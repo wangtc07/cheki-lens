@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChekiLens - 05. 写真詳細 (iOS 18 Photos Detail Style)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif; -webkit-font-smoothing: antialiased; }
+  body { background: #000; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  
+  .iphone {
+    width: 393px; height: 852px; background: #000000; border-radius: 54px;
+    box-shadow: 0 0 0 2px #262626, 0 25px 70px rgba(0,0,0,0.9); position: relative; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  
+  /* Status Bar */
+  .status-bar { height: 50px; display: flex; justify-content: space-between; align-items: center; padding: 14px 26px 0; color: #fff; font-size: 15px; font-weight: 600; letter-spacing: -0.3px; position: absolute; top:0; left:0; right:0; z-index: 100; }
+  .dynamic-island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 125px; height: 35px; background: #000; border-radius: 20px; }
+  .battery-pill { background: #fff; color: #000; font-size: 11px; font-weight: 800; padding: 1px 4px; border-radius: 4px; }
+
+  /* Top Overlay Nav (Exact Image 3) */
+  .top-overlay {
+    position: absolute; top: 58px; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 16px; z-index: 50;
+  }
+  .circle-btn {
+    width: 38px; height: 38px; border-radius: 50%; background: rgba(30,30,32,0.85); backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .date-time-pill {
+    background: rgba(30,30,32,0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border-radius: 24px; padding: 4px 22px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5); cursor: pointer;
+  }
+  .pill-date-text { font-size: 13.5px; font-weight: 700; color: #fff; }
+  .pill-time-sub { font-size: 10.5px; font-weight: 500; color: rgba(235,235,245,0.7); display: flex; align-items: center; gap: 4px; margin-top: 1px; }
+
+  /* Photo Container */
+  .photo-viewport {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  }
+  .cheki-card {
+    width: 290px; height: 460px; background: #FFFFFF; border-radius: 8px; padding: 14px 14px 44px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.9); position: relative; display: flex; flex-direction: column;
+  }
+  .cheki-photo {
+    flex: 1; border-radius: 4px; background: linear-gradient(145deg, #1e1b4b, #4338ca, #ec4899);
+    display: flex; align-items: center; justify-content: center; font-size: 60px; position: relative; overflow: hidden;
+  }
+  .cheki-chin-text {
+    position: absolute; bottom: 10px; left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: baseline;
+    font-family: 'Bradley Hand', 'Caveat', cursive, sans-serif; font-weight: 700; color: #111; font-size: 15px;
+  }
+
+  /* Live / Badge in top right of photo (Exact Image 3) */
+  .spatial-badge {
+    position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+    border-radius: 14px; padding: 4px 8px; display: flex; align-items: center; gap: 4px; color: #fff; font-size: 10px; font-weight: 600;
+  }
+
+  /* Bottom Controls: Filmstrip Scrubber + Standard 5 Toolbar (Exact Image 3) */
+  .bottom-stack {
+    position: absolute; bottom: 0; left: 0; right: 0; display: flex; flex-direction: column; z-index: 50;
+    background: linear-gradient(to top, rgba(0,0,0,0.95) 40%, rgba(0,0,0,0) 100%);
+  }
+
+  /* Filmstrip Scrubber */
+  .filmstrip-row {
+    display: flex; justify-content: center; align-items: center; gap: 5px; padding: 8px 16px; overflow-x: auto;
+  }
+  .filmstrip-thumb {
+    width: 26px; height: 38px; border-radius: 3px; background: #333; overflow: hidden; opacity: 0.6; flex-shrink: 0;
+  }
+  .filmstrip-thumb.active {
+    width: 32px; height: 44px; border: 2px solid #fff; opacity: 1; box-shadow: 0 0 10px rgba(255,255,255,0.4);
+  }
+
+  /* 5 Standard iOS Toolbar Icons (Exact Image 3) */
+  .ios-toolbar {
+    height: 72px; padding: 0 16px 20px; display: flex; align-items: center; justify-content: space-around;
+  }
+  .tool-icon-btn {
+    width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer;
+  }
+
+  .home-indicator { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; background: #fff; border-radius: 3px; z-index: 100; }
+</style>
+</head>
+<body>
+
+<div class="iphone">
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <div>20:31</div>
+    <div class="dynamic-island"></div>
+    <div class="status-icons" style="display:flex; gap:6px; align-items:center;">
+      <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><path d="M1 9h2v2H1V9zm4-3h2v5H5V6zm4-3h2v8H9V3zm4-2h2v10h-2V1z"/></svg>
+      <div class="battery-pill">32</div>
+    </div>
+  </div>
+
+  <!-- Top Overlay (Image 3) -->
+  <div class="top-overlay">
+    <div class="circle-btn">
+      <svg width="11" height="18" viewBox="0 0 12 20" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 18L2 10L10 2"/></svg>
+    </div>
+
+    <!-- Date/Time Pill (Image 3) -->
+    <div class="date-time-pill">
+      <span class="pill-date-text">9月17日</span>
+      <span class="pill-time-sub">
+        16:26 
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.2 0 4-1.8 4-4s-1.8-4-4-4-4 1.8-4 4 1.8 4 4 4zm0 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4z"/></svg>
+      </span>
+    </div>
+
+    <div class="circle-btn">
+      <svg width="18" height="6" viewBox="0 0 18 6" fill="#fff"><circle cx="3" cy="3" r="1.6"/><circle cx="9" cy="3" r="1.6"/><circle cx="15" cy="3" r="1.6"/></svg>
+    </div>
+  </div>
+
+  <!-- Main Cheki Photo -->
+  <div class="photo-viewport">
+    <div class="cheki-card">
+      <div class="spatial-badge">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2l8 4.5v11L12 22l-8-4.5v-11L12 2z"/></svg>
+        <span>›</span>
+      </div>
+      <div class="cheki-photo">👘</div>
+      <div class="cheki-chin-text">
+        <span>さくら ♡</span>
+        <span>2024.09.17</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Stack (Filmstrip + 5 Standard Toolbar Icons) (Image 3) -->
+  <div class="bottom-stack">
+    <!-- Thumbnail Filmstrip -->
+    <div class="filmstrip-row">
+      <div class="filmstrip-thumb" style="background:#4338ca;"></div>
+      <div class="filmstrip-thumb active" style="background:#ec4899;"></div>
+      <div class="filmstrip-thumb" style="background:#3b82f6;"></div>
+      <div class="filmstrip-thumb" style="background:#10b981;"></div>
+      <div class="filmstrip-thumb" style="background:#f59e0b;"></div>
+      <div class="filmstrip-thumb" style="background:#6366f1;"></div>
+      <div class="filmstrip-thumb" style="background:#8b5cf6;"></div>
+    </div>
+
+    <!-- 5 Standard iOS Toolbar Icons (Image 3) -->
+    <div class="ios-toolbar">
+      <!-- 1. Share -->
+      <div class="tool-icon-btn">
+        <svg width="22" height="26" viewBox="0 0 24 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V14"/><polyline points="16 7 12 3 8 7"/><line x1="12" y1="3" x2="12" y2="18"/></svg>
+      </div>
+
+      <!-- 2. Heart -->
+      <div class="tool-icon-btn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      </div>
+
+      <!-- 3. Info (i) -->
+      <div class="tool-icon-btn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      </div>
+
+      <!-- 4. Sliders (Edit) -->
+      <div class="tool-icon-btn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+      </div>
+
+      <!-- 5. Trash -->
+      <div class="tool-icon-btn">
+        <svg width="22" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="home-indicator"></div>
+</div>
+
+</body>
+</html>

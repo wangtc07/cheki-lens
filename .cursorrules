@@ -1,0 +1,17 @@
+# Cursor Rules for ChekiLens
+
+You are developing ChekiLens, an iOS 18 native Polaroid/Cheki scanning and idol fan archival app.
+
+## Mandatory Step Before Any Code Generation:
+1. Always read `docs/PROGRESS.md` first to know the exact atomic task.
+2. Check `git status` to see the current working directory state.
+3. Only implement ONE atomic task per turn.
+4. When done, update `docs/PROGRESS.md` with `[x]` and update the Next Action summary.
+
+## Code Standards:
+- Swift 6 & iOS 17/18 SwiftUI.
+- Apple Human Interface Guidelines: strictly follow mockups in `docs/ui/`.
+- SwiftData for all persistent models (`@Model`).
+- Apple Vision framework (`VNDetectRectanglesRequest`, `VNRecognizeTextRequest`).
+- Core Image (`CIPerspectiveCorrection`).
+- Avoid third-party dependencies unless strictly necessary.

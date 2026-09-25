@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChekiLens - 01. ようこそ (iOS 18 Onboarding)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif; -webkit-font-smoothing: antialiased; }
+  body { background: #000; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  
+  .iphone {
+    width: 393px; height: 852px; background: #000000; border-radius: 54px;
+    box-shadow: 0 0 0 2px #262626, 0 25px 70px rgba(0,0,0,0.9); position: relative; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: space-between; padding: 60px 24px 20px;
+  }
+  
+  .status-bar { height: 50px; display: flex; justify-content: space-between; align-items: center; padding: 14px 26px 0; color: #fff; font-size: 15px; font-weight: 600; letter-spacing: -0.3px; position: absolute; top:0; left:0; right:0; z-index: 100; }
+  .dynamic-island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 125px; height: 35px; background: #000; border-radius: 20px; }
+
+  /* Apple Style Feature List */
+  .onboarding-header { text-align: center; margin-top: 30px; }
+  .app-icon-large {
+    width: 76px; height: 76px; border-radius: 18px; background: linear-gradient(145deg, #4f46e5, #9333ea);
+    display: flex; align-items: center; justify-content: center; font-size: 38px; margin: 0 auto 16px;
+    box-shadow: 0 10px 25px rgba(79,70,229,0.35);
+  }
+  .title-main { font-size: 30px; font-weight: 800; color: #fff; letter-spacing: -0.5px; }
+  .title-sub { font-size: 15px; color: rgba(235,235,245,0.6); margin-top: 4px; }
+
+  .features-list { display: flex; flex-direction: column; gap: 24px; margin: 40px 0; }
+  .feature-row { display: flex; align-items: flex-start; gap: 18px; }
+  .feature-icon-box {
+    width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0;
+  }
+  .feature-text-block { flex: 1; }
+  .feature-heading { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+  .feature-description { font-size: 13.5px; color: rgba(235,235,245,0.6); line-height: 1.4; }
+
+  /* Apple Standard Bottom Button */
+  .bottom-actions { display: flex; flex-direction: column; gap: 14px; margin-bottom: 12px; }
+  .continue-btn {
+    background: #007AFF; color: #fff; font-size: 17px; font-weight: 600; border-radius: 16px; height: 54px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; text-decoration: none;
+    box-shadow: 0 4px 16px rgba(0,122,255,0.3);
+  }
+  .privacy-footnote {
+    font-size: 11.5px; color: rgba(235,235,245,0.4); text-align: center; line-height: 1.4;
+  }
+
+  .home-indicator { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; background: #fff; border-radius: 3px; z-index: 100; }
+</style>
+</head>
+<body>
+
+<div class="iphone">
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <div>20:30</div>
+    <div class="dynamic-island"></div>
+    <div style="font-size:11px; font-weight:800; background:#fff; color:#000; padding:1px 4px; border-radius:4px;">32</div>
+  </div>
+
+  <div>
+    <div class="onboarding-header">
+      <div class="app-icon-large">📷</div>
+      <div class="title-main">ChekiLensへようこそ</div>
+      <div class="title-sub">チェキ自動拉直・特典会記録マネージャー</div>
+    </div>
+
+    <div class="features-list">
+      <div class="feature-row">
+        <div class="feature-icon-box" style="background: rgba(10,132,255,0.15); color: #0A84FF;">📐</div>
+        <div class="feature-text-block">
+          <div class="feature-heading">Apple Vision 透視自動補正</div>
+          <div class="feature-description">斜めから撮った実物チェキの4つ角を自動検出。白枠の縦横比（86×54mm）へ即座に水平補正します。</div>
+        </div>
+      </div>
+
+      <div class="feature-row">
+        <div class="feature-icon-box" style="background: rgba(48,209,88,0.15); color: #30D158;">🔄</div>
+        <div class="feature-text-block">
+          <div class="feature-heading">表裏両面ペアリング</div>
+          <div class="feature-description">表面の写真と、裏面のサイン・直筆メッセージを1枚に紐付け。タップで軽快に3D反転します。</div>
+        </div>
+      </div>
+
+      <div class="feature-row">
+        <div class="feature-icon-box" style="background: rgba(255,159,10,0.15); color: #FF9F0A;">💬</div>
+        <div class="feature-text-block">
+          <div class="feature-heading">日付OCR ＆ 特典会メモ</div>
+          <div class="feature-description">余白の手書き日付を自動解析して写真アプリの時間軸を同期。話した内容やタグも一緒に保管できます。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-actions">
+    <div class="continue-btn">続ける</div>
+    <div class="privacy-footnote">すべての処理は完全オンデバイスで実行され、外部サーバーに画像が送信されることはありません。</div>
+  </div>
+
+  <div class="home-indicator"></div>
+</div>
+
+</body>
+</html>

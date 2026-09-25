@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChekiLens - 02. アルバム (iOS 18 Photos Style)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif; -webkit-font-smoothing: antialiased; }
+  body { background: #000; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  
+  .iphone {
+    width: 393px; height: 852px; background: #000000; border-radius: 54px;
+    box-shadow: 0 0 0 2px #262626, 0 25px 70px rgba(0,0,0,0.9); position: relative; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  
+  /* Status Bar */
+  .status-bar { height: 50px; display: flex; justify-content: space-between; align-items: center; padding: 14px 26px 0; color: #fff; font-size: 15px; font-weight: 600; letter-spacing: -0.3px; position: relative; z-index: 100; }
+  .dynamic-island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 125px; height: 35px; background: #000; border-radius: 20px; }
+  .status-icons { display: flex; gap: 6px; align-items: center; }
+  .battery-pill { background: #fff; color: #000; font-size: 11px; font-weight: 800; padding: 1px 4px; border-radius: 4px; }
+  
+  /* Top Nav Bar (Exact Image 1) */
+  .top-nav { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px 12px; margin-top: 4px; }
+  .nav-circle-btn { width: 38px; height: 38px; background: #1C1C1E; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .nav-title { color: #fff; font-size: 18px; font-weight: 700; }
+  .nav-pill-group { display: flex; background: #1C1C1E; border-radius: 20px; height: 38px; align-items: center; padding: 0 4px; }
+  .nav-pill-btn { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  
+  /* Segmented Control (Exact Image 1) */
+  .segment-container { padding: 4px 16px 16px; }
+  .segment-bg { background: #1C1C1E; border-radius: 22px; display: flex; padding: 3px; height: 42px; }
+  .segment-btn { flex: 1; border-radius: 19px; display: flex; align-items: center; justify-content: center; font-size: 13.5px; font-weight: 600; color: rgba(235,235,245,0.6); cursor: pointer; }
+  .segment-btn.active { background: #323236; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+
+  /* 2-Column Album Grid (Exact Image 1) */
+  .grid-container {
+    flex: 1; overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 0 16px 130px;
+    scrollbar-width: none;
+  }
+  .grid-container::-webkit-scrollbar { display: none; }
+  .album-card {
+    position: relative; aspect-ratio: 4/4.8; border-radius: 24px; overflow: hidden; background: #1C1C1E;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5); cursor: pointer;
+  }
+  .album-img-wrap { width: 100%; height: 100%; position: relative; }
+  .album-gradient { width: 100%; height: 100%; }
+  .album-label {
+    position: absolute; bottom: 12px; left: 14px; right: 14px;
+    color: #fff; font-size: 14px; font-weight: 700; text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+    line-height: 1.25;
+  }
+  .album-sub { font-size: 11px; font-weight: 500; opacity: 0.85; }
+
+  /* Floating Bottom Navigation Bar (Exact Image 1) */
+  .floating-bar-wrap {
+    position: absolute; bottom: 32px; left: 0; right: 0; display: flex; justify-content: center; align-items: center;
+    gap: 12px; z-index: 50; pointer-events: none;
+  }
+  .nav-pill-main {
+    background: rgba(30,30,32,0.82); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+    border: 0.5px solid rgba(255,255,255,0.14); border-radius: 32px; display: flex; padding: 5px 6px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6); pointer-events: auto;
+  }
+  .pill-tab {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 7px 18px; border-radius: 26px; gap: 2px; min-width: 78px; cursor: pointer;
+  }
+  .pill-tab.active { background: rgba(255,255,255,0.12); }
+  .pill-tab-icon { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; }
+  .pill-tab-label { font-size: 10.5px; font-weight: 600; color: rgba(235,235,245,0.6); }
+  .pill-tab.active .pill-tab-label { color: #29b6f6; }
+  
+  .search-fab {
+    width: 58px; height: 58px; background: rgba(30,30,32,0.82); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+    border: 0.5px solid rgba(255,255,255,0.14); border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6); pointer-events: auto; cursor: pointer;
+  }
+
+  .home-indicator { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; background: #fff; border-radius: 3px; z-index: 100; }
+</style>
+</head>
+<body>
+
+<div class="iphone">
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <div>20:30</div>
+    <div class="dynamic-island"></div>
+    <div class="status-icons">
+      <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><path d="M1 9h2v2H1V9zm4-3h2v5H5V6zm4-3h2v8H9V3zm4-2h2v10h-2V1z"/></svg>
+      <svg width="16" height="12" viewBox="0 0 16 12" fill="#fff"><path d="M8 2.5a8.5 8.5 0 0 1 6.5 3.1l1.2-1.2A10.2 10.2 0 0 0 8 .8 10.2 10.2 0 0 0 .3 4.4L1.5 5.6A8.5 8.5 0 0 1 8 2.5zm0 3.8a5 5 0 0 1 3.7 1.7l1.2-1.2A6.7 6.7 0 0 0 8 5a6.7 6.7 0 0 0-4.9 2l1.2 1.2A5 5 0 0 1 8 6.3zm0 3.7c1 0 1.9.8 1.9 1.9s-.9 1.9-1.9 1.9-1.9-.9-1.9-1.9.9-1.9 1.9-1.9z"/></svg>
+      <div class="battery-pill">32</div>
+    </div>
+  </div>
+
+  <!-- Top Nav Bar (Image 1) -->
+  <div class="top-nav">
+    <div class="nav-circle-btn">
+      <svg width="11" height="18" viewBox="0 0 12 20" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 18L2 10L10 2"/></svg>
+    </div>
+    <div class="nav-title">アルバム</div>
+    <div class="nav-pill-group">
+      <div class="nav-pill-btn">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M8 2v12M2 8h12"/></svg>
+      </div>
+      <div class="nav-pill-btn">
+        <svg width="18" height="6" viewBox="0 0 18 6" fill="#fff"><circle cx="3" cy="3" r="1.6"/><circle cx="9" cy="3" r="1.6"/><circle cx="15" cy="3" r="1.6"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- Segmented Control (Image 1) -->
+  <div class="segment-container">
+    <div class="segment-bg">
+      <div class="segment-btn active">個人用</div>
+      <div class="segment-btn">共有</div>
+      <div class="segment-btn">アクティビティ</div>
+    </div>
+  </div>
+
+  <!-- 2-Column Album Grid (Image 1) -->
+  <div class="grid-container">
+    <div class="album-card">
+      <div class="album-img-wrap">
+        <div class="album-gradient" style="background: linear-gradient(145deg, #312e81, #701a75, #db2777);"></div>
+        <div class="album-label">あめ</div>
+      </div>
+    </div>
+
+    <div class="album-card">
+      <div class="album-img-wrap">
+        <div class="album-gradient" style="background: linear-gradient(145deg, #b45309, #78350f, #ea580c);"></div>
+        <div class="album-label">乃木坂46<br><span class="album-sub">(遠藤さくら)</span></div>
+      </div>
+    </div>
+
+    <div class="album-card">
+      <div class="album-img-wrap">
+        <div class="album-gradient" style="background: linear-gradient(145deg, #065f46, #047857, #10b981);"></div>
+        <div class="album-label">ref</div>
+      </div>
+    </div>
+
+    <div class="album-card">
+      <div class="album-img-wrap">
+        <div class="album-gradient" style="background: linear-gradient(145deg, #0e7490, #0369a1, #38bdf8);"></div>
+        <div class="album-label">ゆき</div>
+      </div>
+    </div>
+
+    <div class="album-card">
+      <div class="album-img-wrap">
+        <div class="album-gradient" style="background: linear-gradient(145deg, #374151, #1f2937, #111827);"></div>
+        <div class="album-label">self (スキャン未分類)</div>
+      </div>
+    </div>
+
+    <div class="album-card">
+      <div class="album-img-wrap">
+        <div class="album-gradient" style="background: linear-gradient(145deg, #4c1d95, #6d28d9, #a855f7);"></div>
+        <div class="album-label">Days</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Bottom Navigation (Exact Image 1) -->
+  <div class="floating-bar-wrap">
+    <div class="nav-pill-main">
+      <div class="pill-tab">
+        <div class="pill-tab-icon">
+          <svg width="22" height="18" viewBox="0 0 24 20" fill="none" stroke="rgba(235,235,245,0.6)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="14" rx="3"/><circle cx="8" cy="8" r="2"/><path d="M21 14l-5-5L5 17"/></svg>
+        </div>
+        <span class="pill-tab-label">ライブラリ</span>
+      </div>
+      <div class="pill-tab active">
+        <div class="pill-tab-icon">
+          <svg width="22" height="20" viewBox="0 0 24 22" fill="#29b6f6"><rect x="3" y="2" width="18" height="5" rx="2.5"/><rect x="4" y="9" width="16" height="11" rx="2.5"/></svg>
+        </div>
+        <span class="pill-tab-label">コレクション</span>
+      </div>
+    </div>
+    <div class="search-fab">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7.5"/><path d="M21 21l-4.5-4.5"/></svg>
+    </div>
+  </div>
+
+  <div class="home-indicator"></div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChekiLens - 03. カメラ (iOS Camera Style)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; -webkit-font-smoothing: antialiased; }
+  body { background: #000; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  
+  .iphone {
+    width: 393px; height: 852px; background: #000000; border-radius: 54px;
+    box-shadow: 0 0 0 2px #262626, 0 25px 70px rgba(0,0,0,0.9); position: relative; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  
+  .privacy-dot { position: absolute; top: 14px; right: 86px; width: 6px; height: 6px; background: #34c759; border-radius: 50%; z-index: 100; }
+  
+  /* Top Camera Overlay (Exact Image 5) */
+  .camera-top-row {
+    height: 72px; padding: 24px 20px 0; display: flex; justify-content: space-between; align-items: center; z-index: 50;
+  }
+  .exposure-indicator { color: #fff; font-size: 13.5px; font-weight: 600; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+  .exposure-val { font-size: 15px; font-weight: 700; margin-left: 2px; }
+  
+  .top-control-pill {
+    background: rgba(30,30,32,0.72); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border-radius: 20px; height: 36px; padding: 0 10px; display: flex; align-items: center; gap: 14px;
+  }
+
+  /* Viewfinder Area */
+  .viewfinder {
+    position: absolute; top: 72px; left: 0; right: 0; bottom: 200px; overflow: hidden;
+    background: radial-gradient(circle at 50% 50%, #151820 0%, #050608 100%);
+  }
+  
+  /* 3x3 Grid Lines (Exact Image 5) */
+  .grid-overlay {
+    position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;
+    pointer-events: none;
+  }
+  .grid-overlay > div {
+    border-right: 0.6px solid rgba(255,255,255,0.22); border-bottom: 0.6px solid rgba(255,255,255,0.22);
+  }
+  .grid-overlay > div:nth-child(3n) { border-right: none; }
+  .grid-overlay > div:nth-child(n+7) { border-bottom: none; }
+
+  /* Cheki Auto-Detection Box */
+  .cheki-reticle {
+    position: absolute; top: 12%; left: 16%; right: 16%; bottom: 18%;
+    border: 2px dashed rgba(48,209,88,0.75); border-radius: 12px; box-shadow: 0 0 25px rgba(48,209,88,0.2);
+  }
+  .reticle-corner { position: absolute; width: 22px; height: 22px; border-color: #30d158; border-style: solid; }
+  .reticle-tl { top: -2px; left: -2px; border-width: 4px 0 0 4px; border-top-left-radius: 10px; }
+  .reticle-tr { top: -2px; right: -2px; border-width: 4px 4px 0 0; border-top-right-radius: 10px; }
+  .reticle-bl { bottom: -2px; left: -2px; border-width: 0 0 4px 4px; border-bottom-left-radius: 10px; }
+  .reticle-br { bottom: -2px; right: -2px; border-width: 0 4px 4px 0; border-bottom-right-radius: 10px; }
+
+  /* Zoom Control (Exact Image 5) */
+  .zoom-bar {
+    position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px;
+    z-index: 50;
+  }
+  .zoom-val { color: #fff; font-size: 13.5px; font-weight: 700; text-shadow: 0 1px 3px rgba(0,0,0,0.8); cursor: pointer; }
+  .zoom-val-active {
+    background: rgba(0,0,0,0.65); backdrop-filter: blur(15px); width: 34px; height: 34px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; color: #ffd60a; font-size: 13px; font-weight: 800;
+  }
+
+  /* Bottom Controls Area (Exact Image 5) */
+  .bottom-bar {
+    height: 200px; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+    padding: 0 24px 28px; z-index: 50; position: relative;
+  }
+  
+  .shutter-outer {
+    width: 74px; height: 74px; border-radius: 50%; border: 4px solid #fff; display: flex; align-items: center; justify-content: center;
+    margin-bottom: 22px; cursor: pointer;
+  }
+  .shutter-inner { width: 62px; height: 62px; border-radius: 50%; background: #fff; transition: transform 0.1s; }
+  .shutter-outer:active .shutter-inner { transform: scale(0.92); }
+
+  .mode-row {
+    width: 100%; display: flex; align-items: center; justify-content: space-between;
+  }
+  .thumb-circle {
+    width: 46px; height: 46px; border-radius: 50%; background: #1c1c1e; border: 1px solid rgba(255,255,255,0.15);
+    display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer;
+  }
+  .mode-pill-selector {
+    background: #1c1c1e; border-radius: 20px; height: 36px; display: flex; align-items: center; padding: 2px 6px;
+    gap: 16px;
+  }
+  .mode-label { font-size: 13.5px; font-weight: 700; color: #fff; padding: 4px 10px; border-radius: 16px; cursor: pointer; }
+  .mode-label.active { color: #ffd60a; }
+
+  .flip-camera-circle {
+    width: 46px; height: 46px; border-radius: 50%; background: #1c1c1e; border: 1px solid rgba(255,255,255,0.15);
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+
+  .home-indicator { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; background: #fff; border-radius: 3px; z-index: 100; }
+</style>
+</head>
+<body>
+
+<div class="iphone">
+  <div class="privacy-dot"></div>
+
+  <!-- Top Camera Row (Image 5) -->
+  <div class="camera-top-row">
+    <div class="exposure-indicator">露出<span class="exposure-val">-0.3</span></div>
+    
+    <div class="top-control-pill">
+      <!-- Flash -->
+      <svg width="14" height="18" viewBox="0 0 16 20" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2L2 12h6l-1 6 8-10H9l1-6z"/></svg>
+      <!-- Live Photo -->
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="9" stroke-dasharray="2 3"/></svg>
+      <!-- Menu Dots -->
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="19" cy="19" r="2"/></svg>
+    </div>
+  </div>
+
+  <!-- Viewfinder & 3x3 Grid (Image 5) -->
+  <div class="viewfinder">
+    <div class="grid-overlay">
+      <div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div>
+    </div>
+
+    <!-- Cheki Detection Frame -->
+    <div class="cheki-reticle">
+      <div class="reticle-corner reticle-tl"></div>
+      <div class="reticle-corner reticle-tr"></div>
+      <div class="reticle-corner reticle-bl"></div>
+      <div class="reticle-corner reticle-br"></div>
+    </div>
+
+    <!-- Zoom Selector (Image 5) -->
+    <div class="zoom-bar">
+      <span class="zoom-val">0.5</span>
+      <div class="zoom-val-active">1×</div>
+    </div>
+  </div>
+
+  <!-- Bottom Camera Controls (Image 5) -->
+  <div class="bottom-bar">
+    <div class="shutter-outer">
+      <div class="shutter-inner"></div>
+    </div>
+
+    <div class="mode-row">
+      <div class="thumb-circle">
+        <div style="width:100%; height:100%; background: linear-gradient(135deg, #4f46e5, #ec4899);"></div>
+      </div>
+
+      <div class="mode-pill-selector">
+        <span class="mode-label">ビデオ</span>
+        <span class="mode-label active">写真</span>
+      </div>
+
+      <div class="flip-camera-circle">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="home-indicator"></div>
+</div>
+
+</body>
+</html>

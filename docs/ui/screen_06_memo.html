@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChekiLens - 06. 情報・備忘録 (iOS 18 Info Panel Style)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif; -webkit-font-smoothing: antialiased; }
+  body { background: #000; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+  
+  .iphone {
+    width: 393px; height: 852px; background: #000000; border-radius: 54px;
+    box-shadow: 0 0 0 2px #262626, 0 25px 70px rgba(0,0,0,0.9); position: relative; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+
+  /* Shrunk Photo at Top (Exact Image 4) */
+  .photo-top-header {
+    height: 340px; background: #000; display: flex; align-items: flex-end; justify-content: center;
+    position: relative; overflow: hidden; padding-bottom: 10px;
+  }
+  .shrunk-cheki {
+    width: 250px; height: 380px; background: #fff; border-radius: 6px; padding: 12px 12px 38px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.9); display: flex; flex-direction: column; transform: translateY(-40px);
+  }
+  .shrunk-img {
+    flex: 1; border-radius: 3px; background: linear-gradient(145deg, #1e1b4b, #4338ca, #ec4899);
+    display: flex; align-items: center; justify-content: center; font-size: 50px;
+  }
+
+  /* Scrollable Info Area (Exact Image 4) */
+  .info-scroll-body {
+    flex: 1; background: #000; overflow-y: auto; padding: 10px 16px 90px;
+    scrollbar-width: none;
+  }
+  .info-scroll-body::-webkit-scrollbar { display: none; }
+
+  /* Caption (Add note) - Exact Image 4 */
+  .caption-input-row {
+    padding: 10px 0 16px; font-size: 15px; color: rgba(235,235,245,0.6);
+    border-bottom: 0.5px solid rgba(84,84,88,0.4); margin-bottom: 16px; cursor: pointer;
+  }
+
+  /* Date & Time Header (Exact Image 4) */
+  .date-time-block {
+    display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;
+  }
+  .full-date-text { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 3px; }
+  .cloud-file-row { font-size: 13px; color: rgba(235,235,245,0.6); display: flex; align-items: center; gap: 6px; }
+  .adjust-link { font-size: 15px; color: #0A84FF; font-weight: 500; cursor: pointer; }
+
+  /* Rounded Metadata Group (Exact Image 4) */
+  .meta-card {
+    background: #1C1C1E; border-radius: 16px; padding: 16px; margin-bottom: 12px;
+  }
+  .meta-card-top {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
+  }
+  .meta-primary { font-size: 15px; font-weight: 600; color: #fff; }
+  .meta-format-badge {
+    background: rgba(255,255,255,0.15); padding: 2px 7px; border-radius: 5px; font-size: 11px;
+    font-weight: 700; color: #fff; letter-spacing: 0.5px;
+  }
+  .meta-secondary { font-size: 13.5px; color: rgba(235,235,245,0.6); margin-bottom: 4px; }
+  .meta-tech-details { font-size: 13.5px; color: rgba(235,235,245,0.6); }
+
+  .meta-dashes-row {
+    display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 14px; padding-top: 12px;
+    border-top: 0.5px solid rgba(84,84,88,0.4); text-align: center; color: rgba(235,235,245,0.6); font-size: 13.5px;
+  }
+
+  /* Location Card (Exact Image 4) */
+  .action-card {
+    background: #1C1C1E; border-radius: 16px; padding: 15px 16px; margin-bottom: 12px;
+    display: flex; align-items: center; justify-content: center; color: #0A84FF; font-size: 15px; font-weight: 500;
+    cursor: pointer;
+  }
+
+  /* App Link Card (Exact Image 4) */
+  .app-link-card {
+    background: #1C1C1E; border-radius: 16px; padding: 14px 16px; margin-bottom: 12px;
+    display: flex; align-items: center; justify-content: space-between; cursor: pointer;
+  }
+  .app-link-left { display: flex; align-items: center; gap: 12px; }
+  .app-mini-icon {
+    width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #4f46e5, #ec4899);
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+  }
+  .app-link-title { font-size: 15px; color: #fff; font-weight: 500; }
+  .chevron-right { color: rgba(235,235,245,0.4); font-size: 16px; font-weight: 600; }
+
+  /* Bottom Toolbar with Active Info Icon (Exact Image 4) */
+  .bottom-toolbar {
+    height: 80px; background: rgba(28,28,30,0.92); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+    border-top: 0.5px solid rgba(84,84,88,0.4); display: flex; align-items: center; justify-content: space-around;
+    padding: 0 16px 14px; z-index: 50;
+  }
+  .tool-icon-btn {
+    width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer;
+  }
+  .info-icon-active {
+    width: 34px; height: 34px; border-radius: 50%; background: #fff; display: flex; align-items: center; justify-content: center;
+    color: #000;
+  }
+
+  .home-indicator { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 134px; height: 5px; background: #fff; border-radius: 3px; z-index: 100; }
+</style>
+</head>
+<body>
+
+<div class="iphone">
+  <!-- Shrunk Photo Area (Image 4) -->
+  <div class="photo-top-header">
+    <div class="shrunk-cheki">
+      <div class="shrunk-img">👘</div>
+    </div>
+  </div>
+
+  <!-- Scrollable Info Area (Image 4) -->
+  <div class="info-scroll-body">
+    <!-- Caption / Memo Input -->
+    <div class="caption-input-row">
+      キャプションを追加... (特典会メモ: 浴衣姿が好評、生誕祭ライブ)
+    </div>
+
+    <!-- Date/Time Row -->
+    <div class="date-time-block">
+      <div>
+        <div class="full-date-text">2026年9月17日 木曜日 16:26</div>
+        <div class="cloud-file-row">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/></svg>
+          IMG_3738
+        </div>
+      </div>
+      <div class="adjust-link">調整</div>
+    </div>
+
+    <!-- Metadata Card 1: Scanning / Algorithm -->
+    <div class="meta-card">
+      <div class="meta-card-top">
+        <div class="meta-primary">Apple Vision 透視校正</div>
+        <div class="meta-format-badge">JPEG</div>
+      </div>
+      <div class="meta-secondary">Instax Mini (86×54mm)</div>
+      <div class="meta-tech-details">4 MP · 1740 × 2666 · 2.4 MB</div>
+
+      <div class="meta-dashes-row">
+        <span>-</span><span>-</span><span>-</span><span>-</span><span>-</span>
+      </div>
+    </div>
+
+    <!-- Metadata Card 2: Idol & Event Info -->
+    <div class="meta-card">
+      <div class="meta-card-top">
+        <div class="meta-primary">乃木坂46 12th BIRTHDAY LIVE</div>
+        <div class="meta-format-badge" style="background:#0A84FF;">EVENT</div>
+      </div>
+      <div class="meta-secondary">明治神宮野球場 · Day 1</div>
+      <div class="meta-tech-details" style="color:#0A84FF; margin-top:6px;">
+        #生誕祭 #浴衣 #遠藤さくら #首次特典
+      </div>
+    </div>
+
+    <!-- Location Action Card -->
+    <div class="action-card">
+      位置情報を追加...
+    </div>
+
+    <!-- Included In App Card -->
+    <div class="app-link-card">
+      <div class="app-link-left">
+        <div class="app-mini-icon">📁</div>
+        <div class="app-link-title">ChekiLens 乃木坂46 に含まれています</div>
+      </div>
+      <div class="chevron-right">›</div>
+    </div>
+  </div>
+
+  <!-- Bottom Toolbar with Filled Info Icon (Image 4) -->
+  <div class="bottom-toolbar">
+    <!-- 1. Share -->
+    <div class="tool-icon-btn">
+      <svg width="22" height="26" viewBox="0 0 24 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V14"/><polyline points="16 7 12 3 8 7"/><line x1="12" y1="3" x2="12" y2="18"/></svg>
+    </div>
+
+    <!-- 2. Heart -->
+    <div class="tool-icon-btn">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+    </div>
+
+    <!-- 3. Active Info (i) - White circle with black 'i' in Image 4 -->
+    <div class="tool-icon-btn">
+      <div class="info-icon-active">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+      </div>
+    </div>
+
+    <!-- 4. Sliders (Edit) -->
+    <div class="tool-icon-btn">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+    </div>
+
+    <!-- 5. Trash -->
+    <div class="tool-icon-btn">
+      <svg width="22" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+    </div>
+  </div>
+
+  <div class="home-indicator"></div>
+</div>
+
+</body>
+</html>
