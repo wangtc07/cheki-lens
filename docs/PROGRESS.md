@@ -7,11 +7,11 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-* **最後更新時間**：2026-09-25
-* **當前所屬階段**：Phase 0 - 專案初始化與基礎設施
-* **當前進行中任務**：Task 0.1 - 專案架構建立與規格文件就緒
-* **最新穩定 Git Commit**：Initial commit
-* **下一動執行指示**：建立 Xcode 專案骨架與 SwiftData 實體定義 (Task 1.1)
+* **最後更新時間**：2026-09-30
+* **當前所屬階段**：Phase 1 - 資料模型與核心架構
+* **當前進行中任務**：Task 1.4 已完成
+* **最新穩定 Git Commit**：feat(models): 完成 Task 1.1–1.4 SwiftData 資料層建置
+* **下一動執行指示**：開始 Phase 2 影像核心演算法 (Task 2.1 VisionManager.swift)
 
 ---
 
@@ -40,14 +40,14 @@
 ---
 
 ### 階段 1：資料模型與核心架構 (Phase 1: Domain Models & SwiftData)
-- [ ] **Task 1.1**: 建立 Xcode iOS 專案結構（SwiftUI + SwiftData + iOS 17/18 Target）
-- [ ] **Task 1.2**: 定義 SwiftData 實體模型
+- [x] **Task 1.1**: 建立 Xcode iOS 專案結構（SwiftUI + SwiftData + iOS 17/18 Target）
+- [x] **Task 1.2**: 定義 SwiftData 實體模型
   * `ChekiItem.swift`（正反面圖片資料、拍攝時間、手寫OCR時間、規格比例、邊界偏移率）
   * `IdolGroup.swift`（團體名稱、顏色識別、排序權重）
   * `IdolMember.swift`（成員藝名、本名、頭像圖、標籤、所屬團體關聯）
   * `ChekiMemo.swift`（特典會活動名稱、會話筆記文字、#標籤列表）
-- [ ] **Task 1.3**: 建立 ModelContainer 預設注入器與預覽假資料生成器（用於 SwiftUI Preview）
-- [ ] **Task 1.4**: 編寫資料層單元測試（CRUD、正反雙面綁定與級聯刪除）並驗證通過
+- [x] **Task 1.3**: 建立 ModelContainer 預設注入器與預覽假資料生成器（用於 SwiftUI Preview）
+- [x] **Task 1.4**: 編寫資料層單元測試（CRUD、正反雙面綁定與級聯刪除）並驗證通過
 
 ---
 
