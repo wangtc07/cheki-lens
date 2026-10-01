@@ -31,9 +31,9 @@ extension VisionManager {
 
         // 3. Canny エッジ → Hough 直線
         var lines: [HoughLine] = []
-        if let mw = maskWhite  { lines += houghLines(mask: mw, w: imgW, h: imgH, scale: 12, threshold: 40) }
-        if let mb = maskBright { lines += houghLines(mask: mb, w: imgW, h: imgH, scale: 12, threshold: 40) }
-        guard !lines.isEmpty else { throw VisionError.detectionFailed }
+        if let mw = maskWhite  { lines += houghLines(mask: mw, w: imgW, h: imgH, scale: 1, threshold: 80) }
+        if let mb = maskBright { lines += houghLines(mask: mb, w: imgW, h: imgH, scale: 1, threshold: 80) }
+        guard !lines.isEmpty else { print("Hough failed: lines empty"); throw VisionError.detectionFailed }
 
         // 4. 水平 / 垂直 に分類
         let hThresh = 25.0 * .pi / 180.0
@@ -46,7 +46,7 @@ extension VisionManager {
             let t = normalizeTheta(l.theta)
             return abs(t - .pi / 2) < vThresh
         }
-        guard horiz.count >= 2, vert.count >= 2 else { throw VisionError.detectionFailed }
+        guard horiz.count >= 2, vert.count >= 2 else { print("Hough failed: not enough horiz/vert: \(horiz.count), \(vert.count)"); throw VisionError.detectionFailed }
 
         // 5. 重複除去（rho 差 40px 以内は同一辺とみなす）
         horiz = deduplicate(lines: horiz.sorted { $0.rho < $1.rho }, distThresh: 40)
@@ -99,7 +99,7 @@ extension VisionManager {
             }
         }
 
-        guard let corners = bestCorners else { throw VisionError.detectionFailed }
+        guard let corners = bestCorners else { print("Hough failed: no valid corners found (score: \(bestScore))"); throw VisionError.detectionFailed }
         let ordered = VisionManager.orderPoints(corners)
         let normalizedScore = min(1.0, bestScore / (0.30 * Double(imgW * imgH)))
 
@@ -350,55 +350,47 @@ extension VisionManager {
 
     // MARK: - Morphology
 
-    private func morphClose(_ input: [UInt8], w: Int, h: Int, ksize: Int, iterations: Int) -> [UInt8] {
+func morphClose(_ input: [UInt8], w: Int, h: Int, ksize: Int, iterations: Int) -> [UInt8] {
         var cur = input
-        for _ in 0..<iterations { cur = dilate(cur, w: w, h: h, ksize: ksize) }
-        for _ in 0..<iterations { cur = erode(cur, w: w, h: h, ksize: ksize) }
+        for _ in 0..<iterations { cur = dilateFast(cur, w: w, h: h, ksize: ksize) }
+        for _ in 0..<iterations { cur = erodeFast(cur, w: w, h: h, ksize: ksize) }
         return cur
     }
 
-    private func morphOpen(_ input: [UInt8], w: Int, h: Int, ksize: Int, iterations: Int) -> [UInt8] {
+    func morphOpen(_ input: [UInt8], w: Int, h: Int, ksize: Int, iterations: Int) -> [UInt8] {
         var cur = input
-        for _ in 0..<iterations { cur = erode(cur, w: w, h: h, ksize: ksize) }
-        for _ in 0..<iterations { cur = dilate(cur, w: w, h: h, ksize: ksize) }
+        for _ in 0..<iterations { cur = erodeFast(cur, w: w, h: h, ksize: ksize) }
+        for _ in 0..<iterations { cur = dilateFast(cur, w: w, h: h, ksize: ksize) }
         return cur
     }
 
-    private func dilate(_ input: [UInt8], w: Int, h: Int, ksize: Int) -> [UInt8] {
-        let r = ksize / 2
-        var out = [UInt8](repeating: 0, count: w * h)
-        for y in 0..<h {
-            for x in 0..<w {
-                var val = UInt8(0)
-                for dy in -r...r {
-                    for dx in -r...r {
-                        let nx = x + dx, ny = y + dy
-                        guard nx >= 0 && nx < w && ny >= 0 && ny < h else { continue }
-                        val = max(val, input[ny * w + nx])
-                    }
-                }
-                out[y * w + x] = val
+    func dilateFast(_ input: [UInt8], w: Int, h: Int, ksize: Int) -> [UInt8] {
+        var inputCopy = input
+        var outData = [UInt8](repeating: 0, count: w * h)
+        inputCopy.withUnsafeMutableBytes { inPtr in
+            outData.withUnsafeMutableBytes { outPtr in
+                var inBuf = vImage_Buffer(data: inPtr.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w)
+                var outBuf = vImage_Buffer(data: outPtr.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w)
+                vImageMax_Planar8(&inBuf, &outBuf, nil, 0, 0, vImagePixelCount(ksize), vImagePixelCount(ksize), vImage_Flags(kvImageDoNotTile))
             }
         }
-        return out
+        return outData
     }
 
-    private func erode(_ input: [UInt8], w: Int, h: Int, ksize: Int) -> [UInt8] {
-        let r = ksize / 2
-        var out = [UInt8](repeating: 255, count: w * h)
-        for y in 0..<h {
-            for x in 0..<w {
-                var val = UInt8(255)
-                for dy in -r...r {
-                    for dx in -r...r {
-                        let nx = x + dx, ny = y + dy
-                        guard nx >= 0 && nx < w && ny >= 0 && ny < h else { continue }
-                        val = min(val, input[ny * w + nx])
-                    }
-                }
-                out[y * w + x] = val
+    func erodeFast(_ input: [UInt8], w: Int, h: Int, ksize: Int) -> [UInt8] {
+        var inputCopy = input
+        var outData = [UInt8](repeating: 0, count: w * h)
+        inputCopy.withUnsafeMutableBytes { inPtr in
+            outData.withUnsafeMutableBytes { outPtr in
+                var inBuf = vImage_Buffer(data: inPtr.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w)
+                var outBuf = vImage_Buffer(data: outPtr.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w)
+                vImageMin_Planar8(&inBuf, &outBuf, nil, 0, 0, vImagePixelCount(ksize), vImagePixelCount(ksize), vImage_Flags(kvImageDoNotTile))
             }
         }
-        return out
+        return outData
     }
+
+    // Keeping original signatures to avoid breaking other calls
+    private func dilate(_ input: [UInt8], w: Int, h: Int, ksize: Int) -> [UInt8] { return dilateFast(input, w: w, h: h, ksize: ksize) }
+    private func erode(_ input: [UInt8], w: Int, h: Int, ksize: Int) -> [UInt8] { return erodeFast(input, w: w, h: h, ksize: ksize) }
 }

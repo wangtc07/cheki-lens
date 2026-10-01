@@ -37,8 +37,8 @@ extension VisionManager {
             }
 
             // ② モルフォロジー：close (15×15 × 3) + open (5×5 × 2)
-            mask = morphClosePublic(mask, w: imgW, h: imgH, ksize: 15, iterations: 3)
-            mask = morphOpenPublic(mask,  w: imgW, h: imgH, ksize: 5,  iterations: 2)
+            mask = morphClose(mask, w: imgW, h: imgH, ksize: 15, iterations: 3)
+            mask = morphOpen(mask,  w: imgW, h: imgH, ksize: 5,  iterations: 2)
 
             // ③ 連結成分の外接矩形近似（contourApproxPoly 代替）
             // 簡略実装：マスクの境界ピクセルから凸四角形を近似
@@ -177,33 +177,7 @@ extension VisionManager {
         return (h, s, v)
     }
 
-    func morphClosePublic(_ input: [UInt8], w: Int, h: Int, ksize: Int, iterations: Int) -> [UInt8] {
-        var cur = input
-        for _ in 0..<iterations { cur = dilatePublic(cur, w: w, h: h, ksize: ksize) }
-        for _ in 0..<iterations { cur = erodePublic(cur, w: w, h: h, ksize: ksize) }
-        return cur
-    }
 
-    func morphOpenPublic(_ input: [UInt8], w: Int, h: Int, ksize: Int, iterations: Int) -> [UInt8] {
-        var cur = input
-        for _ in 0..<iterations { cur = erodePublic(cur, w: w, h: h, ksize: ksize) }
-        for _ in 0..<iterations { cur = dilatePublic(cur, w: w, h: h, ksize: ksize) }
-        return cur
-    }
-
-    private func dilatePublic(_ input: [UInt8], w: Int, h: Int, ksize: Int) -> [UInt8] {
-        let r = ksize / 2; var out = [UInt8](repeating: 0, count: w * h)
-        for y in 0..<h { for x in 0..<w {
-            var v = UInt8(0)
-            for dy in -r...r { for dx in -r...r {
-                let nx = x+dx, ny = y+dy
-                guard nx>=0&&nx<w&&ny>=0&&ny<h else { continue }
-                v = max(v, input[ny*w+nx])
-            }}
-            out[y*w+x] = v
-        }}
-        return out
-    }
 
     private func erodePublic(_ input: [UInt8], w: Int, h: Int, ksize: Int) -> [UInt8] {
         let r = ksize / 2; var out = [UInt8](repeating: 255, count: w * h)
