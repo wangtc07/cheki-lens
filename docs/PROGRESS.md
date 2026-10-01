@@ -8,9 +8,9 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-01
-* **當前所屬階段**：Phase 2 - 影像核心演算法（已完成）
-* **當前進行中任務**：Task 2.7 已完成
-* **最新穩定 Git Commit**：feat(xcode): 整合 Xcode 專案結構並修復 SwiftData Predicate，17 項 XCTest 單元測試全數通過
+* **當前所屬階段**：Phase 3 - iOS 系統相簿與權限管理
+* **當前進行中任務**：Task 3.1 準備中
+* **最新穩定 Git Commit**：feat(Vision): 優化 Hough Fallback 演算法與修正基準測試色彩空間
 * **下一動執行指示**：開始 Phase 3 系統相簿與權限管理 (Task 3.1 PhotoLibraryManager.swift)
 
 ---
