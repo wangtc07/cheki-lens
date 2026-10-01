@@ -160,29 +160,78 @@ actor VisionManager {
 
     // MARK: - Step 2-4: 偵測四角（三層 fallback）
 
-    func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionResult {
-        // Layer 1: Apple Vision (最優先，機器學習精度高、速度極快 ~50ms)
-        if let result = try? await detectVisionNative(image: image, imageSize: imageSize) {
-            // Check if Vision output is suspicious (e.g. inner photo ratio).
-            let r = VisionManager.quadAspectRatio(result.corners)
-            // If the ratio is < 1.50, it is likely the inner photo or distorted.
-            // Fallback to Layer 2 Hough for accurate outer frame detection!
-            if r >= 1.50 {
-                return result
+func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionResult {
+        let ciCtx = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
+        
+        // --- Layer 1: Apple Vision Native ---
+        var vRes: DetectionResult? = nil
+        do {
+            vRes = try await detectVisionNative(image: image, imageSize: imageSize)
+        } catch {}
+        
+        // --- Layer 1.5: CIDetector (Classic CV) ---
+        var cRes: DetectionResult? = nil
+        if let ciImage = CIImage(cgImage: image).copy() as? CIImage {
+            let detector = CIDetector(ofType: CIDetectorTypeRectangle, context: ciCtx, options: [CIDetectorAccuracy: CIDetectorAccuracyHigh])
+            if let features = detector?.features(in: ciImage) as? [CIRectangleFeature] {
+                var bestCArea = 0.0
+                var bestCPts: [CGPoint]? = nil
+                
+                let iW = Double(imageSize.width)
+                let iH = Double(imageSize.height)
+                
+                for f in features {
+                    let pts = [
+                        CGPoint(x: f.topLeft.x, y: iH - f.topLeft.y),
+                        CGPoint(x: f.topRight.x, y: iH - f.topRight.y),
+                        CGPoint(x: f.bottomRight.x, y: iH - f.bottomRight.y),
+                        CGPoint(x: f.bottomLeft.x, y: iH - f.bottomLeft.y)
+                    ]
+                    let area = VisionManager.quadArea(pts)
+                    if VisionManager.isChekiRatio(pts) && area >= 0.03 * iW * iH {
+                        if area > bestCArea {
+                            bestCArea = area
+                            bestCPts = pts
+                        }
+                    }
+                }
+                if let pts = bestCPts {
+                    cRes = DetectionResult(
+                        corners: VisionManager.orderPoints(pts),
+                        method: .visionNative,
+                        confidence: 1.0,
+                        imageSize: imageSize
+                    )
+                }
             }
         }
         
-        // Layer 2: Hough-based（Python 原版主力，精確邊緣對齊，速度較慢 ~5s）
-        if let result = try? detectHough(image: image, imageSize: imageSize) {
-            return result
+        // Combine Layer 1 and 1.5: Pick the one with the largest area
+        var bestNative: DetectionResult? = nil
+        if let v = vRes, let c = cRes {
+            let vArea = VisionManager.quadArea(v.corners)
+            let cArea = VisionManager.quadArea(c.corners)
+            bestNative = (cArea > vArea * 1.05) ? c : v
+        } else if let v = vRes {
+            bestNative = v
+        } else if let c = cRes {
+            bestNative = c
         }
         
-        // Layer 3: White mask contour
-        if let result = try? detectWhiteMask(image: image, imageSize: imageSize) {
-            return result
+        if let best = bestNative {
+            let r = VisionManager.quadAspectRatio(best.corners)
+            if r >= 1.40 {
+                return best
+            }
         }
-
-        throw VisionError.detectionFailed
+        
+        // --- Layer 2: Hough Transform Fallback ---
+        if let hRes = try? await detectHough(image: image, imageSize: imageSize) {
+            return hRes
+        }
+        
+        // --- Layer 3: White Mask Fallback ---
+        return try await detectWhiteMask(image: image, imageSize: imageSize)
     }
 
     // MARK: - Geometry Helpers
@@ -203,10 +252,18 @@ actor VisionManager {
     /// 長短邊比（用於比例有效性驗證）
     static func quadAspectRatio(_ pts: [CGPoint]) -> Double {
         let ordered = orderPoints(pts)
-        let tl = ordered[0], tr = ordered[1], bl = ordered[3]
-        let w = hypot(tr.x - tl.x, tr.y - tl.y)
-        let h = hypot(bl.x - tl.x, bl.y - tl.y)
-        let longer = max(w, h), shorter = min(w, h)
+        let tl = ordered[0], tr = ordered[1], br = ordered[2], bl = ordered[3]
+        
+        let wTop = hypot(tr.x - tl.x, tr.y - tl.y)
+        let wBot = hypot(br.x - bl.x, br.y - bl.y)
+        let hLeft = hypot(bl.x - tl.x, bl.y - tl.y)
+        let hRight = hypot(br.x - tr.x, br.y - tr.y)
+        
+        let w = (wTop + wBot) / 2.0
+        let h = (hLeft + hRight) / 2.0
+        
+        let longer = max(w, h)
+        let shorter = min(w, h)
         guard shorter > 0 else { return 0 }
         return Double(longer / shorter)
     }

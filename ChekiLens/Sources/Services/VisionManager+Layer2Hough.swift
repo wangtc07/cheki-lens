@@ -132,7 +132,7 @@ extension VisionManager {
 
     /// mask_white：HSV 純白フィルタ（下辺精度向上）
     /// HSV v_min=170, s_max=50 → 純粋な白
-    private func buildWhiteMask(pixels: [UInt8], w: Int, h: Int) -> [UInt8]? {
+    func buildWhiteMask(pixels: [UInt8], w: Int, h: Int) -> [UInt8]? {
         // 複数の閾値パラメータを試して最良のものを採用
         let params: [(sMax: Int, vMin: Int)] = [(50, 170), (70, 150), (40, 185), (100, 130)]
         var bestMask: [UInt8]?
