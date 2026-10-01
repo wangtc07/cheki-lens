@@ -73,9 +73,9 @@ actor VisionManager {
     static let ratioMin: Double = 1.20
     static let ratioMax: Double = 1.90
 
-    /// Hough 嚴格比例窗（1.45 ~ 1.75，Mini 主力）
-    static let houghRatioMin: Double = 1.45
-    static let houghRatioMax: Double = 1.75
+    /// Hough 比例窗（放寬至 1.20 ~ 1.90 以容忍透視變形）
+    static let houghRatioMin: Double = 1.20
+    static let houghRatioMax: Double = 1.90
 
     /// 四角偵測結果與標準答案的吻合閾值（像素誤差 ≤ 此值視為命中）
     static let cornerAcceptablePixelError: Double = 10.0
@@ -161,14 +161,22 @@ actor VisionManager {
     // MARK: - Step 2-4: 偵測四角（三層 fallback）
 
     func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionResult {
-        // Layer 1: Apple Vision (最優先，機器學習精度高)
+        // Layer 1: Apple Vision (最優先，機器學習精度高、速度極快 ~50ms)
         if let result = try? await detectVisionNative(image: image, imageSize: imageSize) {
-            return result
+            // Check if Vision output is suspicious (e.g. inner photo ratio).
+            let r = VisionManager.quadAspectRatio(result.corners)
+            // If the ratio is < 1.50, it is likely the inner photo or distorted.
+            // Fallback to Layer 2 Hough for accurate outer frame detection!
+            if r >= 1.50 {
+                return result
+            }
         }
-        // Layer 2: Hough-based（使用 Core Image 邊緣 + 直線運算）
+        
+        // Layer 2: Hough-based（Python 原版主力，精確邊緣對齊，速度較慢 ~5s）
         if let result = try? detectHough(image: image, imageSize: imageSize) {
             return result
         }
+        
         // Layer 3: White mask contour
         if let result = try? detectWhiteMask(image: image, imageSize: imageSize) {
             return result

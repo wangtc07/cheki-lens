@@ -31,8 +31,8 @@ extension VisionManager {
 
         // 3. Canny エッジ → Hough 直線
         var lines: [HoughLine] = []
-        if let mw = maskWhite  { lines += houghLines(mask: mw, w: imgW, h: imgH, scale: 4, threshold: 80) }
-        if let mb = maskBright { lines += houghLines(mask: mb, w: imgW, h: imgH, scale: 4, threshold: 80) }
+        if let mw = maskWhite  { lines += houghLines(mask: mw, w: imgW, h: imgH, scale: 12, threshold: 40) }
+        if let mb = maskBright { lines += houghLines(mask: mb, w: imgW, h: imgH, scale: 12, threshold: 40) }
         guard !lines.isEmpty else { throw VisionError.detectionFailed }
 
         // 4. 水平 / 垂直 に分類

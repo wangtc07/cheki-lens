@@ -46,9 +46,15 @@ func cornerRMSE(_ pred: [CGPoint], _ gt: [CGPoint]) -> Double {
 }
 
 // ─── Load ───
+let sharedCIContext = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
+
 func loadCGImage(url: URL) -> CGImage? {
-    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-    return CGImageSourceCreateImageAtIndex(src, 0, nil)
+    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+    
+    // 必須將影像轉為 sRGB 空間（與 VisionManager 行為一致），否則 Vision 預測邊界會大幅偏移
+    let ciImage = CIImage(cgImage: img)
+    return sharedCIContext.createCGImage(ciImage, from: ciImage.extent)
 }
 
 
@@ -109,7 +115,7 @@ func perspectiveCrop(image: CGImage, corners: [CGPoint]) -> CGImage? {
     return sharedCIContext.createCGImage(r, from: r.extent)
 }
 
-let sharedCIContext = CIContext()
+
 
 
 

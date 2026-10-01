@@ -363,9 +363,8 @@ func cornerRMSE(_ pred: [CGPoint], _ gt: [CGPoint], scale: Double) -> Double {
 // ─────────────────────────────────────────────
 // MARK: - Main
 // ─────────────────────────────────────────────
-let scriptDir = URL(fileURLWithPath: #file).deletingLastPathComponent()
-                    .deletingLastPathComponent().deletingLastPathComponent()
-let testDataDir  = scriptDir.appendingPathComponent("TestData")
+let scriptDir = URL(fileURLWithPath: "/Users/tcwang/Documents/ChekiLens/BenchmarkTool/Sources")
+let testDataDir = URL(fileURLWithPath: "/Users/tcwang/Documents/ChekiLens/TestData")
 let imagesDir    = testDataDir.appendingPathComponent("images")
 let annotFile    = testDataDir.appendingPathComponent("cheki_annotations.jsonl")
 let outputDir    = testDataDir.appendingPathComponent("output")
@@ -383,7 +382,7 @@ let annotations = annotLines.compactMap { line -> Annotation? in
 print("═══════════════════════════════════════════════════════")
 print("  ChekiLens Vision Pipeline Benchmark — \(annotations.count) images")
 print("═══════════════════════════════════════════════════════")
-print(String(format: "%-40s %-10s %-8s %-8s", "Filename", "Method", "RMSE(px)", "Status"))
+print(String(format: "%-40@ %-10@ %-8@ %-8@", "Filename", "Method", "RMSE(px)", "Status"))
 print(String(repeating: "─", count: 72))
 
 var stats = [String: Int]()
@@ -412,9 +411,9 @@ for annot in annotations {
 
     // Detection（Layer1 → Layer2 Fallback）
     var result: DetectionResult?
-    if let r = detectVision(image: img, imgW: Double(imgW), imgH: Double(imgH)) {
+    if let r = detectHough(image: img, imgW: imgW, imgH: imgH) {
         result = r
-    } else if let r = detectHough(image: img, imgW: imgW, imgH: imgH) {
+    } else if let r = detectVision(image: img, imgW: Double(imgW), imgH: Double(imgH)) {
         result = r
     }
 
@@ -429,8 +428,10 @@ for annot in annotations {
         let hit = rmse <= hitThreshold
         if hit { hitCount += 1 }
         let status = hit ? "✅" : "⚠️"
-        print(String(format: "%-40s %-10s %7.1f %s",
-                     annot.filename, methodStr, rmse, status))
+        let fn = annot.filename.padding(toLength: 40, withPad: " ", startingAt: 0)
+        let meth = methodStr.padding(toLength: 10, withPad: " ", startingAt: 0)
+        let rmseStr = String(format: "%7.1f", rmse)
+        print("\(fn) \(meth) \(rmseStr) \(status)")
 
         // 裁切結果を保存（RMSE に関わらず全件）
         if let cropped = perspectiveCrop(image: img, corners: det.corners) {
