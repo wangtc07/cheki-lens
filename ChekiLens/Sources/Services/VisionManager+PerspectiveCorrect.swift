@@ -34,18 +34,8 @@ extension VisionManager {
 
         let tl = ordered[0], tr = ordered[1], br = ordered[2], bl = ordered[3]
 
-        // 縦横判定：w_top < h_left なら縦向きチェキ（通常）
-        let wTop = hypot(tr.x - tl.x, tr.y - tl.y)
-        let hLeft = hypot(bl.x - tl.x, bl.y - tl.y)
-
-        // 縦長になるよう回転
-        let (finalTL, finalTR, finalBR, finalBL): (CGPoint, CGPoint, CGPoint, CGPoint)
-        if wTop > hLeft {
-            // 横向き → 90° 回転してチェキを縦に
-            finalTL = bl; finalTR = tl; finalBR = tr; finalBL = br
-        } else {
-            finalTL = tl; finalTR = tr; finalBR = br; finalBL = bl
-        }
+        // 保持原始偵測方向，不強制旋轉。這樣可以支援橫向的 Wide 規格，並且避免背面 (Backside) 被錯誤旋轉
+        let (finalTL, finalTR, finalBR, finalBL) = (tl, tr, br, bl)
 
         // Core Image 座標系：原點在左下角（y 軸朝上），坐標以像素（Pixel）為單位，不可除以寬高做正規化
         func toCoreImageVector(_ pt: CGPoint) -> CIVector {
