@@ -10,7 +10,7 @@
 * **最後更新時間**：2026-10-01
 * **當前所屬階段**：Phase 3 - iOS 系統相簿與權限管理
 * **當前進行中任務**：Task 3.1 準備中
-* **最新穩定 Git Commit**：feat(Vision): 優化 Hough Fallback 演算法與修正基準測試色彩空間
+* **最新穩定 Git Commit**：chore: 移除 Git 追蹤之 TestData 測試資料並加入 .gitignore 忽略
 * **下一動執行指示**：開始 Phase 3 系統相簿與權限管理 (Task 3.1 PhotoLibraryManager.swift)
 
 ---
@@ -61,6 +61,15 @@
 - [x] **Task 2.6**: 實作底部手寫日期 OCR（`VNRecognizeTextRequest` 指定白邊區域掃描 + Regex 日期解析器）
 - [x] **Task 2.7**: 撰寫影像演算法單元測試（72 張實體圖 Benchmark，100% 偵測成功，Xcode 17 項單元測試全數通過）
 
+
+---
+
+### 階段 2.5：專屬 AI 模型訓練與整合 (Phase 2.5: CoreML Keypoint Model)
+*採用方案 B：使用手動標註資料訓練四角關鍵點模型，徹底解決極端環境誤判*
+- [ ] **Task 2.5.1**: 收集更多樣化的實體照片（如：手持、極端反光、黑色背景、複雜桌面）並放入 `TestData/images`，使用 WebUI 產生 `cheki_annotations.jsonl`
+- [ ] **Task 2.5.2**: 撰寫 Python 資料擴充腳本 (Data Augmentation)，將數十張原始圖片自動旋轉/扭曲/變色擴充為 1000+ 張訓練集
+- [ ] **Task 2.5.3**: 撰寫並執行 PyTorch 模型訓練腳本，將訓練完成的模型匯出為 iOS 專屬格式 (`ChekiCornerNet.mlpackage`)
+- [ ] **Task 2.5.4**: 將 CoreML 模型匯入 Xcode 專案，實作 `VisionManager+CoreML.swift`，直接輸出斜四角座標
 
 ---
 
