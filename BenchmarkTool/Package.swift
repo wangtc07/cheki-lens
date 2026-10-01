@@ -8,13 +8,22 @@ let package = Package(
         .executableTarget(
             name: "ChekiBenchmark",
             path: "Sources",
-            // Vision, CoreImage, CoreGraphics, ImageIO は macOS システムフレームワーク
             linkerSettings: [
                 .linkedFramework("Vision"),
                 .linkedFramework("CoreImage"),
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("ImageIO"),
                 .linkedFramework("AppKit"),
+            ]
+        ),
+        .executableTarget(
+            name: "QuickBenchmark",
+            path: "SourcesQuick",
+            linkerSettings: [
+                .linkedFramework("Vision"),
+                .linkedFramework("CoreImage"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("ImageIO"),
             ]
         )
     ]

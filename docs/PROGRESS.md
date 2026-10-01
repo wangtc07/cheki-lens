@@ -7,11 +7,11 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-* **最後更新時間**：2026-09-30
-* **當前所屬階段**：Phase 1 - 資料模型與核心架構
-* **當前進行中任務**：Task 1.4 已完成
-* **最新穩定 Git Commit**：feat(models): 完成 Task 1.1–1.4 SwiftData 資料層建置
-* **下一動執行指示**：開始 Phase 2 影像核心演算法 (Task 2.1 VisionManager.swift)
+* **最後更新時間**：2026-10-01
+* **當前所屬階段**：Phase 2 - 影像核心演算法（已完成）
+* **當前進行中任務**：Task 2.7 已完成
+* **最新穩定 Git Commit**：feat(xcode): 整合 Xcode 專案結構並修復 SwiftData Predicate，17 項 XCTest 單元測試全數通過
+* **下一動執行指示**：開始 Phase 3 系統相簿與權限管理 (Task 3.1 PhotoLibraryManager.swift)
 
 ---
 
@@ -53,13 +53,14 @@
 
 ### 階段 2：影像核心演算法 (Phase 2: Vision & Core Image Pipeline)
 *參考來源：`src/image_process/cheki_crop.py`*
-- [ ] **Task 2.1**: 建立 `VisionManager.swift` 核心類別與影像方向/色彩空間預處理
-- [ ] **Task 2.2**: 實作第一層矩形辨識（`VNDetectRectanglesRequest` 自動錨點偵測）
-- [ ] **Task 2.3**: 實作第二/三層 Fallback 機制（邊緣偵測與白色相紙外框輪廓求解）
-- [ ] **Task 2.4**: 實作 `CIPerspectiveCorrection` 透視校正與比例鎖定（Mini: 86×54, Square: 86×72, Wide: 86×108）
-- [ ] **Task 2.5**: 實作邊界微調偏移（Inset / Outset -3% ~ +3% 矩陣微調）
-- [ ] **Task 2.6**: 實作底部手寫日期 OCR（`VNRecognizeTextRequest` 指定白邊區域掃描 + Regex 日期解析器）
-- [ ] **Task 2.7**: 撰寫影像演算法單元測試（使用實體測試圖驗證透視拉直與日期提取）
+- [x] **Task 2.1**: 建立 `VisionManager.swift` 核心類別與影像方向/色彩空間預處理
+- [x] **Task 2.2**: 實作第一層矩形辨識（`VNDetectRectanglesRequest` 自動錨點偵測）
+- [x] **Task 2.3**: 實作第二/三層 Fallback 機制（邊緣偵測與白色相紙外框輪廓求解）
+- [x] **Task 2.4**: 實作 `CIPerspectiveCorrection` 透視校正與比例鎖定（Mini: 86×54, Square: 86×72, Wide: 86×108）
+- [x] **Task 2.5**: 實作邊界微調偏移（Inset / Outset -3% ~ +3% 矩陣微調）
+- [x] **Task 2.6**: 實作底部手寫日期 OCR（`VNRecognizeTextRequest` 指定白邊區域掃描 + Regex 日期解析器）
+- [x] **Task 2.7**: 撰寫影像演算法單元測試（72 張實體圖 Benchmark，100% 偵測成功，Xcode 17 項單元測試全數通過）
+
 
 ---
 

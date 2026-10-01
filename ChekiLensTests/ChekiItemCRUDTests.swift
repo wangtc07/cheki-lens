@@ -114,8 +114,9 @@ final class ChekiItemCRUDTests: XCTestCase {
         try context.save()
 
         // Act
+        let targetStateRaw = ProcessingState.completed.rawValue
         let descriptor = FetchDescriptor<ChekiItem>(
-            predicate: #Predicate { $0.processingState == .completed }
+            predicate: #Predicate { $0.processingStateRaw == targetStateRaw }
         )
         let fetched = try context.fetch(descriptor)
 

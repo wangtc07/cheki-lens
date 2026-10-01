@@ -63,8 +63,15 @@ final class ChekiItem {
 
     // MARK: State
 
+    /// 處理狀態持久化字串（供 SwiftData Predicate 查詢，如 #Predicate { $0.processingStateRaw == target }）
+    var processingStateRaw: String
+
     /// 處理狀態（掃描流程）
-    var processingState: ProcessingState
+    @Transient
+    var processingState: ProcessingState {
+        get { ProcessingState(rawValue: processingStateRaw) ?? .unprocessed }
+        set { processingStateRaw = newValue.rawValue }
+    }
 
     /// 是否已同步至 iOS 系統相簿
     var isSyncedToPhotoLibrary: Bool
@@ -108,11 +115,12 @@ final class ChekiItem {
         self.borderInsetRatio = borderInsetRatio
         self.perspectivePointsJSON = perspectivePointsJSON
         self.detectionMethod = detectionMethod
-        self.processingState = processingState
+        self.processingStateRaw = processingState.rawValue
         self.isSyncedToPhotoLibrary = isSyncedToPhotoLibrary
         self.idolMember = idolMember
         self.memo = memo
     }
+
 }
 
 // MARK: - Computed Helpers
