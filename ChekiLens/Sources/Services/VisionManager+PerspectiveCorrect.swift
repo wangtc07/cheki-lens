@@ -47,23 +47,23 @@ extension VisionManager {
             finalTL = tl; finalTR = tr; finalBR = br; finalBL = bl
         }
 
-        // CIPerspectiveCorrection は Vision 座標系 (y 上向き, 0~1 正規化) を使用
-        // → ピクセル座標を正規化 + y 反転
-        func normalize(_ pt: CGPoint) -> CIVector {
-            CIVector(x: pt.x / imgW, y: (imgH - pt.y) / imgH)
+        // Core Image 座標系：原點在左下角（y 軸朝上），坐標以像素（Pixel）為單位，不可除以寬高做正規化
+        func toCoreImageVector(_ pt: CGPoint) -> CIVector {
+            CIVector(x: pt.x, y: imgH - pt.y)
         }
 
         let ciImage = CIImage(cgImage: image)
 
-        // CIFilter の inputTopLeft は Vision 座標系（左下原点）
+        // CIFilter の inputTopLeft は Core Image 座標系（左下原點，以像素為單位）
         guard let filter = CIFilter(name: "CIPerspectiveCorrection") else {
             throw VisionError.perspectiveCorrectionFailed
         }
         filter.setValue(ciImage, forKey: kCIInputImageKey)
-        filter.setValue(normalize(finalTL), forKey: "inputTopLeft")
-        filter.setValue(normalize(finalTR), forKey: "inputTopRight")
-        filter.setValue(normalize(finalBR), forKey: "inputBottomRight")
-        filter.setValue(normalize(finalBL), forKey: "inputBottomLeft")
+        filter.setValue(toCoreImageVector(finalTL), forKey: "inputTopLeft")
+        filter.setValue(toCoreImageVector(finalTR), forKey: "inputTopRight")
+        filter.setValue(toCoreImageVector(finalBR), forKey: "inputBottomRight")
+        filter.setValue(toCoreImageVector(finalBL), forKey: "inputBottomLeft")
+
 
         guard let corrected = filter.outputImage else {
             throw VisionError.perspectiveCorrectionFailed
