@@ -37,6 +37,6 @@ Pods/
 # Temporary / Scratch
 *.tmp
 *.bak
-TestData/output*/
+TestData/
 BenchmarkTool/.build/
 
