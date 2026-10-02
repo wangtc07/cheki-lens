@@ -9,9 +9,9 @@
 
 * **最後更新時間**：2026-10-02
 * **當前所屬階段**：Phase 2.8 - 終極混合式高精度影像辨識引擎 (Hybrid Precision Engine v2)
-* **當前進行中任務**：完成 Task 2.8.1 規格感知與防拉伸輸出模組，接續 Task 2.8.2
-* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.8.1 規格感知與防拉伸輸出模組 (AspectRatioClassifier)
-* **下一動執行指示**：實作 Task 2.8.2 白邊分佈感知與內框反推外框模組 (FrameExtrapolator.swift)
+* **當前進行中任務**：完成 Task 2.8.2 白邊感知與內框反推外框模組，接續 Task 2.8.3
+* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.8.2 白邊分佈感知與內框反推外框模組 (FrameExtrapolator)
+* **下一動執行指示**：實作 Task 2.8.3 四邊垂直平行驗證與局部 ROI 二次精密修正 (VisionManager+Refinement.swift)
 
 ---
 
@@ -126,9 +126,9 @@
 - [x] **Task 2.8.1**: 實作底片規格感知與防拉伸輸出模組 (`AspectRatioClassifier.swift`)
   * 以四邊形對角線長度比與面積比，精準分類 Instax Mini (直/橫)、Instax Square、Instax Wide (直/橫)
   * 動態指定 `CIPerspectiveCorrection` 的標準輸出解析度，防止橫向與 Wide 被強制拉伸變形（DSCF2190、IMG_1886 驗證通過）
-- [ ] **Task 2.8.2**: 實作白邊分佈感知與內框反推外框模組 (`FrameExtrapolator.swift`)
-  * 分析四邊白邊寬度分佈 `[top, right, bottom, left]` 與長寬比
-  * 若檢測到特徵符合內部深色相片（長寬比接近 1.33 且面積過小），依標準比例外彈還原完整四角外框
+- [x] **Task 2.8.2**: 實作白邊分佈感知與內框反推外框模組 (`FrameExtrapolator.swift`)
+  * 分析長短邊比例是否符合內部照片特徵（長寬比接近 1.348）
+  * 若檢測到誤抓內部深色畫面，依據富士工業規格（左右4mm、上5mm、下巴19mm）精確外彈還原外框，驗證錯誤率降低 70%~87%（DSCF3716、IMG_7280 驗證通過）
 - [ ] **Task 2.8.3**: 實作四邊垂直平行驗證與局部 ROI 二次精密修正 (`VisionManager+Refinement.swift`)
   * 計算四邊斜率向量與相鄰邊夾角，標記偏角大於 5° 的異常點
   * 針對偏移角落裁切局部 ROI 視窗，執行二次 `VNDetectRectanglesRequest` 修正單一頂點

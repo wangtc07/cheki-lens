@@ -293,10 +293,17 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
             bestNative = c
         }
         
-        if let best = bestNative {
-            let r = VisionManager.quadAspectRatio(best.corners)
-            if r >= 1.40 {
+        if var best = bestNative {
+            // Task 2.8.2: 檢查是否誤抓內部相片 (FrameExtrapolator 反推外框)
+            let extraRes = FrameExtrapolator.checkAndExtrapolate(corners: best.corners, imageSize: imageSize)
+            if extraRes.isInnerFrame {
+                best.corners = extraRes.extrapolatedCorners
                 return best
+            } else {
+                let r = VisionManager.quadAspectRatio(best.corners)
+                if r >= 1.15 { // 涵蓋 Square (1.19), Wide (1.26), Mini (1.59)
+                    return best
+                }
             }
         }
         
