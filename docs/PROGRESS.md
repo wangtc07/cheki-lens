@@ -8,10 +8,10 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-02
-* **當前所屬階段**：Phase 4 完成 - iOS 官方 UI 介面
-* **當前進行中任務**：等待 Xcode Build 驗證，接續 Phase 5 StoreKit
-* **最新穩定 Git Commit**：feat(UI): 完成 Task 4.1-4.7 Phase 4 iOS 官方 UI 介面
-* **下一動執行指示**：在 Xcode 按 Cmd+R 驗證 Build，確認 UI 可以正常啟動後，進入 Phase 5 (StoreKit 2)
+* **當前所屬階段**：Phase 2.8 - 終極混合式高精度影像辨識引擎 (Hybrid Precision Engine v2)
+* **當前進行中任務**：規劃與實作 Phase 2.8 高精度拍立得邊界檢測管線
+* **最新穩定 Git Commit**：feat(Vision): 將 OCR 背面偵測提升為最優先級，避免 AI 誤判深色背面
+* **下一動執行指示**：開始實作 Task 2.8.1 規格比例感知與自動方向校正 (解決橫向與 Wide 變形拉伸)
 
 ---
 
@@ -70,6 +70,77 @@
 - [x] **Task 2.5.2**: 撰寫 Python 資料擴充腳本 (Data Augmentation)，將數十張原始圖片自動旋轉/扭曲/變色擴充為 1000+ 張訓練集
 - [x] **Task 2.5.3**: 撰寫並執行 PyTorch 模型訓練腳本，將訓練完成的模型匯出為 iOS 專屬格式 (`ChekiCornerNet.mlpackage`)
 - [x] **Task 2.5.4**: 將 CoreML 模型匯入 Xcode 專案，實作 `VisionManager+CoreML.swift`，直接輸出斜四角座標
+
+---
+
+### 階段 2.8：終極混合式高精度影像辨識引擎 (Phase 2.8: Hybrid Precision Pipeline v2)
+*融合 Apple 原生直線精度 (15px 貼齊)、白邊幾何感知、內框外彈策略、背面水平膠帶錨點與 YOLO11-Pose 兜底*
+
+#### 🏗️ 整體架構流程圖 (Overarching Architecture Pipeline)
+```
+輸入原始照片 (EXIF 物理轉正)
+      │
+      ▼
+[Layer 0: 背面 OCR 快速掃描 (10ms)]
+  ├─ 找到 instax / mouth 關鍵字 ──► 【進入背面分支】
+  │                                      │
+  │                                      ├─ 1. OCR 檢測文字上下方位 ──► 決定 180° 翻正方向
+  │                                      ├─ 2. CIDetector / Hough 水平線 ──► 鎖定上下黑膠帶 Y 邊界
+  │                                      └─ 3. YOLO11-Pose Bounding Box ──► 鎖定左右 X 邊界
+  │                                      └─► 合成高精度背面四角透視校正
+  │
+  └─ 未找到背面文字 ──► 【進入正面/彩繪分支】
+                            │
+                            ▼
+      [Layer 1: Apple 原生 VNDetectRectanglesRequest (5ms)]
+                            │
+                            ▼
+              [驗證 A: 白邊比例與長寬比感知 (Ratio Sensing)]
+                ├─ 【合格 (存在正常白邊)】
+                │     │
+                │     ▼
+                │   [驗證 B: 四邊垂直平行角度檢查 (Orthogonality)]
+                │     ├─ 四角夾角接近 90° (±5°) ──► 驗證通過
+                │     └─ 某頂點偏斜 ──► [精密二次修正] 局部 ROI 視窗二次 Vision 修正
+                │
+                └─ 【不合格 (無白邊 / 比例異常)】
+                      │
+                      ├─ 情況 1: 面積比例過小且接近 4:3 ──► 【誤抓內部相片】
+                      │     │
+                      │     └─► [內框反推外框策略] 依 Mini/Square/Wide 物理幾何外彈
+                      │           └─► 重新送回 [驗證 A] 檢查
+                      │
+                      └─ 情況 2: 滿版彩繪 / 極暗底漏抓 / 上白邊消失
+                            │
+                            └─► 【重新判斷: 全圖 YOLO11-Pose Fallback】
+                                  └─► 輸出 4 個任意透視關鍵點兜底 (保證 0 嚴重翻車)
+                            │
+                            ▼
+      [終端格式化: 規格感知與防拉伸變形 (Aspect Formatter)]
+        ├─ 對角線與有效長寬比比對 ──► 自動判定 Instax Mini (直/橫) / Square / Wide (直/橫)
+        ├─ 自動還原真實物理比例輸出 (如 Mini: 540x860 或 860x540)
+        └─ 徹底消除橫向或 Wide 被強拉壓扁之問題
+```
+
+#### 📋 Phase 2.8 開發任務清單 (Development Checklist)
+- [ ] **Task 2.8.1**: 實作底片規格感知與防拉伸輸出模組 (`AspectRatioClassifier.swift`)
+  * 以四邊形對角線長度比與面積比，精準分類 Instax Mini (直/橫)、Instax Square、Instax Wide (直/橫)
+  * 動態指定 `CIPerspectiveCorrection` 的標準輸出解析度，防止橫向與 Wide 被強制拉伸變形
+- [ ] **Task 2.8.2**: 實作白邊分佈感知與內框反推外框模組 (`FrameExtrapolator.swift`)
+  * 分析四邊白邊寬度分佈 `[top, right, bottom, left]` 與長寬比
+  * 若檢測到特徵符合內部深色相片（長寬比接近 1.33 且面積過小），依標準比例外彈還原完整四角外框
+- [ ] **Task 2.8.3**: 實作四邊垂直平行驗證與局部 ROI 二次精密修正 (`VisionManager+Refinement.swift`)
+  * 計算四邊斜率向量與相鄰邊夾角，標記偏角大於 5° 的異常點
+  * 針對偏移角落裁切局部 ROI 視窗，執行二次 `VNDetectRectanglesRequest` 修正單一頂點
+- [ ] **Task 2.8.4**: 實作背面專用雙重錨點定型模組 (`BacksideDetector.swift`)
+  * OCR 僅做背面分類與 180° 自動旋轉翻正判定
+  * 結合上下水平黑膠帶強對比邊界 (Y 軸) 與 YOLO Bounding Box (X 軸) 精確重構背面邊界
+- [ ] **Task 2.8.5**: 整合 YOLO11-Pose 作為全圖重判 Fallback 兜底機制 (`VisionManager+Fallback.swift`)
+  * 針對滿版彩繪（如 DSCF0025）、嚴重反光或 Apple 原生完全漏抓之案例，直接呼叫 YOLO11-Pose
+  * 確保全測試集達到「0 個嚴重失誤 (Catastrophic Failures = 0)」的最高品質門檻
+- [ ] **Task 2.8.6**: 驗證與基準回歸測試 (`run_hybrid_benchmark.py` / Swift 測試)
+  * 在 60 張極端驗證集（含彩邊、黑底背面、傾斜透視）全面執行盲測
+  * 驗證「0 重大翻車」與「≥95% 免微調合格率」目標達成
 
 ---
 

@@ -40,3 +40,6 @@ Pods/
 TestData/
 BenchmarkTool/.build/
 
+runs/
+datasets/
+*.pt
