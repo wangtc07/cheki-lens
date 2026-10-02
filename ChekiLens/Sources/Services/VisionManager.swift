@@ -164,7 +164,14 @@ actor VisionManager {
 func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionResult {
         let ciCtx = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
         
-// --- Layer 0: Custom CoreML AI Model + Native Hybrid (混血演算法) ---
+// --- Layer 0: 背面專用 OCR 優先判定 ---
+        // 拍立得背面完全沒有邊界，傳統 AI 容易誤判。
+        // 我們直接先用極速的 OCR 掃描，如果有找到 instax 等字樣，代表這「絕對是背面」，直接反推座標，略過 AI。
+        if let ocrRes = try? await detectBacksideCorners(in: image, imageSize: imageSize) {
+            return ocrRes
+        }
+        
+        // --- Layer 1: Custom CoreML AI Model + Native Hybrid (混血演算法) ---
         if let mlRes = try? await detectVisionCoreML(image: image, imageSize: imageSize) {
             let area = VisionManager.quadArea(mlRes.corners)
             let iW = Double(imageSize.width)
@@ -227,12 +234,7 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
             }
         }
 
-        // --- Layer 0.5: 背面專用 OCR 錨點定位 ---
-        if let ocrRes = try? await detectBacksideCorners(in: image, imageSize: imageSize) {
-            return ocrRes
-        }
-
-        // --- Layer 1: Apple Vision Native ---
+        // --- Layer 2: Apple Vision Native ---
         var vRes: DetectionResult? = nil
         do {
             vRes = try await detectVisionNative(image: image, imageSize: imageSize)
