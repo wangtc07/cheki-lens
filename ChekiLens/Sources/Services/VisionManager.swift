@@ -215,7 +215,7 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
                         // 確保最終收斂的形狀比例依然是合理的拍立得比例
                         if VisionManager.isChekiRatio(hybridCorners) {
                             // 混血成功！返回由 Native Vision 收斂的超高精度座標
-                            return DetectionResult(corners: hybridCorners, method: .visionNative, confidence: observation.confidence, imageSize: imageSize)
+                            return DetectionResult(corners: hybridCorners, method: .visionNative, confidence: Double(observation.confidence), imageSize: imageSize)
                         }
                     }
                 }
