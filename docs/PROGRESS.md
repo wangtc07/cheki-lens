@@ -66,7 +66,7 @@
 
 ### 階段 2.5：專屬 AI 模型訓練與整合 (Phase 2.5: CoreML Keypoint Model)
 *採用方案 B：使用手動標註資料訓練四角關鍵點模型，徹底解決極端環境誤判*
-- [ ] **Task 2.5.1**: 收集更多樣化的實體照片（如：手持、極端反光、黑色背景、複雜桌面）並放入 `TestData/images`，使用 WebUI 產生 `cheki_annotations.jsonl`
+- [x] **Task 2.5.1**: 收集更多樣化的實體照片（如：手持、極端反光、黑色背景、複雜桌面）並放入 `TestData/images`，使用 WebUI 產生 `cheki_annotations.jsonl`
 - [x] **Task 2.5.2**: 撰寫 Python 資料擴充腳本 (Data Augmentation)，將數十張原始圖片自動旋轉/扭曲/變色擴充為 1000+ 張訓練集
 - [x] **Task 2.5.3**: 撰寫並執行 PyTorch 模型訓練腳本，將訓練完成的模型匯出為 iOS 專屬格式 (`ChekiCornerNet.mlpackage`)
 - [x] **Task 2.5.4**: 將 CoreML 模型匯入 Xcode 專案，實作 `VisionManager+CoreML.swift`，直接輸出斜四角座標
@@ -74,10 +74,10 @@
 ---
 
 ### 階段 3：iOS 系統相簿與權限管理 (Phase 3: Photos Framework Sync)
-- [ ] **Task 3.1**: 封裝 `PhotoLibraryManager.swift`（PHPhotoLibrary 授權狀態處理）
-- [ ] **Task 3.2**: 實作自動建立相簿階層結構（`ChekiLens` › `團體` › `成員` 資料夾）
-- [ ] **Task 3.3**: 實作同秒寫入機制（正面與背面照片賦予同秒 `creationDate` 緊鄰存入相簿）
-- [ ] **Task 3.4**: 實作 OCR 日期回寫相簿時間軸（使用手寫日期取代翻拍當日時間）
+- [x] **Task 3.1**: 封裝 `PhotoLibraryManager.swift`（PHPhotoLibrary 授權狀態處理）
+- [x] **Task 3.2**: 實作自動建立相簿階層結構（`ChekiLens` › `團體` › `成員` 資料夾）
+- [x] **Task 3.3**: 實作同秒寫入機制（正面與背面照片賦予同秒 `creationDate` 緊鄰存入相簿）
+- [x] **Task 3.4**: 實作 OCR 日期回寫相簿時間軸（使用手寫日期取代翻拍當日時間）
 
 ---
 

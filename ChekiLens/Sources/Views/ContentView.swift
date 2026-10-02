@@ -1,25 +1,27 @@
 import SwiftUI
 
-/// App 根視圖（佔位，待 Task 4.x 替換為真實首頁）
+/// App 根視圖 — 根據 onboarding 狀態決定顯示哪個畫面
 struct ContentView: View {
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-                Image(systemName: "photo.stack")
-                    .font(.system(size: 64))
-                    .foregroundStyle(.tint)
-                Text("ChekiLens")
-                    .font(.largeTitle.bold())
-                Text("開發中 — Phase 1 資料層建置")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        if hasCompletedOnboarding {
+            // 主畫面：TabView (iOS 官方底部分頁導覽)
+            TabView {
+                Tab("典藏", systemImage: "photo.stack") {
+                    LibraryView()
+                }
+                Tab("設定", systemImage: "gearshape") {
+                    SettingsView()
+                }
             }
-            .navigationTitle("ChekiLens")
-            .navigationBarTitleDisplayMode(.inline)
+        } else {
+            OnboardingView()
         }
     }
 }
 
 #Preview {
     ContentView()
+        .modelContainer(for: ChekiItem.self, inMemory: true)
 }

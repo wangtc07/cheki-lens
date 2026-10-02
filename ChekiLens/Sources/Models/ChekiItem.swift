@@ -217,4 +217,16 @@ enum ProcessingState: String, Codable, CaseIterable, Sendable {
     case completed     = "completed"
     /// 發生錯誤
     case error         = "error"
+
+    var displayName: String {
+        switch self {
+        case .unprocessed:    return "未處理"
+        case .detecting:      return "偵測中"
+        case .awaitingReview: return "等待確認"
+        case .corrected:      return "校正完成"
+        case .recognizingDate:return "OCR 辨識中"
+        case .completed:      return "完成"
+        case .error:          return "錯誤"
+        }
+    }
 }
