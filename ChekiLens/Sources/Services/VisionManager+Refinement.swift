@@ -187,12 +187,16 @@ extension VisionManager {
             }
         }
         
-        // --- 1D Sobel 梯度邊緣吸附 ---
+        // --- 1D Sobel 梯度邊緣直線擬合與多輪收斂迴圈 ---
         var sobelShifted = false
         if let image = image {
-            let snapped = snapEdgesWithSobel(corners: currentCorners, image: image, imageSize: imageSize)
-            if snapped != currentCorners {
+            for _ in 0..<3 {
+                let snapped = snapEdgesWithSobel(corners: currentCorners, image: image, imageSize: imageSize)
+                let maxShift = zip(snapped, currentCorners).map { hypot($0.0.x - $0.1.x, $0.0.y - $0.1.y) }.max() ?? 0.0
                 currentCorners = snapped
+                if maxShift < 2.0 {
+                    break
+                }
                 sobelShifted = true
             }
         }
@@ -213,7 +217,7 @@ extension VisionManager {
         )
     }
     
-    /// 沿四邊法向量使用 1D Sobel 梯度自動吸附至實體邊緣階躍線
+    /// 沿四邊法向量使用 1D Sobel 梯度採樣邊緣階躍點，擬合最佳直線並求解四線交點 (Line-Fitting Consensus Intersection)
     private static func snapEdgesWithSobel(
         corners: [CGPoint],
         image: CGImage,
@@ -232,12 +236,11 @@ extension VisionManager {
         }
         
         struct Line {
-            let a: Double
-            let b: Double
-            let c: Double
+            let a: Double; let b: Double; let c: Double // ax + by + c = 0
         }
         
         var lines: [Line] = []
+        var edgePtsCount: [Int] = []
         var anyEdgeShifted = false
         
         for i in 0..<4 {
@@ -256,18 +259,17 @@ extension VisionManager {
             let searchIn = 25
             var searchOut = 25
             
-            // 檢驗當前邊線中點是否落在亮白邊框內 (lum >= 130)，或邊線外側 30px 存在亮白相紙邊框
-            // 若為白邊內陷 (如 IMG_7882 頂邊少抓 200px 白邊)，允許沿外法向量延伸搜尋黑白階躍線
+            // 頂邊白邊內陷檢測 (如 IMG_7882 頂邊少抓 200px 白邊)
             let midX = (p1.x + p2.x) / 2.0
             let midY = (p1.y + p2.y) / 2.0
             let midL = lum(x: Int(round(midX)), y: Int(round(midY)))
             let out30L = lum(x: Int(round(midX + 30.0 * nx)), y: Int(round(midY + 30.0 * ny)))
-            if midL >= 130.0 || out30L >= 130.0 {
+            if i == 0 && (midL >= 130.0 || out30L >= 130.0) {
                 searchOut = min(320, Int(Double(min(w, h)) * 0.10))
             }
             
-            var offsets: [Double] = []
-            for s in [0.2, 0.35, 0.5, 0.65, 0.8] {
+            var edgePts: [CGPoint] = []
+            for s in [0.15, 0.3, 0.45, 0.6, 0.75, 0.9] {
                 let sx = Double(p1.x) + s * dx
                 let sy = Double(p1.y) + s * dy
                 
@@ -287,25 +289,60 @@ extension VisionManager {
                         bestD = Double(d)
                     }
                 }
-                if bestG >= 35.0 {
-                    offsets.append(bestD)
+                if bestG >= 30.0 {
+                    edgePts.append(CGPoint(x: sx + bestD * nx, y: sy + bestD * ny))
                 }
             }
             
-            var shift = 0.0
-            if offsets.count >= 3 {
-                offsets.sort()
-                let med = offsets[offsets.count / 2]
-                if abs(med) >= 2.0 && med >= -Double(searchIn) * 0.75 && med <= Double(searchOut) * 0.95 {
-                    shift = med
-                    anyEdgeShifted = true
+            edgePtsCount.append(edgePts.count)
+            if edgePts.count >= 2 {
+                let n = Double(edgePts.count)
+                let meanX = edgePts.reduce(0.0) { $0 + Double($1.x) } / n
+                let meanY = edgePts.reduce(0.0) { $0 + Double($1.y) } / n
+                var sxx = 0.0, sxy = 0.0, syy = 0.0
+                for pt in edgePts {
+                    let dX = Double(pt.x) - meanX
+                    let dY = Double(pt.y) - meanY
+                    sxx += dX * dX
+                    sxy += dX * dY
+                    syy += dY * dY
                 }
+                let angle = 0.5 * atan2(2.0 * sxy, sxx - syy)
+                let la = -sin(angle)
+                let lb = cos(angle)
+                let lc = -(la * meanX + lb * meanY)
+                lines.append(Line(a: la, b: lb, c: lc))
+                anyEdgeShifted = true
+            } else {
+                let c = -(nx * Double(p1.x) + ny * Double(p1.y))
+                lines.append(Line(a: nx, b: ny, c: c))
             }
-            
-            let mx = Double(p1.x + p2.x) / 2.0 + shift * nx
-            let my = Double(p1.y + p2.y) / 2.0 + shift * ny
-            let c = nx * mx + ny * my
-            lines.append(Line(a: nx, b: ny, c: c))
+        }
+        
+        // 平行約束保護：若對邊某一邊未採集到足夠梯度點，強制使其與對邊保持嚴格平行
+        if edgePtsCount[2] < 2 && edgePtsCount[0] >= 2 {
+            let topL = lines[0]
+            let midBot = CGPoint(x: (corners[2].x + corners[3].x)/2.0, y: (corners[2].y + corners[3].y)/2.0)
+            let lc = -(topL.a * Double(midBot.x) + topL.b * Double(midBot.y))
+            lines[2] = Line(a: topL.a, b: topL.b, c: lc)
+        }
+        if edgePtsCount[0] < 2 && edgePtsCount[2] >= 2 {
+            let botL = lines[2]
+            let midTop = CGPoint(x: (corners[0].x + corners[1].x)/2.0, y: (corners[0].y + corners[1].y)/2.0)
+            let lc = -(botL.a * Double(midTop.x) + botL.b * Double(midTop.y))
+            lines[0] = Line(a: botL.a, b: botL.b, c: lc)
+        }
+        if edgePtsCount[1] < 2 && edgePtsCount[3] >= 2 {
+            let leftL = lines[3]
+            let midRight = CGPoint(x: (corners[1].x + corners[2].x)/2.0, y: (corners[1].y + corners[2].y)/2.0)
+            let lc = -(leftL.a * Double(midRight.x) + leftL.b * Double(midRight.y))
+            lines[1] = Line(a: leftL.a, b: leftL.b, c: lc)
+        }
+        if edgePtsCount[3] < 2 && edgePtsCount[1] >= 2 {
+            let rightL = lines[1]
+            let midLeft = CGPoint(x: (corners[0].x + corners[3].x)/2.0, y: (corners[0].y + corners[3].y)/2.0)
+            let lc = -(rightL.a * Double(midLeft.x) + rightL.b * Double(midLeft.y))
+            lines[3] = Line(a: rightL.a, b: rightL.b, c: lc)
         }
         
         guard anyEdgeShifted else { return corners }
@@ -316,8 +353,8 @@ extension VisionManager {
             let l2 = lines[i]
             let det = l1.a * l2.b - l2.a * l1.b
             guard abs(det) > 1e-4 else { return corners }
-            let x = (l1.c * l2.b - l2.c * l1.b) / det
-            let y = (l1.a * l2.c - l2.a * l1.c) / det
+            let x = (l1.c * l2.b - l2.c * l1.b) / -det
+            let y = (l2.a * l1.c - l1.a * l2.c) / det
             snapped.append(CGPoint(x: x, y: y))
         }
         

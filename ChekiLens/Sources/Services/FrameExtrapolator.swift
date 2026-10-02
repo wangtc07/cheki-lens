@@ -142,11 +142,23 @@ enum FrameExtrapolator {
         var targetFormat: ChekiFilmFormat = .mini
         var confidence = 0.0
 
-        if longShortRatio >= 1.29 && longShortRatio <= 1.385 {
-            isInner = true
-            targetFormat = .mini
-            confidence = max(0.6, 1.0 - abs(longShortRatio - 1.348) * 3.0)
-        } else if longShortRatio >= 0.96 && longShortRatio <= 1.05 {
+        if isPortrait {
+            // 直向拍攝：Mini 內框物理比為 1.348，考量透視短縮可放寬至 1.20 ~ 1.385 (完全不會影響橫向 Wide，因 Wide 是 landscape)
+            if longShortRatio >= 1.20 && longShortRatio <= 1.385 {
+                isInner = true
+                targetFormat = .mini
+                confidence = max(0.6, 1.0 - abs(longShortRatio - 1.348) * 3.0)
+            }
+        } else {
+            // 橫向拍攝：Mini 橫向內框精確鎖定 1.29 ~ 1.385，避免誤傷橫向 Wide (1.256)
+            if longShortRatio >= 1.29 && longShortRatio <= 1.385 {
+                isInner = true
+                targetFormat = .mini
+                confidence = max(0.6, 1.0 - abs(longShortRatio - 1.348) * 3.0)
+            }
+        }
+        
+        if !isInner && longShortRatio >= 0.96 && longShortRatio <= 1.05 {
             isInner = true
             targetFormat = .square
             confidence = max(0.6, 1.0 - abs(longShortRatio - 1.0) * 4.0)

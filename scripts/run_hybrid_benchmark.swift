@@ -38,8 +38,17 @@ struct HybridBenchmarkRunner {
             testSet.append((name: b, path: "TestData/images/\(b)", isBack: true))
         }
         for v in valImages {
-            if !backsides.contains(v) {
-                testSet.append((name: v, path: "\(valDir)/\(v)", isBack: false))
+            let base = (v as NSString).deletingPathExtension
+            if !backsides.contains(where: { ($0 as NSString).deletingPathExtension == base }) {
+                var chosenPath = "\(valDir)/\(v)"
+                for ext in ["JPG", "jpeg", "jpg", "PNG", "png"] {
+                    let cand = "TestData/images/\(base).\(ext)"
+                    if FileManager.default.fileExists(atPath: cand) {
+                        chosenPath = cand
+                        break
+                    }
+                }
+                testSet.append((name: v, path: chosenPath, isBack: false))
             }
         }
         
@@ -52,11 +61,19 @@ struct HybridBenchmarkRunner {
         var methodCounts: [String: Int] = [:]
         var backsideSuccess = 0
         
+        let probDir = "TestData/benchmark_output_problematic_cases"
+        try? FileManager.default.createDirectory(atPath: probDir, withIntermediateDirectories: true)
+        
+        let problemCases = [
+            "287136_DSCF1465", "287137_DSCF1467", "DSCF0008", "DSCF0984",
+            "DSCF0041 2", "DSCF3696", "DSCF3716", "IMG_1979",
+            "IMG_3491", "IMG_6530", "IMG_7364", "IMG_7882"
+        ]
+
         for item in testSet {
+            let fileURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/" + item.path)
             guard FileManager.default.fileExists(atPath: item.path),
-                  let url = URL(string: "file://" + FileManager.default.currentDirectoryPath + "/" + item.path),
-                  let imgSource = CGImageSourceCreateWithURL(url as CFURL, nil),
-                  let cgImage = CGImageSourceCreateImageAtIndex(imgSource, 0, nil) else {
+                  let cgImage = try? await vm.loadAndPreprocess(url: fileURL) else {
                 continue
             }
             
@@ -67,7 +84,7 @@ struct HybridBenchmarkRunner {
                 let detection = try await vm.detectQuad(in: cgImage, imageSize: size)
                 let cropResult = try await vm.perspectiveCorrect(image: cgImage, corners: detection.corners, detection: detection, format: .auto)
                 
-                // 儲存校正裁切後的圖片至輸出資料夾
+                // 1. 儲存校正裁切後的圖片至輸出資料夾 (benchmark_output_hybrid)
                 let outBase = (item.name as NSString).deletingPathExtension
                 let outPath = "\(outDir)/\(outBase)_hybrid.jpg"
                 let outURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/" + outPath)
@@ -76,6 +93,17 @@ struct HybridBenchmarkRunner {
                     let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.9]
                     CGImageDestinationAddImage(dest, cropResult.cgImage, options as CFDictionary)
                     CGImageDestinationFinalize(dest)
+                }
+                
+                // 2. 同步輸出至專屬排錯驗收資料夾 (benchmark_output_problematic_cases)
+                if problemCases.contains(outBase) {
+                    let probPath = "\(probDir)/\(outBase)_fixed.jpg"
+                    let probURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/" + probPath)
+                    if let destProb = CGImageDestinationCreateWithURL(probURL as CFURL, "public.jpeg" as CFString, 1, nil) {
+                        let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.9]
+                        CGImageDestinationAddImage(destProb, cropResult.cgImage, options as CFDictionary)
+                        CGImageDestinationFinalize(destProb)
+                    }
                 }
                 
                 successCount += 1

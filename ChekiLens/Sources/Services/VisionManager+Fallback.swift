@@ -73,19 +73,36 @@ extension VisionManager {
             
             let ptr = multiArray.dataPointer.bindMemory(to: Float.self, capacity: multiArray.count)
             
-            var maxConf: Float = 0.20 // 信心度門檻
             var bestAnchor = -1
+            var bestScore: Float = 0.0
             
             for i in 0..<anchorCount {
                 let conf = ptr[4 * rowStride + i * anchorStride]
-                if conf > maxConf {
-                    maxConf = conf
+                guard conf >= 0.20 else { continue }
+                let w = ptr[2 * rowStride + i * anchorStride]
+                let h = ptr[3 * rowStride + i * anchorStride]
+                
+                let normW = Double(w) / 640.0
+                let normH = Double(h) / 640.0
+                let area = normW * normH
+                guard area >= 0.08 else { continue } // 排除佔比過小的局域碎框
+                
+                let ratio = normH / max(0.01, normW)
+                let miniDist = abs(ratio - 1.593)
+                let wideDist = abs(ratio - 1.256)
+                let squareDist = abs(ratio - 1.194)
+                let minDist = min(miniDist, min(wideDist, squareDist))
+                let formatScore = max(0.2, 1.0 - minDist * 0.5)
+                
+                let score = conf * Float(area) * Float(formatScore)
+                if score > bestScore {
+                    bestScore = score
                     bestAnchor = i
+                    highestConf = conf
                 }
             }
             
             if bestAnchor >= 0 {
-                highestConf = maxConf
                 let xc = ptr[0 * rowStride + bestAnchor * anchorStride]
                 let yc = ptr[1 * rowStride + bestAnchor * anchorStride]
                 let w = ptr[2 * rowStride + bestAnchor * anchorStride]
@@ -125,7 +142,7 @@ extension VisionManager {
         let currentRatio = box.width / max(1.0, box.height)
         
         var finalCorners = rawCorners
-        if abs(currentRatio - targetRatio) > 0.25 {
+        if abs(currentRatio - targetRatio) > 0.08 {
             // 修正寬度以匹配標準物理底片規格
             let correctedW = box.height * targetRatio
             let cx = box.midX
