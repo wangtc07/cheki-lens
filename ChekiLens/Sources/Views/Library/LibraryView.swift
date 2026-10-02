@@ -123,11 +123,13 @@ struct LibraryView: View {
 
         for item in items {
             guard let data = try? await item.loadTransferable(type: Data.self),
-                  let uiImage = UIImage(data: data) else { continue }
+                  let originalUIImage = UIImage(data: data) else { continue }
+
+            let uiImage = originalUIImage.normalizedImage
 
             // 建立 ChekiItem 並存入 SwiftData
             let newItem = ChekiItem()
-            newItem.frontImageData = data
+            newItem.frontImageData = data // 儲存原始資料 (含 EXIF)
             newItem.capturedAt = Date()
             newItem.processingState = .unprocessed
 
