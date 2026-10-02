@@ -300,6 +300,12 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
                 best.corners = extraRes.extrapolatedCorners
                 return best
             } else {
+                // Task 2.8.3: 四邊垂直平行驗證與單點漂移幾何修正
+                let refRes = VisionManager.refineQuadrilateral(corners: best.corners, imageSize: imageSize)
+                if refRes.wasRefined {
+                    best.corners = refRes.corners
+                }
+                
                 let r = VisionManager.quadAspectRatio(best.corners)
                 if r >= 1.15 { // 涵蓋 Square (1.19), Wide (1.26), Mini (1.59)
                     return best

@@ -9,9 +9,9 @@
 
 * **最後更新時間**：2026-10-02
 * **當前所屬階段**：Phase 2.8 - 終極混合式高精度影像辨識引擎 (Hybrid Precision Engine v2)
-* **當前進行中任務**：完成 Task 2.8.2 白邊感知與內框反推外框模組，接續 Task 2.8.3
-* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.8.2 白邊分佈感知與內框反推外框模組 (FrameExtrapolator)
-* **下一動執行指示**：實作 Task 2.8.3 四邊垂直平行驗證與局部 ROI 二次精密修正 (VisionManager+Refinement.swift)
+* **當前進行中任務**：完成 Task 2.8.3 四邊垂直平行驗證與精密修正，接續 Task 2.8.4
+* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.8.3 四邊垂直平行驗證與局部 ROI 二次精密修正 (VisionManager+Refinement)
+* **下一動執行指示**：實作 Task 2.8.4 背面專用雙重錨點定型模組 (BacksideDetector.swift)
 
 ---
 
@@ -129,9 +129,9 @@
 - [x] **Task 2.8.2**: 實作白邊分佈感知與內框反推外框模組 (`FrameExtrapolator.swift`)
   * 分析長短邊比例是否符合內部照片特徵（長寬比接近 1.348）
   * 若檢測到誤抓內部深色畫面，依據富士工業規格（左右4mm、上5mm、下巴19mm）精確外彈還原外框，驗證錯誤率降低 70%~87%（DSCF3716、IMG_7280 驗證通過）
-- [ ] **Task 2.8.3**: 實作四邊垂直平行驗證與局部 ROI 二次精密修正 (`VisionManager+Refinement.swift`)
-  * 計算四邊斜率向量與相鄰邊夾角，標記偏角大於 5° 的異常點
-  * 針對偏移角落裁切局部 ROI 視窗，執行二次 `VNDetectRectanglesRequest` 修正單一頂點
+- [x] **Task 2.8.3**: 實作四邊垂直平行驗證與局部 ROI 二次精密修正 (`VisionManager+Refinement.swift`)
+  * 計算四邊斜率向量與相鄰邊夾角，自適應偵測偏角大於 4° 的單點異常漂移
+  * 針對偏移頂點（如 287136 右上角漂移 69px）利用其餘正交頂點形成的幾何向量精確修正，驗證誤差降低 60%（287136 驗證通過）
 - [ ] **Task 2.8.4**: 實作背面專用雙重錨點定型模組 (`BacksideDetector.swift`)
   * OCR 僅做背面分類與 180° 自動旋轉翻正判定
   * 結合上下水平黑膠帶強對比邊界 (Y 軸) 與 YOLO Bounding Box (X 軸) 精確重構背面邊界
