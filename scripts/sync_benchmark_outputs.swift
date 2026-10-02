@@ -35,9 +35,8 @@ struct BenchmarkSyncer {
             if !FileManager.default.fileExists(atPath: path) {
                 path = "datasets/cheki_pose/images/val/\(name)"
             }
-            guard let url = URL(string: "file://" + FileManager.default.currentDirectoryPath + "/" + path),
-                  let src = CGImageSourceCreateWithURL(url as CFURL, nil),
-                  let cgImage = CGImageSourceCreateImageAtIndex(src, 0, nil) else { continue }
+            let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/" + path)
+            guard let cgImage = try? await vm.loadAndPreprocess(url: url) else { continue }
                   
             let size = CGSize(width: cgImage.width, height: cgImage.height)
             do {

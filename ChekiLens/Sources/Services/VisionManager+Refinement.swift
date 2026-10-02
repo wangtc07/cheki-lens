@@ -120,13 +120,35 @@ extension VisionManager {
                 }
                 
                 // 規格長寬比適配度 (Format Error)
-                let r = VisionManager.quadAspectRatio(cand)
+                let candTopW = Double(hypot(cand[1].x - cand[0].x, cand[1].y - cand[0].y))
+                let candBotW = Double(hypot(cand[2].x - cand[3].x, cand[2].y - cand[3].y))
+                let candLeftH = Double(hypot(cand[3].x - cand[0].x, cand[3].y - cand[0].y))
+                let candRightH = Double(hypot(cand[2].x - cand[1].x, cand[2].y - cand[1].y))
+                let candAvgW = (candTopW + candBotW) / 2.0
+                let candAvgH = (candLeftH + candRightH) / 2.0
+                let isCandPortrait = candAvgH >= candAvgW
+                let r = isCandPortrait ? (candAvgH / candAvgW) : (candAvgW / candAvgH)
+                
                 let miniErr = abs(r - 1.593)
                 let sqErr = abs(r - 1.194)
                 let wideErr = abs(r - 1.256)
-                let formatErr = min(miniErr, min(sqErr, wideErr))
                 
-                guard r >= 1.12 && r <= 1.85 && formatErr <= 0.18 else { continue }
+                let formatErr: Double
+                if isCandPortrait {
+                    // 直向卡片：絕無 Wide 規格！僅有 Mini 直向 (1.593) 與 Square (1.194)
+                    if miniErr <= 0.13 {
+                        formatErr = miniErr
+                    } else if sqErr <= 0.08 {
+                        formatErr = sqErr
+                    } else {
+                        continue // 排除直向誤判 Wide（徹底杜絕 IMG_7882 頂邊被向下壓深削短問題）
+                    }
+                } else {
+                    // 橫向卡片：允許 Mini (1.593)、Square (1.194) 與 Wide (1.256)
+                    let bestErr = min(miniErr, min(sqErr, wideErr))
+                    guard bestErr <= 0.14 else { continue }
+                    formatErr = bestErr
+                }
                 
                 // 對角直角偏差 (Opposite Corner Angle Deviation)
                 let oppIdx = (i + 2) % 4
@@ -211,9 +233,6 @@ extension VisionManager {
         var lines: [Line] = []
         var anyEdgeShifted = false
         
-        let searchR = max(15, min(25, Int(Double(min(w, h)) * 0.01)))
-        let maxAllowedShift = Double(searchR) * 0.75
-        
         for i in 0..<4 {
             let p1 = corners[i]
             let p2 = corners[(i + 1) % 4]
@@ -226,6 +245,18 @@ extension VisionManager {
             let nx = ty
             let ny = -tx // 順時針外法向量
             
+            // 基礎搜尋半徑 (常態微調 ±25px)
+            let searchIn = 25
+            var searchOut = 25
+            
+            // 檢驗當前邊線中點是否落在亮白邊框內 (lum >= 130)
+            // 若為白邊內陷 (如 IMG_7882 頂邊少抓 200px 白邊)，允許沿外法向量延伸搜尋黑白階躍線
+            let midX = Int(round((p1.x + p2.x) / 2.0))
+            let midY = Int(round((p1.y + p2.y) / 2.0))
+            if lum(x: midX, y: midY) >= 130.0 {
+                searchOut = min(260, Int(Double(min(w, h)) * 0.08))
+            }
+            
             var offsets: [Double] = []
             for s in [0.2, 0.35, 0.5, 0.65, 0.8] {
                 let sx = Double(p1.x) + s * dx
@@ -233,16 +264,16 @@ extension VisionManager {
                 
                 var bestG = 0.0
                 var bestD = 0.0
-                for d in -searchR...searchR {
-                    let outX = Int(round(sx + Double(d + 1) * nx))
-                    let outY = Int(round(sy + Double(d + 1) * ny))
-                    let inX  = Int(round(sx + Double(d - 1) * nx))
-                    let inY  = Int(round(sy + Double(d - 1) * ny))
+                for d in -searchIn...searchOut {
+                    let outX = Int(round(sx + Double(d + 2) * nx))
+                    let outY = Int(round(sy + Double(d + 2) * ny))
+                    let inX  = Int(round(sx + Double(d - 2) * nx))
+                    let inY  = Int(round(sy + Double(d - 2) * ny))
                     
                     let lOut = lum(x: outX, y: outY)
                     let lIn  = lum(x: inX, y: inY)
                     let g = lIn - lOut
-                    if g > bestG {
+                    if g > bestG && lIn >= 100.0 && lOut <= 80.0 {
                         bestG = g
                         bestD = Double(d)
                     }
@@ -256,7 +287,7 @@ extension VisionManager {
             if offsets.count >= 3 {
                 offsets.sort()
                 let med = offsets[offsets.count / 2]
-                if abs(med) >= 2.0 && abs(med) <= maxAllowedShift {
+                if abs(med) >= 2.0 && med >= -Double(searchIn) * 0.75 && med <= Double(searchOut) * 0.95 {
                     shift = med
                     anyEdgeShifted = true
                 }
@@ -286,11 +317,11 @@ extension VisionManager {
         let snapArea = VisionManager.quadArea(snapped)
         guard origArea > 0 else { return corners }
         let areaDiff = abs(snapArea - origArea) / origArea
-        guard areaDiff <= 0.08 else { return corners }
+        guard areaDiff <= 0.12 else { return corners }
         
         let origR = VisionManager.quadAspectRatio(corners)
         let snapR = VisionManager.quadAspectRatio(snapped)
-        guard abs(snapR - origR) <= 0.08 else { return corners }
+        guard abs(snapR - origR) <= 0.15 else { return corners }
         guard VisionManager.isChekiRatio(snapped) else { return corners }
         
         return snapped
