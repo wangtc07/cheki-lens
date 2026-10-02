@@ -23,10 +23,10 @@ extension VisionManager {
         for obs in observations {
             let text = obs.topCandidates(1).first?.string.lowercased() ?? ""
             if text.contains("mouth") || text.contains("don't") || text.contains("put") {
-                topRect = try? obs.boundingBox(for: obs.topCandidates(1).first!.string.startIndex..<obs.topCandidates(1).first!.string.endIndex)?.boundingBox
+                topRect = obs.boundingBox
             }
             if text.contains("instax") || text.contains("fujifilm") {
-                bottomRect = try? obs.boundingBox(for: obs.topCandidates(1).first!.string.startIndex..<obs.topCandidates(1).first!.string.endIndex)?.boundingBox
+                bottomRect = obs.boundingBox
             }
         }
         

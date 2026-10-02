@@ -52,6 +52,7 @@ struct CropResult {
     var cgImage: CGImage
     var outputSize: CGSize
     var detectionResult: DetectionResult
+    var filmSpecification: FilmSpecification? = nil
 }
 
 // MARK: - VisionManager
@@ -184,12 +185,15 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
                 let paddingX = CGFloat(iW * 0.08)
                 let paddingY = CGFloat(iH * 0.08)
                 
-                let minX = max(0, xs.min()! - paddingX)
+                let minX = max(CGFloat(0), xs.min()! - paddingX)
                 let maxX = min(CGFloat(iW), xs.max()! + paddingX)
-                let minY = max(0, ys.min()! - paddingY)
+                let minY = max(CGFloat(0), ys.min()! - paddingY)
                 let maxY = min(CGFloat(iH), ys.max()! + paddingY)
                 
-                let roiRect = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+                let roiRect = CGRect(
+                    origin: CGPoint(x: minX, y: minY),
+                    size: CGSize(width: maxX - minX, height: maxY - minY)
+                )
                 
                 // 嘗試在裁切後的 ROI 內使用 Apple Native Vision 進行亞像素級邊緣對齊
                 if let croppedCGImage = image.cropping(to: roiRect) {

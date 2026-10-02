@@ -59,13 +59,11 @@ extension VisionManager {
             throw VisionError.perspectiveCorrectionFailed
         }
 
-        // 出力サイズ決定（比率ロック + 4K）
-        let outputSize = resolveOutputSize(
-            from: corrected.extent.size,
-            format: resolveFormat(from: detection, requestedFormat: format)
-        )
+        // 規格與方向智能分類 (Task 2.8.1: AspectRatioClassifier)
+        let spec = AspectRatioClassifier.classify(corners: ordered, requestedFormat: format)
+        let outputSize = spec.standardOutputSize
 
-        // Lanczos リサンプリング（Python の cv2.INTER_LANCZOS4 相当）
+        // Lanczos 重採樣 (Python cv2.INTER_LANCZOS4 等效)
         guard let scaled = applyLanczosResize(image: corrected, targetSize: outputSize) else {
             throw VisionError.perspectiveCorrectionFailed
         }
@@ -78,41 +76,26 @@ extension VisionManager {
         return CropResult(
             cgImage: finalCG,
             outputSize: outputSize,
-            detectionResult: detection
+            detectionResult: detection,
+            filmSpecification: spec
         )
     }
 
-    // MARK: - Format Auto Resolution
+    // MARK: - Legacy Resolvers (Delegated to AspectRatioClassifier)
 
     private func resolveFormat(
         from detection: DetectionResult,
         requestedFormat: ChekiFilmFormat
     ) -> ChekiFilmFormat {
-        if requestedFormat != .auto { return requestedFormat }
-        let ratio = VisionManager.quadAspectRatio(detection.corners)
-        // ratio 近傍で最良のフォーマットを選ぶ
-        let formats: [ChekiFilmFormat] = [.mini, .square, .wide]
-        return formats.min(by: { abs($0.aspectRatio - ratio) < abs($1.aspectRatio - ratio) }) ?? .mini
+        let spec = AspectRatioClassifier.classify(corners: detection.corners, requestedFormat: requestedFormat)
+        return spec.format
     }
 
-    // MARK: - Output Size
-
-    /// 4K 出力サイズ計算（長辺 3840px 固定、短辺は比率から逆算）
     private func resolveOutputSize(from rawSize: CGSize, format: ChekiFilmFormat) -> CGSize {
-        let longEdge = Double(ChekiFilmFormat.outputLongEdgePx)   // 3840
-        let ratio = format == .auto ? 86.0/54.0 : format.aspectRatio
-        let isPortrait = rawSize.height >= rawSize.width
-        if isPortrait {
-            // 縦向き：高さ = 3840, 幅 = 3840 / ratio
-            let h = longEdge
-            let w = h / ratio
-            return CGSize(width: w, height: h)
-        } else {
-            // 横向き（Wide）
-            let w = longEdge
-            let h = w / ratio
-            return CGSize(width: w, height: h)
-        }
+        let isLandscape = rawSize.width > rawSize.height
+        let orientation: ChekiOrientation = isLandscape ? .landscape : .portrait
+        let spec = AspectRatioClassifier.specification(for: format, orientation: orientation)
+        return spec.standardOutputSize
     }
 
     // MARK: - Lanczos Resize
