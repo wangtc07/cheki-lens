@@ -227,6 +227,11 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
             }
         }
 
+        // --- Layer 0.5: 背面專用 OCR 錨點定位 ---
+        if let ocrRes = try? await detectBacksideCorners(in: image, imageSize: imageSize) {
+            return ocrRes
+        }
+
         // --- Layer 1: Apple Vision Native ---
         var vRes: DetectionResult? = nil
         do {

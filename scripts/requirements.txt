@@ -4,3 +4,4 @@ coremltools
 numpy
 tqdm
 matplotlib
+ultralytics
