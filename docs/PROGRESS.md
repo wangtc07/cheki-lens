@@ -9,9 +9,9 @@
 
 * **最後更新時間**：2026-10-02
 * **當前所屬階段**：Phase 2.8 - 終極混合式高精度影像辨識引擎 (Hybrid Precision Engine v2)
-* **當前進行中任務**：完成 Task 2.8.3 四邊垂直平行驗證與精密修正，接續 Task 2.8.4
-* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.8.3 四邊垂直平行驗證與局部 ROI 二次精密修正 (VisionManager+Refinement)
-* **下一動執行指示**：實作 Task 2.8.4 背面專用雙重錨點定型模組 (BacksideDetector.swift)
+* **當前進行中任務**：完成 Task 2.8.4 背面專用雙重錨點定型模組，接續 Task 2.8.5
+* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.8.4 背面專用雙重錨點定型模組 (BacksideDetector)
+* **下一動執行指示**：實作 Task 2.8.5 整合 YOLO11-Pose 作為全圖重判 Fallback 兜底機制 (VisionManager+Fallback.swift)
 
 ---
 
@@ -132,9 +132,9 @@
 - [x] **Task 2.8.3**: 實作四邊垂直平行驗證與局部 ROI 二次精密修正 (`VisionManager+Refinement.swift`)
   * 計算四邊斜率向量與相鄰邊夾角，自適應偵測偏角大於 4° 的單點異常漂移
   * 針對偏移頂點（如 287136 右上角漂移 69px）利用其餘正交頂點形成的幾何向量精確修正，驗證誤差降低 60%（287136 驗證通過）
-- [ ] **Task 2.8.4**: 實作背面專用雙重錨點定型模組 (`BacksideDetector.swift`)
-  * OCR 僅做背面分類與 180° 自動旋轉翻正判定
-  * 結合上下水平黑膠帶強對比邊界 (Y 軸) 與 YOLO Bounding Box (X 軸) 精確重構背面邊界
+- [x] **Task 2.8.4**: 實作背面專用雙重錨點定型模組 (`BacksideDetector.swift`)
+  * OCR 檢測頂部 "Don't put in mouth" 與底部 "instax/FUJIFILM" 關鍵字分類背面與 180° 方向判斷
+  * 結合橫向跨距錨點與工業標準尺寸幾何定型，實測 6 大實體背面 100% 成功偵測（DSCF0024、0026、0032、0034、0042、IMG_6529 全數通過）
 - [ ] **Task 2.8.5**: 整合 YOLO11-Pose 作為全圖重判 Fallback 兜底機制 (`VisionManager+Fallback.swift`)
   * 針對滿版彩繪（如 DSCF0025）、嚴重反光或 Apple 原生完全漏抓之案例，直接呼叫 YOLO11-Pose
   * 確保全測試集達到「0 個嚴重失誤 (Catastrophic Failures = 0)」的最高品質門檻
