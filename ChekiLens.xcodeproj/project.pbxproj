@@ -29,6 +29,23 @@
 		D7EF56FE306DECA500C522ED /* ChekiLensUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChekiLensUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D7B22751306F483900C0E328 /* Exceptions for "ChekiLensUITests" folder in "ChekiLens" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ChekiCornerNet.mlpackage,
+			);
+			target = D7EF56E4306DECA300C522ED /* ChekiLens */;
+		};
+		D7B22752306F483900C0E328 /* Exceptions for "ChekiLensUITests" folder in "ChekiLensUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ChekiCornerNet.mlpackage,
+			);
+			target = D7EF56FD306DECA500C522ED /* ChekiLensUITests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D7EF56E7306DECA300C522ED /* ChekiLens */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -42,6 +59,10 @@
 		};
 		D7EF5701306DECA500C522ED /* ChekiLensUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D7B22751306F483900C0E328 /* Exceptions for "ChekiLensUITests" folder in "ChekiLens" target */,
+				D7B22752306F483900C0E328 /* Exceptions for "ChekiLensUITests" folder in "ChekiLensUITests" target */,
+			);
 			path = ChekiLensUITests;
 			sourceTree = "<group>";
 		};

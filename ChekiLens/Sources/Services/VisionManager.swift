@@ -41,6 +41,7 @@ enum DetectionMethodUsed: String {
     case hough       = "hough"
     case visionNative = "vision_native"
     case whiteMask   = "white_mask"
+    case visionCoreML = "coreml"
     case failed      = "failed"
 }
 
@@ -163,6 +164,16 @@ actor VisionManager {
 func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionResult {
         let ciCtx = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
         
+// --- Layer 0: Custom CoreML AI Model (ChekiCornerNet) ---
+        if let mlRes = try? await detectVisionCoreML(image: image, imageSize: imageSize) {
+            let area = VisionManager.quadArea(mlRes.corners)
+            let iW = Double(imageSize.width)
+            let iH = Double(imageSize.height)
+            if area >= 0.05 * iW * iH && VisionManager.isChekiRatio(mlRes.corners) {
+                return mlRes
+            }
+        }
+
         // --- Layer 1: Apple Vision Native ---
         var vRes: DetectionResult? = nil
         do {

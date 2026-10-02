@@ -67,9 +67,9 @@
 ### 階段 2.5：專屬 AI 模型訓練與整合 (Phase 2.5: CoreML Keypoint Model)
 *採用方案 B：使用手動標註資料訓練四角關鍵點模型，徹底解決極端環境誤判*
 - [ ] **Task 2.5.1**: 收集更多樣化的實體照片（如：手持、極端反光、黑色背景、複雜桌面）並放入 `TestData/images`，使用 WebUI 產生 `cheki_annotations.jsonl`
-- [ ] **Task 2.5.2**: 撰寫 Python 資料擴充腳本 (Data Augmentation)，將數十張原始圖片自動旋轉/扭曲/變色擴充為 1000+ 張訓練集
-- [ ] **Task 2.5.3**: 撰寫並執行 PyTorch 模型訓練腳本，將訓練完成的模型匯出為 iOS 專屬格式 (`ChekiCornerNet.mlpackage`)
-- [ ] **Task 2.5.4**: 將 CoreML 模型匯入 Xcode 專案，實作 `VisionManager+CoreML.swift`，直接輸出斜四角座標
+- [x] **Task 2.5.2**: 撰寫 Python 資料擴充腳本 (Data Augmentation)，將數十張原始圖片自動旋轉/扭曲/變色擴充為 1000+ 張訓練集
+- [x] **Task 2.5.3**: 撰寫並執行 PyTorch 模型訓練腳本，將訓練完成的模型匯出為 iOS 專屬格式 (`ChekiCornerNet.mlpackage`)
+- [x] **Task 2.5.4**: 將 CoreML 模型匯入 Xcode 專案，實作 `VisionManager+CoreML.swift`，直接輸出斜四角座標
 
 ---
 
