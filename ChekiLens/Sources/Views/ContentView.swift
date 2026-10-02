@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// App 根視圖 — 根據 onboarding 狀態決定顯示哪個畫面
 struct ContentView: View {
@@ -8,12 +9,14 @@ struct ContentView: View {
         if hasCompletedOnboarding {
             // 主畫面：TabView (iOS 官方底部分頁導覽)
             TabView {
-                Tab("典藏", systemImage: "photo.stack") {
-                    LibraryView()
-                }
-                Tab("設定", systemImage: "gearshape") {
-                    SettingsView()
-                }
+                LibraryView()
+                    .tabItem {
+                        Label("典藏", systemImage: "photo.stack")
+                    }
+                SettingsView()
+                    .tabItem {
+                        Label("設定", systemImage: "gearshape")
+                    }
             }
         } else {
             OnboardingView()
@@ -22,6 +25,8 @@ struct ContentView: View {
 }
 
 #Preview {
+    let config = ModelConfiguration(isStoredInMemoryOnly: true)
+    let container = try! ModelContainer(for: ChekiItem.self, configurations: config)
     ContentView()
-        .modelContainer(for: ChekiItem.self, inMemory: true)
+        .modelContainer(container)
 }

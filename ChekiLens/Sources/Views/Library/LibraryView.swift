@@ -10,7 +10,7 @@ import PhotosUI
 struct LibraryView: View {
 
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \ChekiItem.creationDate, order: .reverse) private var chekiItems: [ChekiItem]
+    @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var chekiItems: [ChekiItem]
 
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var showingPicker = false
@@ -22,6 +22,9 @@ struct LibraryView: View {
         GridItem(.flexible(), spacing: 2),
         GridItem(.flexible(), spacing: 2)
     ]
+
+    // 明確宣告 init，避免 Swift 6 因 @Query private var 導致合成 initializer 變成 private
+    init() {}
 
     var body: some View {
         NavigationStack {
@@ -125,7 +128,7 @@ struct LibraryView: View {
             // 建立 ChekiItem 並存入 SwiftData
             let newItem = ChekiItem()
             newItem.frontImageData = data
-            newItem.creationDate = Date()
+            newItem.capturedAt = Date()
             newItem.processingState = .unprocessed
 
             modelContext.insert(newItem)
@@ -144,14 +147,14 @@ struct LibraryView: View {
         do {
             let manager = VisionManager()
             let detection = try await manager.detectQuad(in: cgImage, imageSize: imageSize)
-            let cropResult = try manager.perspectiveCorrect(
+            let cropResult = try await manager.perspectiveCorrect(
                 image: cgImage,
                 corners: detection.corners,
                 detection: detection,
                 format: .auto
             )
             await MainActor.run {
-                item.frontImageData = UIImage(cgImage: cropResult.image).jpegData(compressionQuality: 0.92)
+                item.frontImageData = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92)
                 item.processingState = .completed
             }
         } catch {

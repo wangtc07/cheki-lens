@@ -35,11 +35,11 @@ struct ChekiDetailView: View {
             // 頂部日期藥丸
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
-                    Text(item.creationDate, style: .date)
+                    Text(item.capturedAt, style: .date)
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundStyle(.white)
-                    Text(item.creationDate, style: .time)
+                    Text(item.capturedAt, style: .time)
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.7))
                 }

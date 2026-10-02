@@ -25,8 +25,8 @@ struct ChekiInfoView: View {
 
             // 日期資訊
             Section("拍攝資訊") {
-                LabeledContent("日期", value: item.creationDate.formatted(date: .long, time: .omitted))
-                LabeledContent("時間", value: item.creationDate.formatted(date: .omitted, time: .shortened))
+                LabeledContent("日期", value: item.capturedAt.formatted(date: .long, time: .omitted))
+                LabeledContent("時間", value: item.capturedAt.formatted(date: .omitted, time: .shortened))
                 LabeledContent("規格", value: item.filmFormat.displayName)
                 LabeledContent("處理狀態", value: item.processingState.displayName)
             }
