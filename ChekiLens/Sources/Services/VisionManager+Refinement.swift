@@ -249,12 +249,14 @@ extension VisionManager {
             let searchIn = 25
             var searchOut = 25
             
-            // 檢驗當前邊線中點是否落在亮白邊框內 (lum >= 130)
+            // 檢驗當前邊線中點是否落在亮白邊框內 (lum >= 130)，或邊線外側 30px 存在亮白相紙邊框
             // 若為白邊內陷 (如 IMG_7882 頂邊少抓 200px 白邊)，允許沿外法向量延伸搜尋黑白階躍線
-            let midX = Int(round((p1.x + p2.x) / 2.0))
-            let midY = Int(round((p1.y + p2.y) / 2.0))
-            if lum(x: midX, y: midY) >= 130.0 {
-                searchOut = min(260, Int(Double(min(w, h)) * 0.08))
+            let midX = (p1.x + p2.x) / 2.0
+            let midY = (p1.y + p2.y) / 2.0
+            let midL = lum(x: Int(round(midX)), y: Int(round(midY)))
+            let out30L = lum(x: Int(round(midX + 30.0 * nx)), y: Int(round(midY + 30.0 * ny)))
+            if midL >= 130.0 || out30L >= 130.0 {
+                searchOut = min(320, Int(Double(min(w, h)) * 0.10))
             }
             
             var offsets: [Double] = []
@@ -265,15 +267,15 @@ extension VisionManager {
                 var bestG = 0.0
                 var bestD = 0.0
                 for d in -searchIn...searchOut {
-                    let outX = Int(round(sx + Double(d + 2) * nx))
-                    let outY = Int(round(sy + Double(d + 2) * ny))
-                    let inX  = Int(round(sx + Double(d - 2) * nx))
-                    let inY  = Int(round(sy + Double(d - 2) * ny))
+                    let outX = Int(round(sx + Double(d + 4) * nx))
+                    let outY = Int(round(sy + Double(d + 4) * ny))
+                    let inX  = Int(round(sx + Double(d - 4) * nx))
+                    let inY  = Int(round(sy + Double(d - 4) * ny))
                     
                     let lOut = lum(x: outX, y: outY)
                     let lIn  = lum(x: inX, y: inY)
                     let g = lIn - lOut
-                    if g > bestG && lIn >= 100.0 && lOut <= 80.0 {
+                    if g > bestG && lIn >= 110.0 && lOut <= 85.0 {
                         bestG = g
                         bestD = Double(d)
                     }
@@ -317,11 +319,11 @@ extension VisionManager {
         let snapArea = VisionManager.quadArea(snapped)
         guard origArea > 0 else { return corners }
         let areaDiff = abs(snapArea - origArea) / origArea
-        guard areaDiff <= 0.12 else { return corners }
+        guard areaDiff <= 0.15 else { return corners }
         
         let origR = VisionManager.quadAspectRatio(corners)
         let snapR = VisionManager.quadAspectRatio(snapped)
-        guard abs(snapR - origR) <= 0.15 else { return corners }
+        guard abs(snapR - origR) <= 0.18 else { return corners }
         guard VisionManager.isChekiRatio(snapped) else { return corners }
         
         return snapped
