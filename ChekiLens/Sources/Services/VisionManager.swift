@@ -228,8 +228,8 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
         }
         
         if var best = bestNative {
-            // Task 2.8.2: 檢查是否誤抓內部相片 (FrameExtrapolator 反推外框)
-            let extraRes = FrameExtrapolator.checkAndExtrapolate(corners: best.corners, imageSize: imageSize)
+            // Task 2.9.2: 檢查是否誤抓內部相片 (FrameExtrapolator 反推外框 + 外環色彩反差門檻防護)
+            let extraRes = FrameExtrapolator.checkAndExtrapolate(corners: best.corners, imageSize: imageSize, image: image)
             if extraRes.isInnerFrame {
                 best.corners = extraRes.extrapolatedCorners
                 return best
