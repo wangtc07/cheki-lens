@@ -165,6 +165,13 @@ extension VisionManager {
                 guard pCand.x >= -30 && pCand.x <= imageSize.width + 30 &&
                       pCand.y >= -30 && pCand.y <= imageSize.height + 30 else { continue }
                 
+                // 實體底色反差防護：推導出的候選頂點絕不可落入黑底桌面上 (lum < 65)
+                // 防止正常頂點被不平整對邊之斜率強行拉入黑底背景 (徹底根除 IMG_7882 右下角內縮下墜問題)
+                if let img = image {
+                    let candLum = FrameExtrapolator.sampleLuminance(in: img, at: pCand)
+                    guard candLum >= 65.0 else { continue }
+                }
+                
                 let score = formatErr * 2.0 + oppDev * 0.1
                 if score < bestCandScore {
                     bestCandScore = score
