@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 // MARK: - ChekiInfoView (Task 4.6)
 /// 拍立得資訊與備忘面板

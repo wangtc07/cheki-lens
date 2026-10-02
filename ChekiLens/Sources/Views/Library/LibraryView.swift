@@ -202,5 +202,5 @@ private struct ChekiThumbnailView: View {
 
 #Preview {
     LibraryView()
-        .modelContainer(for: ChekiItem.self, inMemory: true)
+        .modelContainer(try! ModelContainer(for: ChekiItem.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
 }

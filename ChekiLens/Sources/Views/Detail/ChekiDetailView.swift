@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 // MARK: - ChekiDetailView (Task 4.5)
 /// 拍立得單張全螢幕檢視
@@ -139,5 +140,5 @@ struct ChekiDetailView: View {
     NavigationStack {
         ChekiDetailView(item: ChekiItem())
     }
-    .modelContainer(for: ChekiItem.self, inMemory: true)
+    .modelContainer(try! ModelContainer(for: ChekiItem.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
 }
