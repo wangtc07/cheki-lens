@@ -313,6 +313,12 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
             }
         }
         
+        // --- Layer 1.8: Task 2.8.5 YOLO11-Pose Fallback 兜底機制 ---
+        // 針對滿版彩繪 (DSCF0025.JPG) 或極端反光漏抓，由物件級神經網路全圖兜底重判
+        if let fallbackRes = try? await detectFallbackPose(image: image, imageSize: imageSize) {
+            return fallbackRes
+        }
+        
         // --- Layer 2: Hough Transform Fallback ---
         if let hRes = try? await detectHough(image: image, imageSize: imageSize) {
             return hRes

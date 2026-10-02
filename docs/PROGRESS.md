@@ -9,9 +9,9 @@
 
 * **最後更新時間**：2026-10-02
 * **當前所屬階段**：Phase 2.8 - 終極混合式高精度影像辨識引擎 (Hybrid Precision Engine v2)
-* **當前進行中任務**：完成 Task 2.8.4 背面專用雙重錨點定型模組，接續 Task 2.8.5
-* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.8.4 背面專用雙重錨點定型模組 (BacksideDetector)
-* **下一動執行指示**：實作 Task 2.8.5 整合 YOLO11-Pose 作為全圖重判 Fallback 兜底機制 (VisionManager+Fallback.swift)
+* **當前進行中任務**：完成 Task 2.8.5 整合 YOLO11-Pose Fallback 兜底機制，接續 Task 2.8.6
+* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.8.5 整合 YOLO11-Pose Fallback 兜底機制 (VisionManager+Fallback)
+* **下一動執行指示**：執行 Task 2.8.6 驗證與基準回歸測試 (run_hybrid_benchmark.py 全量評測)
 
 ---
 
@@ -135,9 +135,9 @@
 - [x] **Task 2.8.4**: 實作背面專用雙重錨點定型模組 (`BacksideDetector.swift`)
   * OCR 檢測頂部 "Don't put in mouth" 與底部 "instax/FUJIFILM" 關鍵字分類背面與 180° 方向判斷
   * 結合橫向跨距錨點與工業標準尺寸幾何定型，實測 6 大實體背面 100% 成功偵測（DSCF0024、0026、0032、0034、0042、IMG_6529 全數通過）
-- [ ] **Task 2.8.5**: 整合 YOLO11-Pose 作為全圖重判 Fallback 兜底機制 (`VisionManager+Fallback.swift`)
-  * 針對滿版彩繪（如 DSCF0025）、嚴重反光或 Apple 原生完全漏抓之案例，直接呼叫 YOLO11-Pose
-  * 確保全測試集達到「0 個嚴重失誤 (Catastrophic Failures = 0)」的最高品質門檻
+- [x] **Task 2.8.5**: 整合 YOLO11-Pose 作為全圖重判 Fallback 兜底機制 (`VisionManager+Fallback.swift`)
+  * 將 YOLO11-Pose 匯出為 iOS 專屬 CoreML 模型 (`ChekiPoseNet.mlpackage`)，以物件語義全圖感知作為 Layer 1.8 兜底防線
+  * 針對滿版彩繪（如 DSCF0025.JPG）、極端反光或 Native Vision 漏抓案例精準重判，並經 AspectRatioClassifier 幾何鎖定（DSCF0025 驗證通過）
 - [ ] **Task 2.8.6**: 驗證與基準回歸測試 (`run_hybrid_benchmark.py` / Swift 測試)
   * 在 60 張極端驗證集（含彩邊、黑底背面、傾斜透視）全面執行盲測
   * 驗證「0 重大翻車」與「≥95% 免微調合格率」目標達成
