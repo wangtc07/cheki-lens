@@ -148,6 +148,7 @@
 ### 階段 2.9：混合辨識引擎精度重構與 11 大瑕疵清零 (Phase 2.9: Precision Engine v2.1 Refactor)
 *專項分支：`feat/vision-precision-refinement`*
 *目標：徹底修復用戶抽檢發現之 11 大邊界、回退、誤外彈與關鍵點丟失案例，並將該 11 個案例單獨輸出至獨立資料夾供人工驗收*
+*防跑偏守門協議 (Anti-Drift Guard)：每一微任務完成後，必須無條件執行 `scripts/verify_no_regression.swift`，確保 49 張既有正常樣本通過率恆為 100.0%、6 張背面恆為 100.0%，任何非預期飄移即刻觸發回退防護。*
 
 #### 📋 Phase 2.9 開發任務清單 (Development Checklist)
 - [x] **Task 2.9.1 (方案 3)**: 實作 Layer 1 雙階段視窗過濾與防回退面積保護 (`VisionManager+Layer1Vision.swift`)
