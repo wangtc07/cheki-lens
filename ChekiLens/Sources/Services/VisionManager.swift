@@ -172,73 +172,7 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
             return ocrRes
         }
         
-        // --- Layer 1: Custom CoreML AI Model + Native Hybrid (混血演算法) ---
-        if let mlRes = try? await detectVisionCoreML(image: image, imageSize: imageSize) {
-            let area = VisionManager.quadArea(mlRes.corners)
-            let iW = Double(imageSize.width)
-            let iH = Double(imageSize.height)
-            
-            if area >= 0.05 * iW * iH {
-                // ML 已經找到大致範圍，將此範圍擴張 10% 作為高精度收斂的 ROI
-                let xs = mlRes.corners.map { $0.x }
-                let ys = mlRes.corners.map { $0.y }
-                let paddingX = CGFloat(iW * 0.08)
-                let paddingY = CGFloat(iH * 0.08)
-                
-                let minX = max(CGFloat(0), xs.min()! - paddingX)
-                let maxX = min(CGFloat(iW), xs.max()! + paddingX)
-                let minY = max(CGFloat(0), ys.min()! - paddingY)
-                let maxY = min(CGFloat(iH), ys.max()! + paddingY)
-                
-                let roiRect = CGRect(
-                    origin: CGPoint(x: minX, y: minY),
-                    size: CGSize(width: maxX - minX, height: maxY - minY)
-                )
-                
-                // 嘗試在裁切後的 ROI 內使用 Apple Native Vision 進行亞像素級邊緣對齊
-                if let croppedCGImage = image.cropping(to: roiRect) {
-                    let request = VNDetectRectanglesRequest()
-                    request.maximumObservations = 1
-                    request.minimumConfidence = 0.5
-                    request.minimumSize = 0.3
-                    
-                    let handler = VNImageRequestHandler(cgImage: croppedCGImage, options: [:])
-                    try? handler.perform([request])
-                    
-                    if let observation = request.results?.first as? VNRectangleObservation {
-                        let roiW = roiRect.width
-                        let roiH = roiRect.height
-                        
-                        // 將局部座標轉換回整張全圖的實際座標
-                        func convert(_ pt: CGPoint) -> CGPoint {
-                            let localX = pt.x * roiW
-                            let localY = (1.0 - pt.y) * roiH // Vision 原點在左下，需翻轉 Y
-                            return CGPoint(x: localX + roiRect.minX, y: localY + roiRect.minY)
-                        }
-                        
-                        let hybridCorners = [
-                            convert(observation.topLeft),
-                            convert(observation.topRight),
-                            convert(observation.bottomRight),
-                            convert(observation.bottomLeft)
-                        ]
-                        
-                        // 確保最終收斂的形狀比例依然是合理的拍立得比例
-                        if VisionManager.isChekiRatio(hybridCorners) {
-                            // 混血成功！返回由 Native Vision 收斂的超高精度座標
-                            return DetectionResult(corners: hybridCorners, method: .visionNative, confidence: Double(observation.confidence), imageSize: imageSize)
-                        }
-                    }
-                }
-                
-                // 如果 Native 收斂失敗 (例如白邊被嚴重塗鴉或反光破壞)，退回純 ML 預測的結果
-                if VisionManager.isChekiRatio(mlRes.corners) {
-                    return mlRes
-                }
-            }
-        }
-
-        // --- Layer 2: Apple Vision Native ---
+        // --- Layer 1: Apple Vision Native & CIDetector ---
         var vRes: DetectionResult? = nil
         do {
             vRes = try await detectVisionNative(image: image, imageSize: imageSize)

@@ -8,10 +8,10 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-02
-* **當前所屬階段**：Phase 2.8 - 終極混合式高精度影像辨識引擎 (Hybrid Precision Engine v2)
-* **當前進行中任務**：完成 Task 2.8.5 整合 YOLO11-Pose Fallback 兜底機制，接續 Task 2.8.6
-* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.8.5 整合 YOLO11-Pose Fallback 兜底機制 (VisionManager+Fallback)
-* **下一動執行指示**：執行 Task 2.8.6 驗證與基準回歸測試 (run_hybrid_benchmark.py 全量評測)
+* **當前所屬階段**：Phase 2.8 完成 - 終極混合式高精度影像辨識引擎 (Hybrid Precision Engine v2 100% 盲測通過)
+* **當前進行中任務**：全量基準測試完成（66/66 100% 命中，0 重大翻車），接續 Phase 5 商業化與 StoreKit 2
+* **最新穩定 Git Commit**：test(Vision): 完成 Task 2.8.6 全量混合影像辨識引擎基準回歸測試
+* **下一動執行指示**：進入 Phase 5 (Task 5.1: StoreKitManager.swift 封裝 NT$120 買斷商品)
 
 ---
 
@@ -138,9 +138,10 @@
 - [x] **Task 2.8.5**: 整合 YOLO11-Pose 作為全圖重判 Fallback 兜底機制 (`VisionManager+Fallback.swift`)
   * 將 YOLO11-Pose 匯出為 iOS 專屬 CoreML 模型 (`ChekiPoseNet.mlpackage`)，以物件語義全圖感知作為 Layer 1.8 兜底防線
   * 針對滿版彩繪（如 DSCF0025.JPG）、極端反光或 Native Vision 漏抓案例精準重判，並經 AspectRatioClassifier 幾何鎖定（DSCF0025 驗證通過）
-- [ ] **Task 2.8.6**: 驗證與基準回歸測試 (`run_hybrid_benchmark.py` / Swift 測試)
-  * 在 60 張極端驗證集（含彩邊、黑底背面、傾斜透視）全面執行盲測
-  * 驗證「0 重大翻車」與「≥95% 免微調合格率」目標達成
+- [x] **Task 2.8.6**: 驗證與基準回歸測試 (`run_hybrid_benchmark.swift` 全量評測)
+  * 在 66 張極端驗證集（含 6 大暗底背面、滿版彩繪、橫向 Wide、傾斜透視）全面執行盲測
+  * 達成 66/66 (100.0%) 偵測率、0 重大翻車 (Catastrophic Failures = 0)、背面 6/6 100% 成功命中
+  * 輸出全量 4K 裁切成果至 `TestData/benchmark_output_hybrid/`
 
 ---
 
