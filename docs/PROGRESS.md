@@ -8,10 +8,10 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-02
-* **當前所屬階段**：Phase 2.8 完成 - 終極混合式高精度影像辨識引擎 (Hybrid Precision Engine v2 100% 盲測通過)
-* **當前進行中任務**：全量基準測試完成（66/66 100% 命中，0 重大翻車），接續 Phase 5 商業化與 StoreKit 2
+* **當前所屬階段**：Phase 2.9 - 混合辨識引擎精度重構與 11 大瑕疵清零 (分支: `feat/vision-precision-refinement`)
+* **當前進行中任務**：分支已建立，準備依序執行方案 1~4 原子微任務，最後將 11 張問題樣品單獨輸出至 `TestData/benchmark_output_problematic_cases/` 驗證
 * **最新穩定 Git Commit**：test(Vision): 完成 Task 2.8.6 全量混合影像辨識引擎基準回歸測試
-* **下一動執行指示**：進入 Phase 5 (Task 5.1: StoreKitManager.swift 封裝 NT$120 買斷商品)
+* **下一動執行指示**：執行 Task 2.9.1 (Layer 1 雙階段視窗過濾與防回退面積保護)
 
 ---
 
@@ -142,6 +142,30 @@
   * 在 66 張極端驗證集（含 6 大暗底背面、滿版彩繪、橫向 Wide、傾斜透視）全面執行盲測
   * 達成 66/66 (100.0%) 偵測率、0 重大翻車 (Catastrophic Failures = 0)、背面 6/6 100% 成功命中
   * 輸出全量 4K 裁切成果至 `TestData/benchmark_output_hybrid/`
+
+---
+
+### 階段 2.9：混合辨識引擎精度重構與 11 大瑕疵清零 (Phase 2.9: Precision Engine v2.1 Refactor)
+*專項分支：`feat/vision-precision-refinement`*
+*目標：徹底修復用戶抽檢發現之 11 大邊界、回退、誤外彈與關鍵點丟失案例，並將該 11 個案例單獨輸出至獨立資料夾供人工驗收*
+
+#### 📋 Phase 2.9 開發任務清單 (Development Checklist)
+- [ ] **Task 2.9.1 (方案 3)**: 實作 Layer 1 雙階段視窗過濾與防回退面積保護 (`VisionManager+Layer1Vision.swift`)
+  * 第一階段啟用拍立得黃金比例窗（`0.45 ~ 0.95` 直向與 `1.05 ~ 1.85` 橫向），限制 `maximumObservations = 5`，徹底根除 `IMG_7882` 被 20 個碎雜訊塞滿名額問題
+  * 引入面積下限保護（<35% 且長寬比異常時列為可疑），防止 `IMG_3491` 局域截半回退
+- [ ] **Task 2.9.2 (方案 1)**: 實作內外雙輪廓幾何互鎖與外彈反差防護 (`FrameExtrapolator.swift`)
+  * 外緣環狀色彩反差檢查（Outer Ring Contrast Gate）：外緣為黑色時嚴禁外彈，徹底根除 `287136` 外框被二次外彈包入黑底問題
+  * 邊界溢出剛體投影：當底邊切出螢幕時，以完整之內部相片 4 角幾何推導外框，根治 `DSCF0984` 底邊無實體線問題
+  * 修正橫豎下巴方位判定，解決 `DSCF0041 2` 與 `DSCF3696` 邊框分配錯誤
+- [ ] **Task 2.9.3 (方案 2)**: 實作動態正交向量修正與 1D Sobel 梯度邊緣吸附 (`VisionManager+Refinement.swift`)
+  * 降低歪斜觸發門檻至 2.0°，以邊向量長度與平行度取代單純角度比值，徹底消滅 `IMG_1979` 的 TR/BR 互毀誤修 bug
+  * 實作沿法向量之 1D Sobel 梯度邊緣吸附，自動鎖定黑白交界階躍線，校正 `287137`、`DSCF0008`、`IMG_7364` 浮起與偏斜頂點
+- [ ] **Task 2.9.4 (方案 4)**: 實作 YOLO11-Pose 4 關鍵點直接解碼與全局 NMS 約束 (`VisionManager+Fallback.swift`)
+  * 直接解碼 Tensor 通道 5..16 之 4 個 Corner Keypoints（`kpt_x, kpt_y, conf`），徹底捨棄 Bounding Box 中心盲目展開法，完美解決 `IMG_6530` 滿版正面截半
+  * 引入 IoU 0.45 NMS 與全卡面積閥門，防止 `IMG_7882` 誤抓局域桌角
+- [ ] **Task 2.9.5 (驗收)**: 專項瑕疵驗收與全量基準測試 (`scripts/run_hybrid_benchmark.swift`)
+  * 建立專屬輸出資料夾 `TestData/benchmark_output_problematic_cases/`，單獨導出 11 張修復前後對比圖供人工驗收
+  * 全量 66 張驗證集盲測，確認指標與視覺皆優於 `main` 分支後方可發起合併
 
 ---
 
