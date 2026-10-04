@@ -45,7 +45,7 @@ extension VisionManager {
         corners: [CGPoint],
         imageSize: CGSize,
         image: CGImage? = nil,
-        skewThresholdDegrees: Double = 2.0
+        skewThresholdDegrees: Double = 2.3
     ) -> QuadRefinementResult {
         let ordered = VisionManager.orderPoints(corners)
         guard ordered.count == 4 else {

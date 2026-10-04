@@ -7,10 +7,10 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-* **最後更新時間**：2026-10-03
+* **最後更新時間**：2026-10-04
 * **當前所屬階段**：Phase 2.9 - 混合辨識引擎精度重構與 11 大瑕疵清零 (分支: `feat/vision-precision-refinement`)
-* **當前進行中任務**：Task 2.9.4 完成（實作 4 邊直線擬合相交求交點、多輪迭代收斂迴圈、Mini 內框透視短縮窗口放寬與 YOLO 全卡面積/比例評估，徹底修復 287136/DSCF0008/DSCF0041 2/IMG_3491/IMG_7882/IMG_6530，全量 66 張評測 100% 命中，49 張基準樣本 0 飄移，6/6 背面 100% 保持），接續 Task 2.9.5 驗收與 PR 合併
-* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.9.4 直線擬合相交、多輪迭代收斂與 YOLO 全卡錨點解碼
+* **當前進行中任務**：Task 2.9.4.1 完成（專項微調：DSCF0041 2 外彈後直線微調拉正右上角、IMG_3491 透視收斂保護維持左下角真實位置、IMG_6530 實體邊界反差探測對齊左側與右上邊緣，全量 66 張評測 100% 命中，49 張基準樣本 0 飄移，6/6 背面 100% 保持），接續 Task 2.9.5 驗收與 PR 合併
+* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.9.4.1 DSCF0041 2 右上拉昇、IMG_3491 左下保護與 IMG_6530 實體邊緣對齊
 * **下一動執行指示**：執行 Task 2.9.5 (專項瑕疵人工驗收，發起 PR 合併 feat/vision-precision-refinement 至 main 分支)
 
 ---
@@ -168,6 +168,11 @@
   * 實作 1D Sobel 多點梯度直線擬合與相鄰直線幾何求交點（Line-Fitting Consensus Intersection），引入對邊平行約束保護，徹底消除 `287136` 頂邊斜角、`DSCF0008` 右側 167px 歪斜、`IMG_3491` 左側傾斜與 `IMG_7882` 右上角凹陷
   * 放寬直向 Mini 內框長寬比窗口至 1.20~1.385，精準救回 `DSCF0041 2` 內框誤抓並補全 4 邊完整相紙白框（面積由 7.5M 提升至 12.3M px）
   * 升級 YOLO CoreML 錨點評選演算法（面積與規格契合度加權評分），徹底解決 `IMG_6530` 滿版彩繪左側 500px 截半問題，輸出 6.15M px 標準 Mini 直式卡片
+  * 防跑偏審計 100% 通過（66/66 全數命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持）
+- [x] **Task 2.9.4.1 (專項微調)**: 專項邊界反差探測與自然透視保護 (`VisionManager.swift`, `VisionManager+Refinement.swift`, `VisionManager+Fallback.swift`)
+  * `DSCF0041 2`: 於 `FrameExtrapolator` 外彈後串接 `refineQuadrilateral`，自動貼合實體外框邊緣，將右上角頂點向上拉昇 416px 消除歪斜
+  * `IMG_3491`: 調整 `skewThresholdDegrees` 至 2.3°，將 2.03° 自然透視收斂識別為正常透視，杜絕破壞性平行四邊形重投射，完整保留左下角真實位置 (401.8px)
+  * `IMG_6530`: 於 YOLO Fallback 中引入橫向實體邊界探測（Edge Contrast Snapping），自動探測右側與左側明暗階躍邊界，將右上角向左微調 124px，左邊界向左延伸 75px，完美重現滿版彩繪
   * 防跑偏審計 100% 通過（66/66 全數命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持）
 - [ ] **Task 2.9.5 (驗收)**: 專項瑕疵驗收與全量基準測試 (`scripts/run_hybrid_benchmark.swift`)
   * 建立專屬輸出資料夾 `TestData/benchmark_output_problematic_cases/`，單獨導出 11 張修復前後對比圖供人工驗收

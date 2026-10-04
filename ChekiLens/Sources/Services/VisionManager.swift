@@ -232,6 +232,11 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
             let extraRes = FrameExtrapolator.checkAndExtrapolate(corners: best.corners, imageSize: imageSize, image: image)
             if extraRes.isInnerFrame {
                 best.corners = extraRes.extrapolatedCorners
+                // Task 2.9.4.1: 外彈後執行 1D 直線擬合微調，對齊真實外框邊界 (修復 DSCF0041 2 右上頂點下墜)
+                let refRes = VisionManager.refineQuadrilateral(corners: best.corners, imageSize: imageSize, image: image)
+                if refRes.wasRefined {
+                    best.corners = refRes.corners
+                }
                 return best
             } else {
                 // Task 2.9.3: 四邊垂直平行驗證、單點漂移正交推導與 1D Sobel 梯度邊緣吸附
