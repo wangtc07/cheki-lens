@@ -95,15 +95,13 @@ struct HybridBenchmarkRunner {
                     CGImageDestinationFinalize(dest)
                 }
                 
-                // 2. 同步輸出至專屬排錯驗收資料夾 (benchmark_output_problematic_cases)
-                if problemCases.contains(outBase) {
-                    let probPath = "\(probDir)/\(outBase)_fixed.jpg"
-                    let probURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/" + probPath)
-                    if let destProb = CGImageDestinationCreateWithURL(probURL as CFURL, "public.jpeg" as CFString, 1, nil) {
-                        let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.9]
-                        CGImageDestinationAddImage(destProb, cropResult.cgImage, options as CFDictionary)
-                        CGImageDestinationFinalize(destProb)
-                    }
+                // 2. 同步輸出至專屬驗收資料夾 (benchmark_output_problematic_cases)
+                let probPath = "\(probDir)/\(outBase)_fixed.jpg"
+                let probURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/" + probPath)
+                if let destProb = CGImageDestinationCreateWithURL(probURL as CFURL, "public.jpeg" as CFString, 1, nil) {
+                    let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.9]
+                    CGImageDestinationAddImage(destProb, cropResult.cgImage, options as CFDictionary)
+                    CGImageDestinationFinalize(destProb)
                 }
                 
                 successCount += 1
