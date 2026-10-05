@@ -92,12 +92,17 @@ extension VisionManager {
         let deltaW = maxW > 0 ? abs(wTop - wBot) / maxW : 0
         let deltaH = maxH > 0 ? abs(hLeft - hRight) / maxH : 0
         
+        let isPortrait = maxH >= maxW
+        let ratio = isPortrait ? (maxH / max(1.0, maxW)) : (maxW / max(1.0, maxH))
+        // 橫向 Wide 規格 (108mm x 86mm，比例 ~1.26) 具備較大之自然視角透視收斂 (2.5°~3.5°)，放寬門檻以保護其真實物理邊緣
+        let effectiveSkewThreshold = (!isPortrait && ratio <= 1.35) ? 3.5 : skewThresholdDegrees
+        
         let hasOutOfBounds = currentCorners.contains {
             $0.x < 0 || $0.y < 0 || $0.x > imageSize.width || $0.y > imageSize.height
         }
         
-        // 觸發門檻：平行邊歪斜 >= 2.0° 或對應邊長差異 >= 12% 或頂點超出畫面
-        let needsRefine = hSkew >= skewThresholdDegrees || vSkew >= skewThresholdDegrees || deltaW >= 0.12 || deltaH >= 0.12 || hasOutOfBounds
+        // 觸發門檻：平行邊歪斜 >= 門檻或對應邊長差異 >= 12% 或頂點超出畫面
+        let needsRefine = hSkew >= effectiveSkewThreshold || vSkew >= effectiveSkewThreshold || deltaW >= 0.12 || deltaH >= 0.12 || hasOutOfBounds
         
         if needsRefine {
             // 測試 4 個頂點作為異常點之修復候選
@@ -229,8 +234,8 @@ extension VisionManager {
         let bpr = image.bytesPerRow
         let bpp = image.bitsPerPixel / 8
         
-        func lum(x: Int, y: Int) -> Double {
-            guard x >= 0 && x < w && y >= 0 && y < h else { return 0 }
+        func lum(x: Int, y: Int) -> Double? {
+            guard x >= 0 && x < w && y >= 0 && y < h else { return nil }
             let o = y * bpr + x * bpp
             return 0.299 * Double(ptr[o]) + 0.587 * Double(ptr[o+1]) + 0.114 * Double(ptr[o+2])
         }
@@ -242,6 +247,16 @@ extension VisionManager {
         var lines: [Line] = []
         var edgePtsCount: [Int] = []
         var anyEdgeShifted = false
+        
+        // 計算四邊形長寬走向與長寬比，判斷是否為直向卡片
+        let wTop = hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y)
+        let wBot = hypot(corners[2].x - corners[3].x, corners[2].y - corners[3].y)
+        let hLeft = hypot(corners[3].x - corners[0].x, corners[3].y - corners[0].y)
+        let hRight = hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y)
+        let avgW = (wTop + wBot) / 2.0
+        let avgH = (hLeft + hRight) / 2.0
+        let isPortrait = avgH >= avgW
+        let currentRatio = isPortrait ? (avgH / max(1.0, avgW)) : (avgW / max(1.0, avgH))
         
         for i in 0..<4 {
             let p1 = corners[i]
@@ -259,13 +274,16 @@ extension VisionManager {
             let searchIn = 25
             var searchOut = 25
             
-            // 頂邊白邊內陷檢測 (如 IMG_7882 頂邊少抓 200px 白邊)
-            let midX = (p1.x + p2.x) / 2.0
-            let midY = (p1.y + p2.y) / 2.0
-            let midL = lum(x: Int(round(midX)), y: Int(round(midY)))
-            let out30L = lum(x: Int(round(midX + 30.0 * nx)), y: Int(round(midY + 30.0 * ny)))
-            if i == 0 && (midL >= 130.0 || out30L >= 130.0) {
-                searchOut = min(320, Int(Double(min(w, h)) * 0.10))
+            // 頂邊白邊內陷檢測 (僅在直向卡片且長寬比異常偏低時放寬至 320px，例如 IMG_7882 頂邊少抓 200px 白邊)
+            // 橫向卡片或已具備標準 Mini 比例 (>= 1.50) 者嚴格維持 25px，防止越界採樣淺色木紋桌面
+            if i == 0 && isPortrait && currentRatio < 1.50 {
+                let midX = (p1.x + p2.x) / 2.0
+                let midY = (p1.y + p2.y) / 2.0
+                let midL = lum(x: Int(round(midX)), y: Int(round(midY))) ?? 0.0
+                let out30L = lum(x: Int(round(midX + 30.0 * nx)), y: Int(round(midY + 30.0 * ny))) ?? 0.0
+                if midL >= 130.0 || out30L >= 130.0 {
+                    searchOut = min(320, Int(Double(min(w, h)) * 0.10))
+                }
             }
             
             var edgePts: [CGPoint] = []
@@ -281,15 +299,16 @@ extension VisionManager {
                     let inX  = Int(round(sx + Double(d - 4) * nx))
                     let inY  = Int(round(sy + Double(d - 4) * ny))
                     
-                    let lOut = lum(x: outX, y: outY)
-                    let lIn  = lum(x: inX, y: inY)
+                    guard let lOut = lum(x: outX, y: outY),
+                          let lIn  = lum(x: inX, y: inY) else { continue }
                     let g = lIn - lOut
-                    if g > bestG && lIn >= 110.0 && lOut <= 85.0 {
+                    // 階躍邊緣檢測：卡片內部為白邊/淺色 (>= 110.0)，且卡片外側明顯較暗 (階躍差 >= 25.0，或深色底 lOut<=85 時 >= 20.0)
+                    if g > bestG && lIn >= 110.0 && (g >= 25.0 || (lOut <= 85.0 && g >= 20.0)) {
                         bestG = g
                         bestD = Double(d)
                     }
                 }
-                if bestG >= 30.0 {
+                if bestG >= 20.0 {
                     edgePts.append(CGPoint(x: sx + bestD * nx, y: sy + bestD * ny))
                 }
             }

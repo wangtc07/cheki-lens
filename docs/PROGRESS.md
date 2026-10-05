@@ -7,10 +7,10 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-* **最後更新時間**：2026-10-04
+* **最後更新時間**：2026-10-06
 * **當前所屬階段**：Phase 2.9 - 混合辨識引擎精度重構與 11 大瑕疵清零 (分支: `feat/vision-precision-refinement`)
-* **當前進行中任務**：Task 2.9.5 完成（全量 66 張驗證集 100% 盲測命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持，12 大專項瑕疵 4 角精度基準評測完成），接續合併分支 `feat/vision-precision-refinement` 至 `main`
-* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.9.5 專項瑕疵全量驗收與 4 角精度基準評測
+* **當前進行中任務**：Task 2.9.4.2 完成（淺色木紋桌面頂部空白根除、DSCF2190 橫向水準直角鎖定、IMG_1886 Wide 自然透視保護、DSCF0984 右側邊距平衡），全量 66 張驗證集 100% 盲測命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持
+* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.9.4.2 淺色木紋桌面頂部吸附修復、橫向大下巴限制與 Wide 寬版自然透視保護
 * **下一動執行指示**：發起 PR / Git Merge 將 feat/vision-precision-refinement 合併入 main 分支，推進至 Phase 4 UI 整合
 
 ---
@@ -173,6 +173,12 @@
   * `DSCF0041 2`: 於 `FrameExtrapolator` 外彈後串接 `refineQuadrilateral`，自動貼合實體外框邊緣，將右上角頂點向上拉昇 416px 消除歪斜
   * `IMG_3491`: 調整 `skewThresholdDegrees` 至 2.3°，將 2.03° 自然透視收斂識別為正常透視，杜絕破壞性平行四邊形重投射，完整保留左下角真實位置 (401.8px)
   * `IMG_6530`: 於 YOLO Fallback 中引入橫向實體邊界探測（Edge Contrast Snapping），自動探測右側與左側明暗階躍邊界，將右上角向左微調 124px，左邊界向左延伸 75px，完美重現滿版彩繪
+  * 防跑偏審計 100% 通過（66/66 全數命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持）
+- [x] **Task 2.9.4.2 (專項微調 II)**: 淺色桌面階躍差自適應、橫向大下巴限制與 Wide 自然透視保護 (`VisionManager+Refinement.swift`)
+  * `IMG_1908`, `IMG_1921`, `IMG_2142`, `IMG_2279`, `IMG_3902` (淺色木紋桌): 實作越界安全 Luminance 取樣，杜絕 $Y < 0$ 偽造黑底階躍，並將 Sobel 梯度採樣升級為階躍差自適應 ($\Delta I \ge 25.0$)，徹底消除頂邊被誤吸附至 $Y = 0.0$ 的 230px 桌面留白問題
+  * `DSCF2190`: 限制深搜僅在直向且比例異常時啟用 (`isPortrait && currentRatio < 1.50`)，橫向 Mini 嚴格使用 25px 邊緣微調，消除 187px 頂部歪斜，完美還原水平直角卡片
+  * `IMG_1886`: 放寬橫向 Wide 規格自然透視門檻至 3.5° (`!isPortrait && ratio <= 1.35`)，杜絕破壞性平行四邊形重投射，右下角 (BR) 完整保留真實位置 (3671.3px)
+  * `DSCF0984`: 左右兩側邊界擬合微調，右側白邊寬度還原為 174px，左側 196px，對稱平衡
   * 防跑偏審計 100% 通過（66/66 全數命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持）
 - [x] **Task 2.9.5 (驗收)**: 專項瑕疵驗收與全量基準測試 (`scripts/run_hybrid_benchmark.swift`)
   * 建立專屬輸出資料夾 `TestData/benchmark_output_problematic_cases/`，單獨導出 12 張修復圖供人工驗收
