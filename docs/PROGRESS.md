@@ -180,9 +180,10 @@
   * `IMG_1886`: 放寬橫向 Wide 規格自然透視門檻至 3.5° (`!isPortrait && ratio <= 1.35`)，杜絕破壞性平行四邊形重投射，右下角 (BR) 完整保留真實位置 (3671.3px)
   * `DSCF0984`: 左右兩側邊界擬合微調，右側白邊寬度還原為 174px，左側 196px，對稱平衡
   * 防跑偏審計 100% 通過（66/66 全數命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持）
-- [x] **Task 2.9.5 (驗收)**: 專項瑕疵驗收與全量基準測試 (`scripts/run_hybrid_benchmark.swift`)
-  * 建立專屬輸出資料夾 `TestData/benchmark_output_problematic_cases/`，單獨導出 12 張修復圖供人工驗收
+- [x] **Task 2.9.5 (驗收)**: 專項瑕疵驗收、全量基準測試與新舊版本對照導出 (`scripts/run_hybrid_benchmark.swift`, `scripts/export_comparison.swift`)
+  * 建立專屬輸出資料夾 `TestData/benchmark_output_problematic_cases/`，同步導出全量 65 張修復圖供人工驗收
   * 全量 66 張驗證集盲測，確認指標與視覺皆優於 `main` 分支（全量命中 100%，基準 49/49 零漂移，背面 6/6 保持）
+  * 建立新舊版本雙向對照導出工具 (`scripts/export_comparison.swift`)，將當前 Commit 與 `ff7d866` 全量成對導出至 `TestData/benchmark_comparison/`（以 `_current.jpg` 與 `_ff7d866.jpg` 後綴區分）方便使用者逐圖比對
 
 ---
 
