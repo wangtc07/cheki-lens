@@ -386,16 +386,50 @@ final class PreviewDataTests: XCTestCase {
         let container = try ModelContainerProvider.preview(withSampleData: true)
         let context = container.mainContext
 
-        // Assert：應有 2 個團體
+        // Assert：應有 3 個團體（日向坂46、乃木坂46、櫻坂46）
         let groups = try context.fetch(FetchDescriptor<IdolGroup>())
-        XCTAssertEqual(groups.count, 2, "PreviewData 應生成 2 個偶像團體")
+        XCTAssertEqual(groups.count, 3, "PreviewData 應生成 3 個偶像團體")
 
-        // 應有 3 個成員
+        // 應有 6 位成員
         let members = try context.fetch(FetchDescriptor<IdolMember>())
-        XCTAssertEqual(members.count, 3, "PreviewData 應生成 3 位偶像成員")
+        XCTAssertEqual(members.count, 6, "PreviewData 應生成 6 位偶像成員")
 
-        // 應有至少 1 張有 memo 的 ChekiItem
+        // 應有 13 張拍立得（12 張已歸類 + 1 張未分類）
+        let items = try context.fetch(FetchDescriptor<ChekiItem>())
+        XCTAssertEqual(items.count, 13, "PreviewData 應生成 13 張測試拍立得")
+        XCTAssertEqual(items.filter { $0.idolMember == nil }.count, 1, "應包含 1 張未分類拍立得供篩選測試")
+        XCTAssertGreaterThan(items.filter(\.hasBothSides).count, 5, "應包含多張正反雙面拍立得")
+
+        // 應有多條含 #標籤 的備忘錄
         let memos = try context.fetch(FetchDescriptor<ChekiMemo>())
-        XCTAssertGreaterThan(memos.count, 0, "PreviewData 應生成至少 1 條備忘")
+        XCTAssertGreaterThanOrEqual(memos.count, 10, "PreviewData 應生成豐富的活動與對話備忘")
+
+        // 測試 seedIfEmpty 冪等性（重複呼叫不會重複塞入資料）
+        PreviewData.seedIfEmpty(into: context)
+        let itemsAfterReseed = try context.fetch(FetchDescriptor<ChekiItem>())
+        XCTAssertEqual(itemsAfterReseed.count, 13, "seedIfEmpty 在已有資料時不應重複新增")
+    }
+
+    func test_libraryView_matchesSearch() throws {
+        let container = try ModelContainerProvider.preview(withSampleData: true)
+        let context = container.mainContext
+        let items = try context.fetch(FetchDescriptor<ChekiItem>())
+
+        // 搜尋團體名稱
+        let hinataItems = items.filter { LibraryView.matchesSearch(item: $0, query: "日向坂46") }
+        XCTAssertEqual(hinataItems.count, 7, "日向坂46 應有 7 張拍立得")
+
+        // 搜尋成員姓名
+        let hinaItems = items.filter { LibraryView.matchesSearch(item: $0, query: "河田陽菜") }
+        XCTAssertEqual(hinaItems.count, 3, "河田陽菜 應有 3 張拍立得")
+
+        // 搜尋 #標籤
+        let hashtagItems = items.filter { LibraryView.matchesSearch(item: $0, query: "#神對應") }
+        XCTAssertGreaterThanOrEqual(hashtagItems.count, 2, "搜尋 #神對應 應能命中對應備忘錄的拍立得")
+
+        // 搜尋未分類
+        let uncategorized = items.filter { LibraryView.matchesSearch(item: $0, query: "未分類") }
+        XCTAssertEqual(uncategorized.count, 1, "搜尋「未分類」應命中 1 張未歸類拍立得")
     }
 }
+

@@ -8,10 +8,10 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-06
-* **當前所屬階段**：Phase 2.9 圓滿結案並合併回 `main` 分支（準備進入 Phase 4 UI 介面開發）
-* **當前進行中任務**：已完成 `feat/vision-precision-refinement` 合併至 `main`（全量 65 張驗證集 100% 命中，56 張基準樣本 `0.0px` 零偏移，8 大指定瑕疵與背面 6/6 全數完美通過）
-* **最新穩定 Git Commit**：fix(Vision): 嚴格鎖定深色背景 Sobel 門檻確保 56 張基準測試零偏移並修復 DSCF0984 右上中段夾具凹陷
-* **下一動執行指示**：執行 **Task 4.1** 實作「01. ようこそ 歡迎導引輪播」（Apple 條列功能展示與權限引導）
+* **當前所屬階段**：Phase 4 — UI 介面開發（嚴格遵循 Apple HIG 原生 iOS 17/18 SwiftUI 設計規範）
+* **當前進行中任務**：已完成 **Task 4.1**（`OnboardingView.swift` 原生 3 頁導引與權限設定）與 **Task 4.2**（`LibraryView.swift` 原生典藏畫廊，支援全部 / 團體 / 成員三階層 Segmented Control、`.searchable` 關鍵字與 `#標籤` 搜尋、以及 3 團 6 成員 13 張拍立得測試資料集）
+* **最新穩定 Git Commit**：feat(UI): 重新以 Apple 原生 HIG 規範實作 Task 4.1 與 Task 4.2 並擴充測試資料集
+* **下一動執行指示**：執行 **Task 4.3** 實作即時相機掃描視圖（`CameraScannerView.swift`）
 
 ---
 
@@ -196,12 +196,12 @@
 ---
 
 ### 階段 4：UI 介面開發 (Phase 4: SwiftUI Views - iOS 18 HIG)
-*參考來源：`docs/ui/` 內 7 個高保真畫面*
-- [ ] **Task 4.1**: 實作「01. ようこそ 歡迎導引輪播」（Apple 條列功能展示與權限引導）
-- [ ] **Task 4.2**: 實作「02. アルバム 典藏首頁」
-  * 頂部導覽列與分段控制（全部 / 團體 / 成員）
-  * 雙欄圓角大卡片網格與標籤
-  * 底部 iOS 18 浮動導覽膠囊 (`[ライブラリ | コレクション]`) ＋ 圓形搜尋鈕
+*參考來源：`docs/ui/` 僅作功能架構參考，實作嚴格遵循 Apple HIG 原生 SwiftUI 設計規範*
+- [x] **Task 4.1**: 實作「01. 歡迎導引輪播 (`OnboardingView.swift`)」（Apple 標準功能展示、3D 翻轉與 86×54 正位互動展示、相簿與相機權限引導）
+- [x] **Task 4.2**: 實作「02. 典藏首頁 (`LibraryView.swift`)」
+  * 原生 `NavigationStack`、`.searchable` 搜尋列與 Segmented `Picker`（全部 / 團體 / 成員）
+  * 雙欄圓角拍立得卡片網格（`LazyVGrid`）、成員篩選膠囊列、團體與成員鑽取檢視
+  * 擴充 `PreviewData` 測試資料集（3 個團體、6 位成員、13 張含正反雙面與未分類之拍立得、備忘錄與 `#標籤`）
 - [ ] **Task 4.3**: 實作「03. カメラ 即時相機掃描」
   * AVFoundation 相機預覽流
   * 3×3 九宮格 ＋ 綠色拍立得虛線追蹤框

@@ -7,25 +7,8 @@ import SwiftData
 @main
 struct ChekiLensApp: App {
 
-    /// 共用 ModelContainer，於 App 層注入整個視圖樹
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            ChekiItem.self,
-            IdolGroup.self,
-            IdolMember.self,
-            ChekiMemo.self
-        ])
-        let modelConfiguration = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: false,
-            allowsSave: true
-        )
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("❌ 無法建立 ModelContainer：\(error)")
-        }
-    }()
+    /// 共用 ModelContainer，於 App 層注入整個視圖樹（DEBUG 模式下若資料庫為空會自動載入範例測試資料）
+    var sharedModelContainer: ModelContainer = ModelContainerProvider.live
 
     var body: some Scene {
         WindowGroup {
