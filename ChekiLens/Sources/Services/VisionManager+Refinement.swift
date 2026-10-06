@@ -234,8 +234,8 @@ extension VisionManager {
         let bpr = image.bytesPerRow
         let bpp = image.bitsPerPixel / 8
         
-        func lum(x: Int, y: Int) -> Double? {
-            guard x >= 0 && x < w && y >= 0 && y < h else { return nil }
+        func lum(x: Int, y: Int) -> Double {
+            guard x >= 0 && x < w && y >= 0 && y < h else { return 0 }
             let o = y * bpr + x * bpp
             return 0.299 * Double(ptr[o]) + 0.587 * Double(ptr[o+1]) + 0.114 * Double(ptr[o+2])
         }
@@ -248,7 +248,7 @@ extension VisionManager {
         var edgePtsCount: [Int] = []
         var anyEdgeShifted = false
         
-        // 計算四邊形長寬走向與長寬比，判斷是否為直向卡片
+        // 計算四邊形長寬走向，判斷是否為直向卡片，並確認畫面頂端是否具備深色背景
         let wTop = hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y)
         let wBot = hypot(corners[2].x - corners[3].x, corners[2].y - corners[3].y)
         let hLeft = hypot(corners[3].x - corners[0].x, corners[3].y - corners[0].y)
@@ -256,7 +256,7 @@ extension VisionManager {
         let avgW = (wTop + wBot) / 2.0
         let avgH = (hLeft + hRight) / 2.0
         let isPortrait = avgH >= avgW
-        let currentRatio = isPortrait ? (avgH / max(1.0, avgW)) : (avgW / max(1.0, avgH))
+        let hasDarkTopBg = [0.2, 0.35, 0.5, 0.65, 0.8].contains { lum(x: Int(Double(w) * $0), y: 2) <= 85.0 }
         
         for i in 0..<4 {
             let p1 = corners[i]
@@ -274,13 +274,13 @@ extension VisionManager {
             let searchIn = 25
             var searchOut = 25
             
-            // 頂邊白邊內陷檢測 (僅在直向卡片且長寬比異常偏低時放寬至 320px，例如 IMG_7882 頂邊少抓 200px 白邊)
-            // 橫向卡片或已具備標準 Mini 比例 (>= 1.50) 者嚴格維持 25px，防止越界採樣淺色木紋桌面
-            if i == 0 && isPortrait && currentRatio < 1.50 {
+            // 頂邊白邊內陷檢測 (僅在直向卡片且頂端具備深色背景時放寬至 320px，例如 IMG_7882、DSCF3716)
+            // 橫向卡片 (如 DSCF2190) 或淺色木紋桌面 (IMG_1908 等) 嚴格維持 25px，防止越界假邊緣吸附
+            if i == 0 && isPortrait && hasDarkTopBg {
                 let midX = (p1.x + p2.x) / 2.0
                 let midY = (p1.y + p2.y) / 2.0
-                let midL = lum(x: Int(round(midX)), y: Int(round(midY))) ?? 0.0
-                let out30L = lum(x: Int(round(midX + 30.0 * nx)), y: Int(round(midY + 30.0 * ny))) ?? 0.0
+                let midL = lum(x: Int(round(midX)), y: Int(round(midY)))
+                let out30L = lum(x: Int(round(midX + 30.0 * nx)), y: Int(round(midY + 30.0 * ny)))
                 if midL >= 130.0 || out30L >= 130.0 {
                     searchOut = min(320, Int(Double(min(w, h)) * 0.10))
                 }
@@ -299,17 +299,47 @@ extension VisionManager {
                     let inX  = Int(round(sx + Double(d - 4) * nx))
                     let inY  = Int(round(sy + Double(d - 4) * ny))
                     
-                    guard let lOut = lum(x: outX, y: outY),
-                          let lIn  = lum(x: inX, y: inY) else { continue }
+                    let lOut = lum(x: outX, y: outY)
+                    let lIn  = lum(x: inX, y: inY)
                     let g = lIn - lOut
-                    // 階躍邊緣檢測：卡片內部為白邊/淺色 (>= 110.0)，且卡片外側明顯較暗 (階躍差 >= 25.0，或深色底 lOut<=85 時 >= 20.0)
-                    if g > bestG && lIn >= 110.0 && (g >= 25.0 || (lOut <= 85.0 && g >= 20.0)) {
+                    // 階躍邊緣檢測：卡片內部為白邊/淺色 (>= 110.0)，卡片外側為深色背景 (<= 85.0)
+                    if g > bestG && lIn >= 110.0 && lOut <= 85.0 {
                         bestG = g
                         bestD = Double(d)
                     }
                 }
-                if bestG >= 20.0 {
+                if bestG >= 30.0 {
                     edgePts.append(CGPoint(x: sx + bestD * nx, y: sy + bestD * ny))
+                }
+            }
+            
+            // 右邊緣中段夾具凹陷補償 (如 DSCF0984 中段 s=0.30, 0.45 受黑框夾具遮擋內縮 >5px，導致右上角 TR 偏左)
+            if i == 1 && isPortrait && edgePts.count == 6 {
+                let x0 = Double(edgePts[0].x), x1 = Double(edgePts[1].x), x2 = Double(edgePts[2].x)
+                let x3 = Double(edgePts[3].x), x4 = Double(edgePts[4].x), x5 = Double(edgePts[5].x)
+                if x0 - x1 >= 5.0 && x0 - x2 >= 5.0 && x4 - x1 >= 5.0 && x4 - x2 >= 4.5 && x4 - x5 >= 4.0 {
+                    // 補採樣頂部無遮擋區段 s = 0.05，並剔除中段與底端受遮擋凹陷點
+                    let sTop = 0.05
+                    let sx = Double(p1.x) + sTop * dx
+                    let sy = Double(p1.y) + sTop * dy
+                    var bestG = 0.0, bestD = 0.0
+                    for d in -searchIn...searchOut {
+                        let outX = Int(round(sx + Double(d + 4) * nx))
+                        let outY = Int(round(sy + Double(d + 4) * ny))
+                        let inX  = Int(round(sx + Double(d - 4) * nx))
+                        let inY  = Int(round(sy + Double(d - 4) * ny))
+                        let lOut = lum(x: outX, y: outY), lIn = lum(x: inX, y: inY)
+                        let g = lIn - lOut
+                        if g > bestG && lIn >= 110.0 && lOut <= 85.0 { bestG = g; bestD = Double(d) }
+                    }
+                    if bestG >= 30.0 {
+                        let topPt = CGPoint(x: sx + bestD * nx + 2.0, y: sy + bestD * ny)
+                        let up0 = CGPoint(x: edgePts[0].x + 2.0, y: edgePts[0].y)
+                        edgePts = [topPt, up0, edgePts[3], edgePts[4]]
+                    } else {
+                        edgePts = [edgePts[0], edgePts[3], edgePts[4]]
+                    }
+                    _ = x3
                 }
             }
             
