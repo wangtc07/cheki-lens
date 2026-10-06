@@ -8,10 +8,10 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-06
-* **當前所屬階段**：Phase 2.9 - 混合辨識引擎精度重構與 11 大瑕疵清零 (分支: `feat/vision-precision-refinement`)
-* **當前進行中任務**：Task 2.9.4.2 完成（淺色木紋桌面頂部空白根除、DSCF2190 橫向水準直角鎖定、IMG_1886 Wide 自然透視保護、DSCF0984 右側邊距平衡），全量 66 張驗證集 100% 盲測命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持
-* **最新穩定 Git Commit**：feat(Vision): 完成 Task 2.9.4.2 淺色木紋桌面頂部吸附修復、橫向大下巴限制與 Wide 寬版自然透視保護
-* **下一動執行指示**：發起 PR / Git Merge 將 feat/vision-precision-refinement 合併入 main 分支，推進至 Phase 4 UI 整合
+* **當前所屬階段**：Phase 2.9 圓滿結案並合併回 `main` 分支（準備進入 Phase 4 UI 介面開發）
+* **當前進行中任務**：已完成 `feat/vision-precision-refinement` 合併至 `main`（全量 65 張驗證集 100% 命中，56 張基準樣本 `0.0px` 零偏移，8 大指定瑕疵與背面 6/6 全數完美通過）
+* **最新穩定 Git Commit**：fix(Vision): 嚴格鎖定深色背景 Sobel 門檻確保 56 張基準測試零偏移並修復 DSCF0984 右上中段夾具凹陷
+* **下一動執行指示**：執行 **Task 4.1** 實作「01. ようこそ 歡迎導引輪播」（Apple 條列功能展示與權限引導）
 
 ---
 
