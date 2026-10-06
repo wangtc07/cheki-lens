@@ -397,6 +397,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "需要使用相機拍攝拍立得照片，並進行即時邊框偵測與正位裁切。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "需要寫入權限將處理好的拍立得與原圖存入您的專屬相簿中。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "需要存取相簿以匯入拍立得照片進行掃描與辨識。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -430,6 +431,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "需要使用相機拍攝拍立得照片，並進行即時邊框偵測與正位裁切。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "需要寫入權限將處理好的拍立得與原圖存入您的專屬相簿中。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "需要存取相簿以匯入拍立得照片進行掃描與辨識。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

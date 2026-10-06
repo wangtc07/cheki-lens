@@ -38,6 +38,7 @@ struct LibraryView: View {
 
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
+    @State private var showingCameraScanner: Bool = false
 
     // 排序與篩選
     @State private var sortAscending: Bool = false
@@ -149,6 +150,9 @@ struct LibraryView: View {
             .sheet(isPresented: $showingSettingsSheet) {
                 SettingsView()
             }
+            .fullScreenCover(isPresented: $showingCameraScanner) {
+                CameraScannerView()
+            }
             .overlay {
                 if isProcessing {
                     processingOverlay
@@ -193,6 +197,17 @@ struct LibraryView: View {
                     .frame(height: 36)
                     .background(.ultraThinMaterial, in: Capsule())
                 } else {
+                    Button {
+                        showingCameraScanner = true
+                    } label: {
+                        Image(systemName: "camera.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("開啟相機拍攝拍立得")
+
                     PhotosPicker(
                         selection: $selectedPhotos,
                         maxSelectionCount: 50,
@@ -1010,6 +1025,7 @@ struct AlbumHeroDetailView: View {
     @State private var selectedItemIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm: Bool = false
     @State private var showingSettingsSheet: Bool = false
+    @State private var showingCameraScanner: Bool = false
 
     @State private var sortAscending: Bool = false
     @State private var filterDualSideOnly: Bool = false
@@ -1042,7 +1058,7 @@ struct AlbumHeroDetailView: View {
                     ContentUnavailableView {
                         Label("尚無拍立得項目", systemImage: "photo.on.rectangle")
                     } description: {
-                        Text("點擊右上角「⋯」匯入拍立得至此相冊。")
+                        Text("點擊右上角「⋯」匯入或拍攝拍立得至此相冊。")
                     }
                     .padding(.vertical, 48)
                 } else {
@@ -1065,6 +1081,12 @@ struct AlbumHeroDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 10) {
                     Menu {
+                        Button {
+                            showingCameraScanner = true
+                        } label: {
+                            Label("使用相機拍攝至此相冊", systemImage: "camera")
+                        }
+
                         PhotosPicker(
                             selection: $selectedPhotos,
                             maxSelectionCount: 50,
@@ -1185,6 +1207,9 @@ struct AlbumHeroDetailView: View {
         }
         .sheet(isPresented: $showingSettingsSheet) {
             SettingsView()
+        }
+        .fullScreenCover(isPresented: $showingCameraScanner) {
+            CameraScannerView(defaultMember: defaultMember)
         }
         .overlay {
             if isProcessing {
