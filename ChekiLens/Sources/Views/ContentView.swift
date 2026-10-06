@@ -1,22 +1,32 @@
 import SwiftUI
 import SwiftData
 
-/// App 根視圖 — 根據 onboarding 狀態決定顯示哪個畫面
+/// 主畫面底部分頁列舉（仿照 Apple 原生相簿：左側「全部 / 相冊」切換，右側「搜尋」按鈕）
+enum MainLibraryTab: Hashable {
+    case allPhotos
+    case albums
+    case search
+}
+
+/// App 根視圖 — 根據 onboarding 狀態決定顯示導引或主畫面
 struct ContentView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @State private var selectedTab: MainLibraryTab = .allPhotos
 
     var body: some View {
         if hasCompletedOnboarding {
-            // 主畫面：TabView (iOS 官方底部分頁導覽)
-            TabView {
-                LibraryView()
-                    .tabItem {
-                        Label("典藏", systemImage: "photo.stack")
-                    }
-                SettingsView()
-                    .tabItem {
-                        Label("設定", systemImage: "gearshape")
-                    }
+            TabView(selection: $selectedTab) {
+                Tab("全部", systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
+                    LibraryView()
+                }
+
+                Tab("相冊", systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
+                    AlbumsRootView()
+                }
+
+                Tab("搜尋", systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
+                    LibrarySearchView()
+                }
             }
         } else {
             OnboardingView()
@@ -25,8 +35,6 @@ struct ContentView: View {
 }
 
 #Preview {
-    let config = ModelConfiguration(isStoredInMemoryOnly: true)
-    let container = try! ModelContainer(for: ChekiItem.self, configurations: config)
     ContentView()
-        .modelContainer(container)
+        .modelContainer(try! ModelContainerProvider.preview(withSampleData: true))
 }

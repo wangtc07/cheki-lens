@@ -404,6 +404,41 @@ enum PreviewData {
                 options: []
             )
         }
+
+        if !isBackside {
+            // 繪製柔和散景光斑與人物剪影，使相冊封面與 Hero 大圖更具辨識度
+            context.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.16)
+            context.fillEllipse(in: CGRect(
+                x: photoRect.minX + photoRect.width * 0.62,
+                y: photoRect.minY + photoRect.height * 0.68,
+                width: photoRect.width * 0.32,
+                height: photoRect.width * 0.32
+            ))
+            context.fillEllipse(in: CGRect(
+                x: photoRect.minX + photoRect.width * 0.10,
+                y: photoRect.minY + photoRect.height * 0.52,
+                width: photoRect.width * 0.22,
+                height: photoRect.width * 0.22
+            ))
+
+            // 偶像半身輪廓裝飾
+            context.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.26)
+            let headDiameter = photoRect.width * 0.34
+            context.fillEllipse(in: CGRect(
+                x: photoRect.midX - headDiameter / 2,
+                y: photoRect.minY + photoRect.height * 0.42,
+                width: headDiameter,
+                height: headDiameter
+            ))
+            let shouldersWidth = photoRect.width * 0.68
+            let shouldersHeight = photoRect.height * 0.44
+            context.fillEllipse(in: CGRect(
+                x: photoRect.midX - shouldersWidth / 2,
+                y: photoRect.minY - shouldersHeight * 0.22,
+                width: shouldersWidth,
+                height: shouldersHeight
+            ))
+        }
         context.restoreGState()
 
         // 3. 在下方下巴模擬手寫簽名/日期色塊線條

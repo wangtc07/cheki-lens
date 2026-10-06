@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - SettingsView (Task 4.7)
 /// 設定頁面 — 使用 iOS 官方 Inset Grouped List
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     var body: some View {
@@ -17,6 +18,7 @@ struct SettingsView: View {
 
                 Section {
                     Button("重新顯示導引頁面") {
+                        dismiss()
                         hasCompletedOnboarding = false
                     }
                 }
@@ -28,6 +30,15 @@ struct SettingsView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("設定")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") {
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
         }
     }
 }

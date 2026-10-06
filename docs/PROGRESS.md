@@ -196,11 +196,12 @@
 ---
 
 ### 階段 4：UI 介面開發 (Phase 4: SwiftUI Views - iOS 18 HIG)
-*參考來源：`docs/ui/` 僅作功能架構參考，實作嚴格遵循 Apple HIG 原生 SwiftUI 設計規範*
+*參考來源：`docs/ui/` 僅作功能架構參考，實作嚴格遵循 Apple HIG 原生 SwiftUI 與 Apple 相簿設計規範*
 - [x] **Task 4.1**: 實作「01. 歡迎導引輪播 (`OnboardingView.swift`)」（Apple 標準功能展示、3D 翻轉與 86×54 正位互動展示、相簿與相機權限引導）
-- [x] **Task 4.2**: 實作「02. 典藏首頁 (`LibraryView.swift`)」
-  * 原生 `NavigationStack`、`.searchable` 搜尋列與 Segmented `Picker`（全部 / 團體 / 成員）
-  * 雙欄圓角拍立得卡片網格（`LazyVGrid`）、成員篩選膠囊列、團體與成員鑽取檢視
+- [x] **Task 4.2**: 實作「02. 典藏與相冊首頁 (`LibraryView.swift` / `ContentView.swift`)」
+  * 底部導覽列比照 Apple 原生相簿：左側膠囊切換「全部 / 相冊」，右側獨立圓形「搜尋 (`Tab(role: .search)`)」按鈕，「設定」收納至右上角 `⋯` 選單
+  * 「相冊」採用 Apple 相簿 1:1 圓角滿版封面磚（左下角白字疊加標題），頂部保留「團體 | 成員」分段控制（移除下方個人數字膠囊列）
+  * 基本相簿構造為 `團體 > 成員`，切換頂部「成員」可無視團體階層直接展開全部成員；點開相冊後呈現全幅 Hero 封面 + 緊密縮圖網格
   * 擴充 `PreviewData` 測試資料集（3 個團體、6 位成員、13 張含正反雙面與未分類之拍立得、備忘錄與 `#標籤`）
 - [ ] **Task 4.3**: 實作「03. カメラ 即時相機掃描」
   * AVFoundation 相機預覽流
