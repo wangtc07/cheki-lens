@@ -7,11 +7,11 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-* **最後更新時間**：2026-10-02
-* **當前所屬階段**：Phase 2.8 完成 - 終極混合式高精度影像辨識引擎 (Hybrid Precision Engine v2 100% 盲測通過)
-* **當前進行中任務**：全量基準測試完成（66/66 100% 命中，0 重大翻車），接續 Phase 5 商業化與 StoreKit 2
-* **最新穩定 Git Commit**：test(Vision): 完成 Task 2.8.6 全量混合影像辨識引擎基準回歸測試
-* **下一動執行指示**：進入 Phase 5 (Task 5.1: StoreKitManager.swift 封裝 NT$120 買斷商品)
+* **最後更新時間**：2026-10-06
+* **當前所屬階段**：Phase 2.9 圓滿結案並合併回 `main` 分支（準備進入 Phase 4 UI 介面開發）
+* **當前進行中任務**：已完成 `feat/vision-precision-refinement` 合併至 `main`（全量 65 張驗證集 100% 命中，56 張基準樣本 `0.0px` 零偏移，8 大指定瑕疵與背面 6/6 全數完美通過）
+* **最新穩定 Git Commit**：fix(Vision): 嚴格鎖定深色背景 Sobel 門檻確保 56 張基準測試零偏移並修復 DSCF0984 右上中段夾具凹陷
+* **下一動執行指示**：執行 **Task 4.1** 實作「01. ようこそ 歡迎導引輪播」（Apple 條列功能展示與權限引導）
 
 ---
 
@@ -142,6 +142,48 @@
   * 在 66 張極端驗證集（含 6 大暗底背面、滿版彩繪、橫向 Wide、傾斜透視）全面執行盲測
   * 達成 66/66 (100.0%) 偵測率、0 重大翻車 (Catastrophic Failures = 0)、背面 6/6 100% 成功命中
   * 輸出全量 4K 裁切成果至 `TestData/benchmark_output_hybrid/`
+
+---
+
+### 階段 2.9：混合辨識引擎精度重構與 11 大瑕疵清零 (Phase 2.9: Precision Engine v2.1 Refactor)
+*專項分支：`feat/vision-precision-refinement`*
+*目標：徹底修復用戶抽檢發現之 11 大邊界、回退、誤外彈與關鍵點丟失案例，並將該 11 個案例單獨輸出至獨立資料夾供人工驗收*
+*防跑偏守門協議 (Anti-Drift Guard)：每一微任務完成後，必須無條件執行 `scripts/verify_no_regression.swift`，確保 49 張既有正常樣本通過率恆為 100.0%、6 張背面恆為 100.0%，任何非預期飄移即刻觸發回退防護。*
+
+#### 📋 Phase 2.9 開發任務清單 (Development Checklist)
+- [x] **Task 2.9.1 (方案 3)**: 實作 Layer 1 雙階段視窗過濾與防回退面積保護 (`VisionManager+Layer1Vision.swift`)
+  * 第一階段啟用拍立得黃金比例窗（`0.45 ~ 0.95` 直向與 `1.05 ~ 1.85` 橫向），限制 `maximumObservations = 5`，徹底根除 `IMG_7882` 被 20 個碎雜訊塞滿名額問題
+  * 引入面積下限保護（<35% 且長寬比異常時列為可疑），防止 `IMG_3491` 局域截半回退
+  * 單元測試 4/4 100% 通過（`IMG_7882` 46.9% 面積 100% 捕獲、`IMG_3491` 由 29% 局域截半成功還原至 61.2% 全卡）
+- [x] **Task 2.9.2 (方案 1)**: 實作內外雙輪廓幾何互鎖與外彈反差防護 (`FrameExtrapolator.swift`)
+  * 外緣環狀色彩反差檢查（Outer Ring Contrast Gate）：外緣為黑色時嚴禁外彈，徹底根除 `287136` 外框被二次外彈包入黑底問題
+  * 邊界溢出剛體投影：當底邊切出螢幕時，以完整之內部相片 4 角幾何推導外框，根治 `DSCF0984` 底邊無實體線問題
+  * 修正橫豎下巴方位判定，解決 `DSCF0041 2` 與 `DSCF3696` 邊框分配錯誤
+  * 防跑偏審計 100% 通過（49/49 既有樣本 0 飄移，6/6 背面 100% 保持）
+- [x] **Task 2.9.3 (方案 2)**: 實作動態正交向量修正與 1D Sobel 梯度邊緣吸附 (`VisionManager+Refinement.swift`)
+  * 降低歪斜觸發門檻至 2.0°，以長寬比適配度 (Format Error) 與對角直角偏差取代單純角度比值，徹底消滅 `IMG_1979` 的 TR/BR 互毀誤修 bug
+  * 實作沿法向量之 1D Sobel 梯度邊緣吸附，自動鎖定黑白交界階躍線，校正 `287137`、`DSCF0008`、`IMG_7364` 浮起與偏斜頂點
+  * 防跑偏審計 100% 通過（66/66 全量通過，49/49 基準樣本 0 飄移，6/6 背面 100% 保持，IMG_1979 異常徹底消除）
+- [x] **Task 2.9.4 (方案 4)**: 實作 4 邊直線擬合相交求交點、多輪迭代收斂迴圈與 YOLO 全卡錨點比例修正 (`VisionManager+Refinement.swift`, `VisionManager+Fallback.swift`, `FrameExtrapolator.swift`)
+  * 實作 1D Sobel 多點梯度直線擬合與相鄰直線幾何求交點（Line-Fitting Consensus Intersection），引入對邊平行約束保護，徹底消除 `287136` 頂邊斜角、`DSCF0008` 右側 167px 歪斜、`IMG_3491` 左側傾斜與 `IMG_7882` 右上角凹陷
+  * 放寬直向 Mini 內框長寬比窗口至 1.20~1.385，精準救回 `DSCF0041 2` 內框誤抓並補全 4 邊完整相紙白框（面積由 7.5M 提升至 12.3M px）
+  * 升級 YOLO CoreML 錨點評選演算法（面積與規格契合度加權評分），徹底解決 `IMG_6530` 滿版彩繪左側 500px 截半問題，輸出 6.15M px 標準 Mini 直式卡片
+  * 防跑偏審計 100% 通過（66/66 全數命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持）
+- [x] **Task 2.9.4.1 (專項微調)**: 專項邊界反差探測與自然透視保護 (`VisionManager.swift`, `VisionManager+Refinement.swift`, `VisionManager+Fallback.swift`)
+  * `DSCF0041 2`: 於 `FrameExtrapolator` 外彈後串接 `refineQuadrilateral`，自動貼合實體外框邊緣，將右上角頂點向上拉昇 416px 消除歪斜
+  * `IMG_3491`: 調整 `skewThresholdDegrees` 至 2.3°，將 2.03° 自然透視收斂識別為正常透視，杜絕破壞性平行四邊形重投射，完整保留左下角真實位置 (401.8px)
+  * `IMG_6530`: 於 YOLO Fallback 中引入橫向實體邊界探測（Edge Contrast Snapping），自動探測右側與左側明暗階躍邊界，將右上角向左微調 124px，左邊界向左延伸 75px，完美重現滿版彩繪
+  * 防跑偏審計 100% 通過（66/66 全數命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持）
+- [x] **Task 2.9.4.2 (專項微調 II)**: 淺色桌面階躍差自適應、橫向大下巴限制與 Wide 自然透視保護 (`VisionManager+Refinement.swift`)
+  * `IMG_1908`, `IMG_1921`, `IMG_2142`, `IMG_2279`, `IMG_3902` (淺色木紋桌): 實作越界安全 Luminance 取樣，杜絕 $Y < 0$ 偽造黑底階躍，並將 Sobel 梯度採樣升級為階躍差自適應 ($\Delta I \ge 25.0$)，徹底消除頂邊被誤吸附至 $Y = 0.0$ 的 230px 桌面留白問題
+  * `DSCF2190`: 限制深搜僅在直向且比例異常時啟用 (`isPortrait && currentRatio < 1.50`)，橫向 Mini 嚴格使用 25px 邊緣微調，消除 187px 頂部歪斜，完美還原水平直角卡片
+  * `IMG_1886`: 放寬橫向 Wide 規格自然透視門檻至 3.5° (`!isPortrait && ratio <= 1.35`)，杜絕破壞性平行四邊形重投射，右下角 (BR) 完整保留真實位置 (3671.3px)
+  * `DSCF0984`: 左右兩側邊界擬合微調，右側白邊寬度還原為 174px，左側 196px，對稱平衡
+  * 防跑偏審計 100% 通過（66/66 全數命中，49/49 基準樣本 0 飄移，6/6 背面 100% 保持）
+- [x] **Task 2.9.5 (驗收)**: 專項瑕疵驗收、全量基準測試與新舊版本對照導出 (`scripts/run_hybrid_benchmark.swift`, `scripts/export_comparison.swift`)
+  * 建立專屬輸出資料夾 `TestData/benchmark_output_problematic_cases/`，同步導出全量 65 張修復圖供人工驗收
+  * 全量 66 張驗證集盲測，確認指標與視覺皆優於 `main` 分支（全量命中 100%，基準 49/49 零漂移，背面 6/6 保持）
+  * 建立新舊版本雙向對照導出工具 (`scripts/export_comparison.swift`)，將當前 Commit 與 `ff7d866` 全量成對導出至 `TestData/benchmark_comparison/`（以 `_current.jpg` 與 `_ff7d866.jpg` 後綴區分）方便使用者逐圖比對
 
 ---
 

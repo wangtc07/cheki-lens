@@ -7,14 +7,17 @@ import Vision
 
 extension VisionManager {
 
-    // MARK: - Vision Native Detection
+    // MARK: - Vision Native Detection (Two-Pass Query & Anti-Regression Scoring)
 
-    /// 第一層偵測：Apple Vision ML 矩形識別
+    /// 第一層偵測：Apple Vision ML 矩形識別 (Task 2.9.1 雙階段過濾升級)
     ///
-    /// 對應 Python `find_cheki_quad_vision()`：
-    /// - minAspectRatio/maxAspectRatio 設為寬鬆範圍，由自訂邏輯過濾拍立得比例
-    /// - 取所有候選中「符合拍立得比例 + 面積最大」的矩形
-    /// - Vision 座標系：原點左下角 (y 軸向上) → 需要翻轉 y
+    /// 升級策略：
+    /// 1. Pass 1 (黃金比例窗)：設定 minimumAspectRatio = 0.45, maximumAspectRatio = 1.00,
+    ///    minimumSize = 0.15, maximumObservations = 5，精確鎖定標準直式拍立得 (Mini 0.628, Square 0.837, Wide 0.796)，
+    ///    徹底消除 IMG_7882 被 20 個碎雜訊文字條擠爆緩衝區的問題。
+    /// 2. Pass 2 (廣角/橫向窗備援)：若 Pass 1 無候選，放寬至 minimumAspectRatio = 0.20 支援極端橫向或視角透視變形。
+    /// 3. 規格吻合度與面積加權評分 (Score = Area * FormatMatch * Confidence)：
+    ///    優先挑選與拍立得真實規格 (Mini/Square/Wide) 契合且面積最大者，杜絕 IMG_3491 誤抓 29% 局域反光導致截半之回退。
     func detectVisionNative(
         image: CGImage,
         imageSize: CGSize
@@ -22,23 +25,39 @@ extension VisionManager {
         let imgW = Double(imageSize.width)
         let imgH = Double(imageSize.height)
 
-        // Vision request 設定（與 Python 版參數一致）
-        let request = VNDetectRectanglesRequest()
-        request.minimumAspectRatio = 0.10   // 寬鬆，讓所有候選進來再自己過濾
-        request.maximumAspectRatio = 0.99
-        request.minimumSize        = 0.01   // 最小面積（相對於圖片）
-        request.maximumObservations = 20    // 取最多 20 個候選
-        request.minimumConfidence  = 0.1
-
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
-        try handler.perform([request])
 
-        guard let observations = request.results, !observations.isEmpty else {
+        // Pass 1: 拍立得標準黃金比例窗聚焦搜尋
+        let req1 = VNDetectRectanglesRequest()
+        req1.minimumAspectRatio = 0.45
+        req1.maximumAspectRatio = 1.00
+        req1.minimumSize        = 0.15   // 排除佔比小於 15% 的零碎文字雜訊條
+        req1.maximumObservations = 5     // 僅取前 5 大顯著矩形
+        req1.minimumConfidence  = 0.25
+
+        try handler.perform([req1])
+
+        var observations = req1.results ?? []
+
+        // Pass 2: 若黃金比例窗未命中，啟動廣角與橫向寬鬆搜尋
+        if observations.isEmpty {
+            let req2 = VNDetectRectanglesRequest()
+            req2.minimumAspectRatio = 0.20
+            req2.maximumAspectRatio = 1.00
+            req2.minimumSize        = 0.05
+            req2.maximumObservations = 10
+            req2.minimumConfidence  = 0.15
+
+            try handler.perform([req2])
+            observations = req2.results ?? []
+        }
+
+        guard !observations.isEmpty else {
             throw VisionError.detectionFailed
         }
 
-        // 篩選：拍立得比例有效 + 最大面積優先
-        var best: (corners: [CGPoint], area: Double, confidence: Double)?
+        // 綜合評分篩選：面積佔比 * 規格吻合度 * 信心度
+        var best: (corners: [CGPoint], area: Double, confidence: Double, score: Double)?
 
         for obs in observations {
             // Vision 座標系：正規化 [0,1]，原點左下 → 翻轉 y
@@ -54,12 +73,25 @@ extension VisionManager {
             // 面積過濾：至少佔圖片 3%
             guard area >= 0.03 * imgW * imgH else { continue }
 
-            // 比例過濾
+            // 拍立得比例範圍驗證
             guard VisionManager.isChekiRatio(pts) else { continue }
 
+            let ratio = VisionManager.quadAspectRatio(pts)
+
+            // 與三大工業標準拍立得長短邊比例 (Mini 1.593, Square 1.194, Wide 1.256) 的最小距離
+            let miniDist = abs(ratio - (86.0 / 54.0))
+            let squareDist = abs(ratio - (86.0 / 72.0))
+            let wideDist = abs(ratio - (108.0 / 86.0))
+            let minDist = min(miniDist, min(squareDist, wideDist))
+
+            // 規格契合度權重 (0.5 ~ 1.0)
+            let formatMatch = max(0.5, 1.0 - minDist * 0.8)
+
             let confidence = Double(obs.confidence)
-            if best == nil || area > best!.area {
-                best = (pts, area, confidence)
+            let score = area * formatMatch * confidence
+
+            if best == nil || score > best!.score {
+                best = (pts, area, confidence, score)
             }
         }
 

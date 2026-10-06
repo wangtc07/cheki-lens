@@ -73,19 +73,36 @@ extension VisionManager {
             
             let ptr = multiArray.dataPointer.bindMemory(to: Float.self, capacity: multiArray.count)
             
-            var maxConf: Float = 0.20 // 信心度門檻
             var bestAnchor = -1
+            var bestScore: Float = 0.0
             
             for i in 0..<anchorCount {
                 let conf = ptr[4 * rowStride + i * anchorStride]
-                if conf > maxConf {
-                    maxConf = conf
+                guard conf >= 0.20 else { continue }
+                let w = ptr[2 * rowStride + i * anchorStride]
+                let h = ptr[3 * rowStride + i * anchorStride]
+                
+                let normW = Double(w) / 640.0
+                let normH = Double(h) / 640.0
+                let area = normW * normH
+                guard area >= 0.08 else { continue } // 排除佔比過小的局域碎框
+                
+                let ratio = normH / max(0.01, normW)
+                let miniDist = abs(ratio - 1.593)
+                let wideDist = abs(ratio - 1.256)
+                let squareDist = abs(ratio - 1.194)
+                let minDist = min(miniDist, min(wideDist, squareDist))
+                let formatScore = max(0.2, 1.0 - minDist * 0.5)
+                
+                let score = conf * Float(area) * Float(formatScore)
+                if score > bestScore {
+                    bestScore = score
                     bestAnchor = i
+                    highestConf = conf
                 }
             }
             
             if bestAnchor >= 0 {
-                highestConf = maxConf
                 let xc = ptr[0 * rowStride + bestAnchor * anchorStride]
                 let yc = ptr[1 * rowStride + bestAnchor * anchorStride]
                 let w = ptr[2 * rowStride + bestAnchor * anchorStride]
@@ -125,18 +142,72 @@ extension VisionManager {
         let currentRatio = box.width / max(1.0, box.height)
         
         var finalCorners = rawCorners
-        if abs(currentRatio - targetRatio) > 0.25 {
+        if abs(currentRatio - targetRatio) > 0.08 {
             // 修正寬度以匹配標準物理底片規格
             let correctedW = box.height * targetRatio
             let cx = box.midX
-            let x1 = max(0.0, min(imageSize.width, cx - correctedW / 2.0))
-            let x2 = max(0.0, min(imageSize.width, cx + correctedW / 2.0))
-            finalCorners = [
-                CGPoint(x: x1, y: box.minY),
-                CGPoint(x: x2, y: box.minY),
-                CGPoint(x: x2, y: box.maxY),
-                CGPoint(x: x1, y: box.maxY)
-            ]
+            
+            var snappedCorners: [CGPoint]? = nil
+            // 4. 實體邊緣反差微調：若畫面右側/左側有顯著明暗階躍邊界，對齊真實相紙邊界 (修復滿版彩繪如 IMG_6530 左側暗色偏置)
+            if let data = image.dataProvider?.data,
+               let ptr = CFDataGetBytePtr(data) {
+                let w = image.width, h = image.height
+                let bpr = image.bytesPerRow
+                let bpp = image.bitsPerPixel / 8
+                
+                func lum(x: Int, y: Int) -> Double {
+                    guard x >= 0 && x < w && y >= 0 && y < h else { return 0 }
+                    let o = y * bpr + x * bpp
+                    return 0.299 * Double(ptr[o]) + 0.587 * Double(ptr[o+1]) + 0.114 * Double(ptr[o+2])
+                }
+                
+                func findEdgeX(y: Int, xRange: ClosedRange<Int>) -> Double? {
+                    var bestG = 0.0, bestX = Double(xRange.lowerBound)
+                    for x in xRange {
+                        let l1 = lum(x: x - 4, y: y)
+                        let l2 = lum(x: x + 4, y: y)
+                        let g = abs(l2 - l1)
+                        if g > bestG {
+                            bestG = g
+                            bestX = Double(x)
+                        }
+                    }
+                    return bestG >= 35.0 ? bestX : nil
+                }
+                
+                let yTop = Int(box.minY + 0.12 * box.height)
+                let yBot = Int(box.maxY - 0.12 * box.height)
+                let rTopX = findEdgeX(y: yTop, xRange: Int(box.maxX - 50)...min(w - 10, Int(box.maxX + 350)))
+                let rBotX = findEdgeX(y: yBot, xRange: Int(box.maxX - 50)...min(w - 10, Int(box.maxX + 350)))
+                let lTopX = findEdgeX(y: yTop, xRange: max(10, Int(box.minX - 450))...Int(box.minX + 50))
+                let lBotX = findEdgeX(y: yBot, xRange: max(10, Int(box.minX - 450))...Int(box.minX + 50))
+                
+                if let rt = rTopX, let rb = rBotX {
+                    let trX = rt
+                    let brX = rb
+                    let tlX = lTopX ?? (trX - correctedW)
+                    let blX = lBotX ?? (brX - correctedW)
+                    snappedCorners = [
+                        CGPoint(x: tlX, y: box.minY),
+                        CGPoint(x: trX, y: box.minY),
+                        CGPoint(x: brX, y: box.maxY),
+                        CGPoint(x: blX, y: box.maxY)
+                    ]
+                }
+            }
+            
+            if let sc = snappedCorners {
+                finalCorners = sc
+            } else {
+                let x1 = max(0.0, min(imageSize.width, cx - correctedW / 2.0))
+                let x2 = max(0.0, min(imageSize.width, cx + correctedW / 2.0))
+                finalCorners = [
+                    CGPoint(x: x1, y: box.minY),
+                    CGPoint(x: x2, y: box.minY),
+                    CGPoint(x: x2, y: box.maxY),
+                    CGPoint(x: x1, y: box.maxY)
+                ]
+            }
         }
         
         return DetectionResult(
