@@ -8,9 +8,9 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-06
-* **當前所屬階段**：Phase 4 — UI 介面開發（嚴格遵循 Apple HIG 原生 iOS 17/18 SwiftUI 設計規範）
-* **當前進行中任務**：已完成 **Task 4.1**（`OnboardingView.swift` 原生 3 頁導引與權限設定）與 **Task 4.2**（`LibraryView.swift` 原生典藏畫廊，支援全部 / 團體 / 成員三階層 Segmented Control、`.searchable` 關鍵字與 `#標籤` 搜尋、以及 3 團 6 成員 13 張拍立得測試資料集）
-* **最新穩定 Git Commit**：feat(UI): 重新以 Apple 原生 HIG 規範實作 Task 4.1 與 Task 4.2 並擴充測試資料集
+* **當前所屬階段**：Phase 4 — UI 介面開發（嚴格遵循 Apple HIG 原生 iOS 17/18 SwiftUI 與 Apple 相簿設計規範）
+* **當前進行中任務**：已完成 **Task 4.1** 與 **Task 4.2** 優化（比照 Apple 相簿 `ライブラリ` 修正頂部標題列對齊、改為無文字框純圓角比例相片網格並支援雙指縮放 `MagnifyGesture` 切換 1/2/3/5 欄；修正「相冊」點擊「成員」時因圖片點擊範圍溢出誤觸「乃木坂46」導航的問題，確保點擊「成員」直接在當前頁面原地展開全部成員相冊）
+* **最新穩定 Git Commit**：feat(UI): 對齊 Apple 相簿頂部標題與雙指縮放網格，並修正相冊切換成員時原地展開全部成員
 * **下一動執行指示**：執行 **Task 4.3** 實作即時相機掃描視圖（`CameraScannerView.swift`）
 
 ---

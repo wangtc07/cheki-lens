@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import UIKit
 
 // MARK: - Album Hierarchy Mode (相冊頂部分段控制：團體 vs 成員)
 
@@ -15,11 +16,12 @@ enum AlbumHierarchyMode: String, CaseIterable, Identifiable {
 
 struct UncategorizedAlbumRoute: Hashable {}
 
-// MARK: - 1. LibraryView (底部左側 Tab 1：「全部」)
+// MARK: - 1. LibraryView (底部左側 Tab 1：「全部」— 仿照 Apple 相簿 ライブラリ 頁面)
 
-/// 「全部」拍立得視圖
-/// - 取消上方分段控制與下方個人數字膠囊列，純粹展示全部拍立得
-/// - 右上角提供 `+` 匯入拍立得，以及 `...` 選單（選取、新增團體/成員、載入測試資料、設定）
+/// 「全部」拍立得視圖（對應參考圖 1、圖 2 Apple 相簿 `ライブラリ`）
+/// - 頂部標題「全部」與「N 個項目」位於左上方，與右側篩選 / 選取膠囊同一水平列（不因 Large Title 下推）
+/// - 僅顯示圓角拍立得相片本身（依真實比例呈現於網格中，不顯示下方文字卡）
+/// - 支援雙指縮放手勢（`MagnifyGesture`）在 1 / 2 / 3 / 5 欄密度間平滑切換
 struct LibraryView: View {
 
     @Environment(\.modelContext) private var modelContext
@@ -37,12 +39,36 @@ struct LibraryView: View {
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
 
-    private let twoColumns = [
-        GridItem(.flexible(), spacing: 14),
-        GridItem(.flexible(), spacing: 14)
-    ]
+    // 排序與篩選
+    @State private var sortAscending: Bool = false
+    @State private var filterDualSideOnly: Bool = false
+
+    // 雙指縮放欄數狀態（支援 1, 2, 3, 5 欄；預設 3 欄如圖 1，縮小可切換至 5 欄如圖 2）
+    private static let supportedColumnCounts = [1, 2, 3, 5]
+    @State private var columnCount: Int = 3
+    @State private var pinchBaselineColumnCount: Int? = nil
 
     init() {}
+
+    private var displayedItems: [ChekiItem] {
+        let filtered = filterDualSideOnly ? chekiItems.filter(\.hasBothSides) : chekiItems
+        return filtered.sorted {
+            sortAscending ? ($0.displayDate < $1.displayDate) : ($0.displayDate > $1.displayDate)
+        }
+    }
+
+    private var gridSpacing: CGFloat {
+        switch columnCount {
+        case 1: return 16
+        case 2: return 12
+        case 3: return 10
+        default: return 6
+        }
+    }
+
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: columnCount)
+    }
 
     static func matchesSearch(item: ChekiItem, query: String) -> Bool {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -74,45 +100,32 @@ struct LibraryView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            ZStack(alignment: .top) {
+                Color(.systemBackground)
+                    .ignoresSafeArea()
+
                 if chekiItems.isEmpty {
                     emptyStateView
+                        .padding(.top, 72)
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
-                            HStack {
-                                Text("共 \(chekiItems.count) 張拍立得")
-                                    .font(.footnote.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                let dualCount = chekiItems.filter(\.hasBothSides).count
-                                if dualCount > 0 {
-                                    Label("\(dualCount) 張含背面", systemImage: "rectangle.portrait.on.rectangle.portrait")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                        LazyVGrid(columns: gridColumns, spacing: gridSpacing) {
+                            ForEach(displayedItems) { item in
+                                photoGridCell(for: item)
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.top, 4)
-
-                            LazyVGrid(columns: twoColumns, spacing: 16) {
-                                ForEach(chekiItems) { item in
-                                    chekiGridCell(for: item)
-                                }
-                            }
-                            .padding(.horizontal, 16)
                         }
-                        .padding(.bottom, 28)
+                        .padding(.horizontal, columnCount >= 5 ? 8 : 14)
+                        .padding(.top, 82)
+                        .padding(.bottom, 32)
+                        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: columnCount)
                     }
+                    .simultaneousGesture(pinchZoomGesture)
                 }
+
+                // 頂部懸浮標題與控制列（對齊 Apple 相簿 ライブラリ 頂部位置）
+                topFloatingHeaderBar
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle(isSelectionMode ? "已選取 \(selectedItemIDs.count) 張" : "全部")
-            .navigationBarTitleDisplayMode(isSelectionMode ? .inline : .large)
-            .toolbar {
-                leadingToolbarItem
-                trailingToolbarItem
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .bottom) {
                 if isSelectionMode {
                     selectionBottomBar
@@ -147,21 +160,220 @@ struct LibraryView: View {
         }
     }
 
-    // MARK: - Subviews
+    // MARK: - Top Floating Header Bar (仿照圖 1 / 圖 2：左上大標題 + 項目數，右上篩選與選取按鈕同列)
+
+    private var topFloatingHeaderBar: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(isSelectionMode ? "已選取 \(selectedItemIDs.count) 項" : "全部")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                if !chekiItems.isEmpty {
+                    Text("\(displayedItems.count) 個項目")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                if isSelectionMode {
+                    Button(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選") {
+                        if selectedItemIDs.count == displayedItems.count {
+                            selectedItemIDs.removeAll()
+                        } else {
+                            selectedItemIDs = Set(displayedItems.map(\.persistentModelID))
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 12)
+                    .frame(height: 36)
+                    .background(.ultraThinMaterial, in: Capsule())
+                } else {
+                    PhotosPicker(
+                        selection: $selectedPhotos,
+                        maxSelectionCount: 50,
+                        matching: .images,
+                        preferredItemEncoding: .automatic
+                    ) {
+                        Image(systemName: "plus")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("匯入拍立得照片")
+                    .onChange(of: selectedPhotos) { _, newItems in
+                        guard !newItems.isEmpty else { return }
+                        processingItems = newItems
+                        selectedPhotos = []
+                        Task { await processImportedPhotos(processingItems) }
+                    }
+
+                    Menu {
+                        Section("顯示密度（亦可雙指縮放）") {
+                            ForEach(Self.supportedColumnCounts, id: \.self) { count in
+                                Button {
+                                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                                        columnCount = count
+                                    }
+                                } label: {
+                                    Label(
+                                        "\(count) 欄顯示",
+                                        systemImage: columnCount == count ? "checkmark" : "square.grid.3x3"
+                                    )
+                                }
+                            }
+                        }
+
+                        Section("排序與篩選") {
+                            Button {
+                                sortAscending = false
+                            } label: {
+                                Label("由新到舊", systemImage: !sortAscending ? "checkmark" : "arrow.down")
+                            }
+                            Button {
+                                sortAscending = true
+                            } label: {
+                                Label("由舊到新", systemImage: sortAscending ? "checkmark" : "arrow.up")
+                            }
+                            Button {
+                                filterDualSideOnly.toggle()
+                            } label: {
+                                Label(
+                                    "僅顯示正反雙面",
+                                    systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait"
+                                )
+                            }
+                        }
+
+                        Section("管理") {
+                            Button {
+                                showingQuickCreateSheet = true
+                            } label: {
+                                Label("新增團體 / 成員", systemImage: "person.badge.plus")
+                            }
+
+                            Button {
+                                withAnimation {
+                                    PreviewData.populate(into: modelContext)
+                                }
+                            } label: {
+                                Label("載入範例測試資料", systemImage: "sparkles.rectangle.stack")
+                            }
+
+                            Button {
+                                showingSettingsSheet = true
+                            } label: {
+                                Label("設定", systemImage: "gearshape")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal.decrease")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("篩選與更多設定")
+                }
+
+                if !displayedItems.isEmpty {
+                    Button {
+                        withAnimation(.snappy(duration: 0.2)) {
+                            isSelectionMode.toggle()
+                            if !isSelectionMode {
+                                selectedItemIDs.removeAll()
+                            }
+                        }
+                    } label: {
+                        Text(isSelectionMode ? "完成" : "選取")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 14)
+                            .frame(height: 36)
+                            .background(.ultraThinMaterial, in: Capsule())
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(.systemBackground).opacity(0.92),
+                    Color(.systemBackground).opacity(0.65),
+                    Color(.systemBackground).opacity(0.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .top)
+        )
+    }
+
+    // MARK: - Pinch-to-Zoom Gesture (雙指縮放切換 1 / 2 / 3 / 5 欄)
+
+    private var pinchZoomGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                if pinchBaselineColumnCount == nil {
+                    pinchBaselineColumnCount = columnCount
+                }
+                guard let baseCount = pinchBaselineColumnCount,
+                      let baseIndex = Self.supportedColumnCounts.firstIndex(of: baseCount) else { return }
+
+                let magnification = value.magnification
+                var targetIndex = baseIndex
+
+                // 雙指張開放大 -> 減少欄數（圖片變大）
+                if magnification > 1.65 {
+                    targetIndex = max(0, baseIndex - 2)
+                } else if magnification > 1.22 {
+                    targetIndex = max(0, baseIndex - 1)
+                }
+                // 雙指捏合縮小 -> 增加欄數（圖片變小，如 3 欄 -> 5 欄）
+                else if magnification < 0.60 {
+                    targetIndex = min(Self.supportedColumnCounts.count - 1, baseIndex + 2)
+                } else if magnification < 0.82 {
+                    targetIndex = min(Self.supportedColumnCounts.count - 1, baseIndex + 1)
+                }
+
+                let newCount = Self.supportedColumnCounts[targetIndex]
+                if newCount != columnCount {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        columnCount = newCount
+                    }
+                }
+            }
+            .onEnded { _ in
+                pinchBaselineColumnCount = nil
+            }
+    }
+
+    // MARK: - Photo Cell (仿照圖 1 / 圖 2：保留相片比例與圓角，無下方文字框)
 
     @ViewBuilder
-    private func chekiGridCell(for item: ChekiItem) -> some View {
+    private func photoGridCell(for item: ChekiItem) -> some View {
+        let isSelected = selectedItemIDs.contains(item.persistentModelID)
+        let cornerRadius: CGFloat = columnCount <= 2 ? 12 : (columnCount == 3 ? 9 : 5)
+
         if isSelectionMode {
-            let isSelected = selectedItemIDs.contains(item.persistentModelID)
-            ChekiPolaroidCard(item: item)
-                .overlay(alignment: .topLeading) {
+            AppleLibraryPhotoCell(item: item, cornerRadius: cornerRadius)
+                .overlay(alignment: .bottomTrailing) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title2)
+                        .font(columnCount >= 5 ? .subheadline : .title3)
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(isSelected ? .white : .white.opacity(0.9), isSelected ? .blue : .black.opacity(0.35))
-                        .padding(10)
+                        .padding(columnCount >= 5 ? 4 : 8)
                 }
-                .scaleEffect(isSelected ? 0.97 : 1.0)
+                .scaleEffect(isSelected ? 0.95 : 1.0)
                 .animation(.snappy(duration: 0.15), value: isSelected)
                 .onTapGesture {
                     if isSelected {
@@ -172,7 +384,7 @@ struct LibraryView: View {
                 }
         } else {
             NavigationLink(value: item) {
-                ChekiPolaroidCard(item: item)
+                AppleLibraryPhotoCell(item: item, cornerRadius: cornerRadius)
             }
             .buttonStyle(.plain)
             .contextMenu {
@@ -235,91 +447,6 @@ struct LibraryView: View {
                     Label("載入範例測試資料", systemImage: "sparkles.rectangle.stack")
                 }
                 .buttonStyle(.bordered)
-            }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var leadingToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            if isSelectionMode {
-                Button(selectedItemIDs.count == chekiItems.count ? "取消全選" : "全選") {
-                    if selectedItemIDs.count == chekiItems.count {
-                        selectedItemIDs.removeAll()
-                    } else {
-                        selectedItemIDs = Set(chekiItems.map(\.persistentModelID))
-                    }
-                }
-            }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var trailingToolbarItem: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            if isSelectionMode {
-                Button("完成") {
-                    withAnimation {
-                        isSelectionMode = false
-                        selectedItemIDs.removeAll()
-                    }
-                }
-                .fontWeight(.semibold)
-            } else {
-                HStack(spacing: 12) {
-                    PhotosPicker(
-                        selection: $selectedPhotos,
-                        maxSelectionCount: 50,
-                        matching: .images,
-                        preferredItemEncoding: .automatic
-                    ) {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("匯入拍立得照片")
-                    .onChange(of: selectedPhotos) { _, newItems in
-                        guard !newItems.isEmpty else { return }
-                        processingItems = newItems
-                        selectedPhotos = []
-                        Task { await processImportedPhotos(processingItems) }
-                    }
-
-                    Menu {
-                        if !chekiItems.isEmpty {
-                            Button {
-                                withAnimation {
-                                    isSelectionMode = true
-                                }
-                            } label: {
-                                Label("選取拍立得", systemImage: "checkmark.circle")
-                            }
-                        }
-
-                        Button {
-                            showingQuickCreateSheet = true
-                        } label: {
-                            Label("新增團體 / 成員", systemImage: "person.badge.plus")
-                        }
-
-                        Button {
-                            withAnimation {
-                                PreviewData.populate(into: modelContext)
-                            }
-                        } label: {
-                            Label("載入範例測試資料", systemImage: "sparkles.rectangle.stack")
-                        }
-
-                        Divider()
-
-                        Button {
-                            showingSettingsSheet = true
-                        } label: {
-                            Label("設定", systemImage: "gearshape")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .accessibilityLabel("更多選項與設定")
-                }
             }
         }
     }
@@ -393,12 +520,52 @@ struct LibraryView: View {
     }
 }
 
+// MARK: - AppleLibraryPhotoCell (仿照圖 1 / 圖 2：在網格單元中呈現真實比例圓角相片)
+
+private struct AppleLibraryPhotoCell: View {
+    let item: ChekiItem
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            if let data = item.frontImageData,
+               let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
+            } else {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color(.secondarySystemFill))
+                    .aspectRatio(0.7, contentMode: .fit)
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+            }
+
+            if item.hasBothSides {
+                Image(systemName: "rectangle.portrait.on.rectangle.portrait.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(5)
+                    .background(.black.opacity(0.45), in: Circle())
+                    .padding(6)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .aspectRatio(0.75, contentMode: .fit)
+        .contentShape(Rectangle())
+    }
+}
+
 // MARK: - 2. AlbumsRootView (底部左側 Tab 2：「相冊」— 仿照 Apple 原生相簿設計)
 
-/// Apple 原生相簿風格的「相冊」視圖（對應參考圖 2、3、4）
-/// - 頂部保留「團體 | 成員」Segmented Control（取消下方個人數字膠囊列）
-/// - 基本相簿構造為 `團體 > 成員`（點擊團體展開成員相冊，點擊成員展開圖 3 全幅封面相冊）
-/// - 切換頂部至「成員」時，無視團體階層直接展開全部成員相冊
+/// Apple 原生相簿風格的「相冊」視圖
+/// - 頂部標題「相冊」與右側 `+` / `⋯` 同列，不浪費上方空間
+/// - 點擊頂部 Segmented Control 的「成員」時，**直接在當前頁面原地展開所有成員相冊**（已修正圖片溢出阻擋點擊區域的問題）
+/// - 點擊「團體」中的某個團體時，才進入該團體的成員頁面（`團體 > 成員`）
 struct AlbumsRootView: View {
 
     @Environment(\.modelContext) private var modelContext
@@ -419,73 +586,52 @@ struct AlbumsRootView: View {
         chekiItems.filter { $0.idolMember == nil }
     }
 
+    /// 取得所有成員（依團體順序與成員順序排列，確保在「成員」模式下完整展開所有團體的成員）
+    private var allExpandedMembers: [IdolMember] {
+        var result: [IdolMember] = []
+        var seenIDs = Set<UUID>()
+
+        for group in idolGroups {
+            for member in group.sortedMembers {
+                if seenIDs.insert(member.id).inserted {
+                    result.append(member)
+                }
+            }
+        }
+        for member in idolMembers {
+            if seenIDs.insert(member.id).inserted {
+                result.append(member)
+            }
+        }
+        return result
+    }
+
     init() {}
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // 頂部保留「團體 | 成員」切換（圖 4 上方，取消下方個人數字部分）
-                    Picker("相冊檢視階層", selection: $hierarchyMode) {
-                        ForEach(AlbumHierarchyMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+            ZStack(alignment: .top) {
+                Color(.systemBackground)
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        switch hierarchyMode {
+                        case .groups:
+                            groupsAlbumGrid
+                        case .members:
+                            allMembersAlbumGrid
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
-
-                    switch hierarchyMode {
-                    case .groups:
-                        groupsAlbumGrid
-                    case .members:
-                        allMembersAlbumGrid
-                    }
+                    .padding(.top, 108)
+                    .padding(.bottom, 28)
                 }
-                .padding(.bottom, 28)
+
+                // 頂部固定標頭 + 「團體 | 成員」切換控制（設定 zIndex 並與下方卡片嚴格隔離點擊區域）
+                albumsTopHeaderBar
+                    .zIndex(10)
             }
-            .background(Color(.systemBackground))
-            .navigationTitle("相冊")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button {
-                            showingQuickCreateSheet = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .accessibilityLabel("新增團體或成員相冊")
-
-                        Menu {
-                            Button {
-                                showingQuickCreateSheet = true
-                            } label: {
-                                Label("新增團體 / 成員", systemImage: "person.badge.plus")
-                            }
-
-                            Button {
-                                withAnimation {
-                                    PreviewData.populate(into: modelContext)
-                                }
-                            } label: {
-                                Label("載入範例測試資料", systemImage: "sparkles.rectangle.stack")
-                            }
-
-                            Divider()
-
-                            Button {
-                                showingSettingsSheet = true
-                            } label: {
-                                Label("設定", systemImage: "gearshape")
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                        }
-                        .accessibilityLabel("更多選項與設定")
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingQuickCreateSheet) {
                 QuickCreateIdolSheet()
             }
@@ -515,6 +661,76 @@ struct AlbumsRootView: View {
                 ChekiDetailView(item: item)
             }
         }
+    }
+
+    // MARK: - Albums Top Header Bar
+
+    private var albumsTopHeaderBar: some View {
+        VStack(spacing: 10) {
+            HStack(alignment: .center) {
+                Text("相冊")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    Button {
+                        showingQuickCreateSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("新增團體或成員相冊")
+
+                    Menu {
+                        Button {
+                            showingQuickCreateSheet = true
+                        } label: {
+                            Label("新增團體 / 成員", systemImage: "person.badge.plus")
+                        }
+
+                        Button {
+                            withAnimation {
+                                PreviewData.populate(into: modelContext)
+                            }
+                        } label: {
+                            Label("載入範例測試資料", systemImage: "sparkles.rectangle.stack")
+                        }
+
+                        Divider()
+
+                        Button {
+                            showingSettingsSheet = true
+                        } label: {
+                            Label("設定", systemImage: "gearshape")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("更多選項與設定")
+                }
+            }
+
+            // 頂部「團體 | 成員」原地切換（點擊「成員」直接在此頁面展開所有成員相冊）
+            Picker("相冊檢視階層", selection: $hierarchyMode.animation(.snappy(duration: 0.22))) {
+                ForEach(AlbumHierarchyMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
+        .background(.bar)
     }
 
     // MARK: - 團體相冊網格（基本相簿構造：團體 > 成員）
@@ -561,11 +777,11 @@ struct AlbumsRootView: View {
         }
     }
 
-    // MARK: - 成員相冊網格（無視團體階層直接展開全部成員）
+    // MARK: - 成員相冊網格（無視團體階層，直接在原本頁面展開所有成員相冊）
 
     @ViewBuilder
     private var allMembersAlbumGrid: some View {
-        if idolMembers.isEmpty && uncategorizedItems.isEmpty {
+        if allExpandedMembers.isEmpty && uncategorizedItems.isEmpty {
             ContentUnavailableView {
                 Label("尚無成員相冊", systemImage: "person.2.crop.square.stack")
             } description: {
@@ -579,7 +795,7 @@ struct AlbumsRootView: View {
             .padding(.top, 48)
         } else {
             LazyVGrid(columns: albumColumns, spacing: 12) {
-                ForEach(idolMembers) { member in
+                ForEach(allExpandedMembers) { member in
                     NavigationLink(value: member) {
                         ApplePhotoAlbumTile(
                             primaryTitle: member.group?.name ?? member.stageName,
@@ -612,15 +828,6 @@ struct AlbumsRootView: View {
                 result.append(latest)
             }
         }
-        if result.count < 4 {
-            for member in group.sortedMembers {
-                for item in member.chekiItems {
-                    if let data = item.frontImageData, result.count < 4 {
-                        result.append(data)
-                    }
-                }
-            }
-        }
         return result
     }
 
@@ -632,7 +839,7 @@ struct AlbumsRootView: View {
     }
 }
 
-// MARK: - 3. ApplePhotoAlbumTile (仿照圖 2：Apple 相簿 1:1 圓角滿版相冊磚，左下角白字疊加標題)
+// MARK: - 3. ApplePhotoAlbumTile (Apple 相簿 1:1 圓角滿版相冊磚，嚴格裁切點擊邊界)
 
 struct ApplePhotoAlbumTile: View {
     let primaryTitle: String
@@ -643,7 +850,6 @@ struct ApplePhotoAlbumTile: View {
         GeometryReader { geo in
             let size = geo.size.width
             ZStack(alignment: .bottomLeading) {
-                // 背景封面（單張滿版，自動微放大裁除相紙白邊以呈現圖 2 滿版相冊視覺）
                 if let firstData = coverImagesData.first,
                    let uiImage = UIImage(data: firstData) {
                     Image(uiImage: uiImage)
@@ -663,7 +869,6 @@ struct ApplePhotoAlbumTile: View {
                         }
                 }
 
-                // 底部漸層確保白色標題清晰可讀（與圖 2 Apple 相簿一致）
                 LinearGradient(
                     colors: [
                         .clear,
@@ -675,7 +880,6 @@ struct ApplePhotoAlbumTile: View {
                 )
                 .frame(width: size, height: size)
 
-                // 左下角白字標題（不顯示下方個人數字，完全對齊圖 2 樣式）
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primaryTitle)
                         .font(.subheadline.weight(.bold))
@@ -694,12 +898,14 @@ struct ApplePhotoAlbumTile: View {
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .aspectRatio(1, contentMode: .fit)
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 
-// MARK: - 4. GroupMembersAlbumView (團體 > 成員 第二層：點開團體後顯示旗下成員相冊)
+// MARK: - 4. GroupMembersAlbumView (團體 > 成員 第二層：點開某個團體後顯示該團體旗下的成員相冊)
 
 private struct GroupMembersAlbumView: View {
     let group: IdolGroup
@@ -786,7 +992,7 @@ private struct GroupMembersAlbumView: View {
     }
 }
 
-// MARK: - 5. AlbumHeroDetailView (點開相冊後：仿照圖 3 Apple 相簿全幅 Hero 封面 + 緊密縮圖網格)
+// MARK: - 5. AlbumHeroDetailView (點開相冊後：仿照圖 3 Apple 相簿全幅 Hero 封面 + 支援雙指縮放的相片網格)
 
 struct AlbumHeroDetailView: View {
     let primaryTitle: String
@@ -807,7 +1013,10 @@ struct AlbumHeroDetailView: View {
 
     @State private var sortAscending: Bool = false
     @State private var filterDualSideOnly: Bool = false
+
+    private static let supportedColumnCounts = [1, 2, 3, 5]
     @State private var columnCount: Int = 5
+    @State private var pinchBaselineColumnCount: Int? = nil
 
     private var displayedItems: [ChekiItem] {
         let filtered = filterDualSideOnly ? items.filter(\.hasBothSides) : items
@@ -827,10 +1036,8 @@ struct AlbumHeroDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 2) {
-                // 頂部全幅 Hero 封面區（對應參考圖 3 上半部）
                 heroHeaderView
 
-                // 下方緊密相片網格（對應參考圖 3 下半部）
                 if displayedItems.isEmpty {
                     ContentUnavailableView {
                         Label("尚無拍立得項目", systemImage: "photo.on.rectangle")
@@ -844,10 +1051,12 @@ struct AlbumHeroDetailView: View {
                             albumPhotoCell(for: item)
                         }
                     }
+                    .animation(.spring(response: 0.3, dampingFraction: 0.82), value: columnCount)
                 }
             }
             .padding(.bottom, 40)
         }
+        .simultaneousGesture(pinchZoomGesture)
         .ignoresSafeArea(edges: .top)
         .background(Color(.systemBackground))
         .navigationBarTitleDisplayMode(.inline)
@@ -865,15 +1074,14 @@ struct AlbumHeroDetailView: View {
                         }
 
                         Menu {
-                            Button {
-                                columnCount = 3
-                            } label: {
-                                Label("3 欄大縮圖", systemImage: columnCount == 3 ? "checkmark" : "square.grid.3x3")
-                            }
-                            Button {
-                                columnCount = 5
-                            } label: {
-                                Label("5 欄緊密網格", systemImage: columnCount == 5 ? "checkmark" : "square.grid.4x3.fill")
+                            ForEach(Self.supportedColumnCounts, id: \.self) { count in
+                                Button {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                                        columnCount = count
+                                    }
+                                } label: {
+                                    Label("\(count) 欄網格", systemImage: columnCount == count ? "checkmark" : "square.grid.3x3")
+                                }
                             }
                         } label: {
                             Label("網格密度", systemImage: "square.grid.3x3")
@@ -990,7 +1198,40 @@ struct AlbumHeroDetailView: View {
         }
     }
 
-    // MARK: - Hero Header (對應參考圖 3 上半部：全幅大圖 + 左下標題與項目數 + 右下播放鈕)
+    private var pinchZoomGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                if pinchBaselineColumnCount == nil {
+                    pinchBaselineColumnCount = columnCount
+                }
+                guard let baseCount = pinchBaselineColumnCount,
+                      let baseIndex = Self.supportedColumnCounts.firstIndex(of: baseCount) else { return }
+
+                let magnification = value.magnification
+                var targetIndex = baseIndex
+
+                if magnification > 1.65 {
+                    targetIndex = max(0, baseIndex - 2)
+                } else if magnification > 1.22 {
+                    targetIndex = max(0, baseIndex - 1)
+                } else if magnification < 0.60 {
+                    targetIndex = min(Self.supportedColumnCounts.count - 1, baseIndex + 2)
+                } else if magnification < 0.82 {
+                    targetIndex = min(Self.supportedColumnCounts.count - 1, baseIndex + 1)
+                }
+
+                let newCount = Self.supportedColumnCounts[targetIndex]
+                if newCount != columnCount {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        columnCount = newCount
+                    }
+                }
+            }
+            .onEnded { _ in
+                pinchBaselineColumnCount = nil
+            }
+    }
 
     private var heroHeaderView: some View {
         GeometryReader { geo in
@@ -1064,8 +1305,12 @@ struct AlbumHeroDetailView: View {
                 .padding(.horizontal, 18)
                 .padding(.bottom, 16)
             }
+            .frame(width: width, height: height)
+            .clipped()
+            .contentShape(Rectangle())
         }
         .frame(height: 390)
+        .clipped()
     }
 
     @ViewBuilder
@@ -1124,6 +1369,7 @@ private struct AlbumSquareThumbnailCell: View {
 
     var body: some View {
         GeometryReader { geo in
+            let size = geo.size.width
             ZStack(alignment: .topTrailing) {
                 if let data = item.frontImageData,
                    let uiImage = UIImage(data: data) {
@@ -1131,12 +1377,12 @@ private struct AlbumSquareThumbnailCell: View {
                         .resizable()
                         .scaledToFill()
                         .scaleEffect(1.22)
-                        .frame(width: geo.size.width, height: geo.size.width)
+                        .frame(width: size, height: size)
                         .clipped()
                 } else {
                     Rectangle()
                         .fill(Color(.systemGray5))
-                        .frame(width: geo.size.width, height: geo.size.width)
+                        .frame(width: size, height: size)
                 }
 
                 if item.hasBothSides {
@@ -1148,8 +1394,13 @@ private struct AlbumSquareThumbnailCell: View {
                         .padding(4)
                 }
             }
+            .frame(width: size, height: size)
+            .clipped()
+            .contentShape(Rectangle())
         }
         .aspectRatio(1, contentMode: .fit)
+        .clipped()
+        .contentShape(Rectangle())
     }
 }
 
@@ -1164,8 +1415,14 @@ struct LibrarySearchView: View {
     @State private var showingSettingsSheet: Bool = false
 
     private let twoColumns = [
-        GridItem(.flexible(), spacing: 14),
-        GridItem(.flexible(), spacing: 14)
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
+    private let threeColumns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
     ]
 
     private var filteredItems: [ChekiItem] {
@@ -1190,7 +1447,6 @@ struct LibrarySearchView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if searchText.isEmpty {
-                        // 熱門 #標籤快速探索
                         if !availableHashtags.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("熱門 #標籤")
@@ -1221,7 +1477,6 @@ struct LibrarySearchView: View {
                             }
                         }
 
-                        // 推角成員相冊快速捷徑
                         if !idolMembers.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("成員相冊")
@@ -1247,26 +1502,27 @@ struct LibrarySearchView: View {
                         ContentUnavailableView.search(text: searchText)
                             .padding(.top, 48)
                     } else {
-                        Text("找到 \(filteredItems.count) 張拍立得")
-                            .font(.footnote.weight(.medium))
+                        Text("\(filteredItems.count) 個項目")
+                            .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 16)
 
-                        LazyVGrid(columns: twoColumns, spacing: 16) {
+                        LazyVGrid(columns: threeColumns, spacing: 10) {
                             ForEach(filteredItems) { item in
                                 NavigationLink(value: item) {
-                                    ChekiPolaroidCard(item: item)
+                                    AppleLibraryPhotoCell(item: item, cornerRadius: 9)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 14)
                     }
                 }
                 .padding(.vertical, 12)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Color(.systemBackground))
             .navigationTitle("搜尋")
+            .navigationBarTitleDisplayMode(.inline)
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),
@@ -1300,116 +1556,6 @@ struct LibrarySearchView: View {
                 )
             }
         }
-    }
-}
-
-// MARK: - ChekiPolaroidCard (雙欄圓角拍立得卡片)
-
-struct ChekiPolaroidCard: View {
-    let item: ChekiItem
-
-    private static func formatHashtag(_ raw: String) -> String {
-        raw.hasPrefix("#") ? raw : "#\(raw)"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .topTrailing) {
-                Color(.tertiarySystemGroupedBackground)
-
-                if let data = item.frontImageData,
-                   let uiImage = UIImage(data: data) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding(8)
-                } else {
-                    VStack(spacing: 6) {
-                        Image(systemName: "photo")
-                            .font(.title2)
-                            .foregroundStyle(.tertiary)
-                        Text("尚無影像")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-
-                HStack(spacing: 4) {
-                    if item.processingState == .error {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                            .padding(6)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-
-                    if item.hasBothSides {
-                        Label("雙面", systemImage: "rectangle.portrait.on.rectangle.portrait.fill")
-                            .labelStyle(.iconOnly)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .padding(6)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .accessibilityLabel("包含正反兩面")
-                    }
-                }
-                .padding(8)
-            }
-            .aspectRatio(0.75, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(item.idolMember?.stageName ?? "未分類拍立得")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 4)
-
-                    if let groupName = item.idolMember?.group?.name {
-                        Text(groupName)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                HStack(spacing: 6) {
-                    Text(ChekiDateFormatter.shared.string(from: item.displayDate))
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-
-                    if item.ocrDate != nil {
-                        Image(systemName: "text.viewfinder")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    if let firstTag = item.memo?.hashtags.first {
-                        Text(Self.formatHashtag(firstTag))
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.blue)
-                            .lineLimit(1)
-                    }
-                }
-            }
-            .padding(.horizontal, 4)
-            .padding(.bottom, 2)
-        }
-        .padding(10)
-        .background(
-            Color(.secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color(.separator).opacity(0.25), lineWidth: 0.5)
-        )
     }
 }
 
@@ -1546,12 +1692,12 @@ private final class ChekiDateFormatter: Sendable {
 
 // MARK: - Previews
 
-#Preview("相冊 (Apple Photos 風格)") {
-    AlbumsRootView()
+#Preview("全部 (Apple Photos ライブラリ)") {
+    LibraryView()
         .modelContainer(try! ModelContainerProvider.preview(withSampleData: true))
 }
 
-#Preview("全部拍立得") {
-    LibraryView()
+#Preview("相冊 (Apple Photos アルバム)") {
+    AlbumsRootView()
         .modelContainer(try! ModelContainerProvider.preview(withSampleData: true))
 }
