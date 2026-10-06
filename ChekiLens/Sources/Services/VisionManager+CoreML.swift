@@ -17,7 +17,7 @@ extension VisionManager {
         let configuration = MLModelConfiguration()
         configuration.computeUnits = .all // 允許使用 Apple Neural Engine
         
-        guard let mlModel = try? ChekiCornerNet(configuration: configuration).model,
+        guard let mlModel = await MainActor.run(body: { try? ChekiCornerNet(configuration: configuration).model }),
               let vnModel = try? VNCoreMLModel(for: mlModel) else {
             print("[CoreML] 無法載入 ChekiCornerNet 模型")
             return nil

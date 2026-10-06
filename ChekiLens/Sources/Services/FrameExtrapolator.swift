@@ -4,7 +4,7 @@ import CoreGraphics
 // MARK: - ExtrapolationResult
 
 /// 內框反推外框分析結果
-struct ExtrapolationResult: Sendable, Equatable {
+nonisolated struct ExtrapolationResult: Sendable, Equatable {
     let isInnerFrame: Bool
     let detectedFormat: ChekiFilmFormat
     let originalCorners: [CGPoint]
@@ -20,7 +20,7 @@ struct ExtrapolationResult: Sendable, Equatable {
 /// 自動將 4 個頂點外彈還原回真正的拍立得外框四角。
 ///
 /// 徹底解決 DSCF3716、IMG_7280、DSCF0041 等內部畫面誤判導致白邊被切除之問題。
-enum FrameExtrapolator {
+nonisolated enum FrameExtrapolator {
 
     /// 讀取 CGImage 指定座標之灰階亮度 (0~255)
     static func sampleLuminance(in image: CGImage, at pt: CGPoint) -> Double {

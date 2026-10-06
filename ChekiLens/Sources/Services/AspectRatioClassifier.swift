@@ -4,7 +4,7 @@ import CoreGraphics
 // MARK: - ChekiOrientation
 
 /// 拍立得拍攝方向
-enum ChekiOrientation: String, Sendable, Codable {
+nonisolated enum ChekiOrientation: String, Sendable, Codable {
     case portrait  // 縱向 (H >= W)
     case landscape // 橫向 (W > H)
 }
@@ -12,7 +12,7 @@ enum ChekiOrientation: String, Sendable, Codable {
 // MARK: - FilmSpecification
 
 /// 拍立得規格識別結果
-struct FilmSpecification: Sendable, Equatable {
+nonisolated struct FilmSpecification: Sendable, Equatable {
     let format: ChekiFilmFormat
     let orientation: ChekiOrientation
     /// 寬度 / 高度 (像素比)
@@ -45,7 +45,7 @@ struct FilmSpecification: Sendable, Equatable {
 /// 3. Instax Wide (橫向 108×86, 直向 86×108)
 ///
 /// 徹底解決橫向拍攝 (如 DSCF2190) 或 Wide 格式 (如 IMG_1886) 被強制拉伸變形為直式 Mini 的問題。
-enum AspectRatioClassifier {
+nonisolated enum AspectRatioClassifier {
 
     /// 根據 4 個角點 [TL, TR, BR, BL] 精準分類規格與方向
     static func classify(corners: [CGPoint], requestedFormat: ChekiFilmFormat = .auto) -> FilmSpecification {

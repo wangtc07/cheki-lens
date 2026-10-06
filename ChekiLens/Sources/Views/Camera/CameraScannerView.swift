@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 import Combine
-import AVFoundation
+@preconcurrency import AVFoundation
 import Vision
 import UIKit
 
@@ -260,8 +260,8 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
         error: Error?
     ) {
         let data = photo.fileDataRepresentation()
-        let image = data.flatMap { UIImage(data: $0)?.normalizedImage }
         Task { @MainActor in
+            let image = data.flatMap { UIImage(data: $0)?.normalizedImage }
             self.photoContinuation?.resume(returning: image)
             self.photoContinuation = nil
         }

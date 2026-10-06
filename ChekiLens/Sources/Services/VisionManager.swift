@@ -7,7 +7,7 @@ import Vision
 // MARK: - ChekiFilmFormat
 
 /// 拍立得相紙規格（比例鎖定用）
-enum ChekiFilmFormat {
+nonisolated enum ChekiFilmFormat: Sendable {
     case mini   // 86×54mm → ratio 1.593
     case square // 86×72mm → ratio 1.194
     case wide   // 108×86mm → ratio 1.256
@@ -29,7 +29,7 @@ enum ChekiFilmFormat {
 // MARK: - DetectionResult
 
 /// Vision 偵測結果
-struct DetectionResult {
+nonisolated struct DetectionResult: Sendable {
     /// 四角點（順序：TL, TR, BR, BL），座標為原始像素尺度
     var corners: [CGPoint]      // [topLeft, topRight, bottomRight, bottomLeft]
     var method: DetectionMethodUsed
@@ -37,7 +37,7 @@ struct DetectionResult {
     var imageSize: CGSize
 }
 
-enum DetectionMethodUsed: String {
+nonisolated enum DetectionMethodUsed: String, Sendable {
     case hough       = "hough"
     case visionNative = "vision_native"
     case whiteMask   = "white_mask"
@@ -48,7 +48,7 @@ enum DetectionMethodUsed: String {
 // MARK: - CropResult
 
 /// 透視校正後的輸出
-struct CropResult {
+nonisolated struct CropResult: Sendable {
     var cgImage: CGImage
     var outputSize: CGSize
     var detectionResult: DetectionResult
@@ -259,12 +259,12 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
         }
         
         // --- Layer 2: Hough Transform Fallback ---
-        if let hRes = try? await detectHough(image: image, imageSize: imageSize) {
+        if let hRes = try? detectHough(image: image, imageSize: imageSize) {
             return hRes
         }
         
         // --- Layer 3: White Mask Fallback ---
-        return try await detectWhiteMask(image: image, imageSize: imageSize)
+        return try detectWhiteMask(image: image, imageSize: imageSize)
     }
 
     // MARK: - Geometry Helpers
@@ -356,7 +356,7 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
 
 // MARK: - VisionError
 
-enum VisionError: LocalizedError {
+nonisolated enum VisionError: LocalizedError {
     case imageLoadFailed(String)
     case preprocessFailed
     case detectionFailed

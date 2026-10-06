@@ -94,7 +94,7 @@ final class ChekiItemCRUDTests: XCTestCase {
         try context.save()
 
         // Act：按 capturedAt 升冪取得
-        var descriptor = FetchDescriptor<ChekiItem>(
+        let descriptor = FetchDescriptor<ChekiItem>(
             sortBy: [SortDescriptor(\.capturedAt, order: .forward)]
         )
         let fetched = try context.fetch(descriptor)

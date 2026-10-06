@@ -25,7 +25,6 @@ extension VisionManager {
         detection: DetectionResult,
         format: ChekiFilmFormat
     ) throws -> CropResult {
-        let imgW = CGFloat(image.width)
         let imgH = CGFloat(image.height)
 
         // 四角点を正順（TL, TR, BR, BL）に並び替え

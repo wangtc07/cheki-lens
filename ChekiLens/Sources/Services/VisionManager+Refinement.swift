@@ -5,7 +5,7 @@ import Vision
 // MARK: - QuadRefinementResult
 
 /// 四邊垂直平行修正結果
-struct QuadRefinementResult: Sendable, Equatable {
+nonisolated struct QuadRefinementResult: Sendable, Equatable {
     let corners: [CGPoint]
     let wasRefined: Bool
     let anomalousCornerIndex: Int?
