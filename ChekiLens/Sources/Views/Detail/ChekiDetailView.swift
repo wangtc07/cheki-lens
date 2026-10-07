@@ -22,10 +22,17 @@ struct ChekiDetailView: View {
 
     /// 當前正在檢視的拍立得（透過底部縮圖膠卷或左右滑動可即時切換）
     @State private var currentItemID: UUID?
+    /// 上一張檢視的拍立得 ID（確保跨張點擊縮圖時離場卡片也能平滑滑動）
+    @State private var previousItemID: UUID?
     /// 是否翻轉至背面（true = 顯示背面手寫簽名，false = 顯示正面照片）
     @State private var isShowingBack: Bool = false
     /// 點擊單下隱藏/顯示上下工具列（沉浸式全螢幕檢視）
     @State private var isChromeHidden: Bool = false
+
+    /// 左右滑動跟手偏移量（1:1 跟隨手指水平滑動）
+    @State private var horizontalDragOffset: CGFloat = 0
+    /// 拖曳方向鎖定（區分水平切換相片 vs 垂直呼出備忘/返回）
+    @State private var dragAxisLock: Axis? = nil
 
     /// 雙指縮放倍率
     @State private var zoomScale: CGFloat = 1.0
@@ -57,11 +64,22 @@ struct ChekiDetailView: View {
         return [item] + sorted
     }
 
+    /// 目前選中的索引位置
+    private var currentIndex: Int {
+        let items = filmstripItems
+        if let id = currentItemID,
+           let idx = items.firstIndex(where: { $0.id == id }) {
+            return idx
+        }
+        return items.firstIndex(where: { $0.id == item.id }) ?? 0
+    }
+
     /// 目前選中的 `ChekiItem`
     private var currentItem: ChekiItem {
-        if let id = currentItemID,
-           let matched = filmstripItems.first(where: { $0.id == id }) {
-            return matched
+        let items = filmstripItems
+        let idx = currentIndex
+        if items.indices.contains(idx) {
+            return items[idx]
         }
         return item
     }
@@ -342,7 +360,7 @@ struct ChekiDetailView: View {
         .environment(\.colorScheme, .dark)
     }
 
-    // MARK: - 2. 中央拍立得檢視與 3D Y 軸翻轉動畫 (3D Y-Axis Flip Viewport)
+    // MARK: - 2. 中央拍立得水平滑動分頁與 3D Y 軸翻轉動畫 (Interactive Horizontal Pager + 3D Flip)
 
     private func mainCardViewport(fullScreenSize: CGSize, isLandscape: Bool) -> some View {
         // 計算卡片實際可用尺寸：
@@ -356,81 +374,108 @@ struct ChekiDetailView: View {
             width: max(120, fullScreenSize.width - horizontalInset * 2),
             height: max(120, fullScreenSize.height - topInset - bottomInset)
         )
+        // 仿照 iOS 原生相簿：相鄰兩張照片之間保留 24pt 黑色間距，隨手指 1:1 水平推動
+        let pageStride: CGFloat = fullScreenSize.width + 24
+        let items = filmstripItems
+        let activeIndex = currentIndex
 
         return ZStack {
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isChromeHidden.toggle()
-                    }
-                }
 
-            Group {
-                if !isShowingBack {
-                    frontCardFace(availableSize: availableSize)
-                } else {
-                    backCardFace(availableSize: availableSize)
-                        // 背面翻轉 180 度後需鏡像回正，確保手寫文字與圖片方向正確不顛倒
-                        .rotation3DEffect(
-                            .degrees(180),
-                            axis: (x: 0, y: 1, z: 0)
-                        )
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, pageItem in
+                if abs(index - activeIndex) <= 8 || pageItem.id == previousItemID {
+                    let isCurrent = (index == activeIndex)
+                    singleCardPageView(
+                        for: pageItem,
+                        isCurrent: isCurrent,
+                        availableSize: availableSize,
+                        isLandscape: isLandscape
+                    )
+                    .frame(width: fullScreenSize.width, height: availableSize.height)
+                    .offset(x: CGFloat(index - activeIndex) * pageStride + horizontalDragOffset)
                 }
             }
-            .overlay(alignment: .topTrailing) {
-                // 右上角浮動正反面 3D 翻轉徽章（緊貼拍立得卡片右上角，不漂浮於黑底空白處）
-                if !isChromeHidden {
-                    Button {
-                        trigger3DFlip()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "rectangle.portrait.rotate")
-                                .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
-                            Text(isShowingBack ? "背面 · 手寫" : (currentItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面"))
-                                .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, isLandscape ? 7 : 9)
-                        .padding(.vertical, isLandscape ? 3 : 4.5)
-                        .background(.black.opacity(0.62), in: Capsule())
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .padding(isLandscape ? 6 : 8)
-                }
-            }
-            .rotation3DEffect(
-                .degrees(isShowingBack ? 180 : 0),
-                axis: (x: 0, y: 1, z: 0),
-                perspective: 0.42
-            )
-            .scaleEffect(zoomScale * activePinchScale)
-            .shadow(color: .black.opacity(0.75), radius: 24, x: 0, y: 12)
-            .onTapGesture(count: 2) {
-                if zoomScale > 1.05 {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        zoomScale = 1.0
-                    }
-                } else {
-                    trigger3DFlip()
-                }
-            }
-            .onTapGesture(count: 1) {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isChromeHidden.toggle()
-                }
-            }
-            .gesture(cardMagnifyGesture)
-            .gesture(cardDragAndSwipeGesture)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.top, topInset)
-            .padding(.bottom, bottomInset)
-            .animation(.easeInOut(duration: 0.2), value: isChromeHidden)
         }
+        .frame(width: fullScreenSize.width, height: fullScreenSize.height)
+        .padding(.top, topInset)
+        .padding(.bottom, bottomInset)
+        .frame(width: fullScreenSize.width, height: fullScreenSize.height)
+        .clipped()
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            if zoomScale > 1.05 {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    zoomScale = 1.0
+                }
+            } else {
+                trigger3DFlip()
+            }
+        }
+        .onTapGesture(count: 1) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isChromeHidden.toggle()
+            }
+        }
+        .gesture(cardMagnifyGesture)
+        .simultaneousGesture(cardDragAndSwipeGesture(pageStride: pageStride))
+        .animation(.easeInOut(duration: 0.2), value: isChromeHidden)
+    }
+
+    @ViewBuilder
+    private func singleCardPageView(
+        for pageItem: ChekiItem,
+        isCurrent: Bool,
+        availableSize: CGSize,
+        isLandscape: Bool
+    ) -> some View {
+        let showingBackFace = isCurrent ? isShowingBack : false
+        let effectiveScale = isCurrent ? (zoomScale * activePinchScale) : 1.0
+
+        Group {
+            if !showingBackFace {
+                frontCardFace(for: pageItem, availableSize: availableSize)
+            } else {
+                backCardFace(for: pageItem, availableSize: availableSize)
+                    // 背面翻轉 180 度後需鏡像回正，確保手寫文字與圖片方向正確不顛倒
+                    .rotation3DEffect(
+                        .degrees(180),
+                        axis: (x: 0, y: 1, z: 0)
+                    )
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            // 右上角浮動正反面 3D 翻轉徽章（緊貼拍立得卡片右上角）
+            if isCurrent && !isChromeHidden {
+                Button {
+                    trigger3DFlip()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "rectangle.portrait.rotate")
+                            .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
+                        Text(showingBackFace ? "背面 · 手寫" : (pageItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面"))
+                            .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, isLandscape ? 7 : 9)
+                    .padding(.vertical, isLandscape ? 3 : 4.5)
+                    .background(.black.opacity(0.62), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                .padding(isLandscape ? 6 : 8)
+            }
+        }
+        .rotation3DEffect(
+            .degrees(showingBackFace ? 180 : 0),
+            axis: (x: 0, y: 1, z: 0),
+            perspective: 0.42
+        )
+        .scaleEffect(effectiveScale)
+        .shadow(color: .black.opacity(0.75), radius: 24, x: 0, y: 12)
     }
 
     private func fittedCardSize(for imageSize: CGSize, in availableSize: CGSize) -> CGSize {
@@ -445,9 +490,9 @@ struct ChekiDetailView: View {
     }
 
     @ViewBuilder
-    private func frontCardFace(availableSize: CGSize) -> some View {
-        let insetScale = CGFloat(1.0 - currentItem.borderInsetRatio * 1.4)
-        if let data = currentItem.frontImageData,
+    private func frontCardFace(for targetItem: ChekiItem, availableSize: CGSize) -> some View {
+        let insetScale = CGFloat(1.0 - targetItem.borderInsetRatio * 1.4)
+        if let data = targetItem.frontImageData,
            let uiImage = UIImage(data: data) {
             let cardSize = fittedCardSize(for: uiImage.size, in: availableSize)
             Image(uiImage: uiImage)
@@ -466,8 +511,8 @@ struct ChekiDetailView: View {
     }
 
     @ViewBuilder
-    private func backCardFace(availableSize: CGSize) -> some View {
-        if let backData = currentItem.backImageData,
+    private func backCardFace(for targetItem: ChekiItem, availableSize: CGSize) -> some View {
+        if let backData = targetItem.backImageData,
            let uiImage = UIImage(data: backData) {
             let cardSize = fittedCardSize(for: uiImage.size, in: availableSize)
             Image(uiImage: uiImage)
@@ -617,13 +662,7 @@ struct ChekiDetailView: View {
                     ForEach(filmstripItems) { stripItem in
                         let isCurrent = (stripItem.id == currentItem.id)
                         Button {
-                            guard stripItem.id != currentItem.id else { return }
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            withAnimation(.snappy(duration: 0.24)) {
-                                currentItemID = stripItem.id
-                                isShowingBack = false
-                                zoomScale = 1.0
-                            }
+                            selectFilmstripItem(stripItem)
                         } label: {
                             ZStack(alignment: .bottomTrailing) {
                                 if let data = stripItem.frontImageData,
@@ -671,7 +710,7 @@ struct ChekiDetailView: View {
             }
             .onChange(of: currentItemID) { _, newID in
                 guard let newID else { return }
-                withAnimation(.snappy(duration: 0.25)) {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
                     proxy.scrollTo(newID, anchor: .center)
                 }
             }
@@ -768,14 +807,49 @@ struct ChekiDetailView: View {
             }
     }
 
-    private var cardDragAndSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 25)
-            .onEnded { value in
+    private func cardDragAndSwipeGesture(pageStride: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+            .onChanged { value in
                 guard zoomScale <= 1.05 else { return }
                 let dx = value.translation.width
                 let dy = value.translation.height
 
-                if abs(dy) > abs(dx) {
+                if dragAxisLock == nil {
+                    if abs(dx) > 8 || abs(dy) > 8 {
+                        dragAxisLock = abs(dx) >= abs(dy) ? .horizontal : .vertical
+                    }
+                }
+
+                guard dragAxisLock == .horizontal else { return }
+
+                let itemsCount = filmstripItems.count
+                let idx = currentIndex
+                let isOverscrollingLeading = (idx == 0 && dx > 0)
+                let isOverscrollingTrailing = (idx >= itemsCount - 1 && dx < 0)
+
+                if isOverscrollingLeading || isOverscrollingTrailing {
+                    // 首尾邊界橡皮筋阻尼回饋
+                    horizontalDragOffset = dx * 0.28
+                } else {
+                    horizontalDragOffset = dx
+                }
+            }
+            .onEnded { value in
+                defer { dragAxisLock = nil }
+                guard zoomScale <= 1.05 else {
+                    horizontalDragOffset = 0
+                    return
+                }
+
+                let dx = value.translation.width
+                let dy = value.translation.height
+                let predictedDx = value.predictedEndTranslation.width
+                let activeAxis = dragAxisLock ?? (abs(dx) >= abs(dy) ? .horizontal : .vertical)
+
+                if activeAxis == .vertical {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
+                        horizontalDragOffset = 0
+                    }
                     // 向上滑動 -> 呼出資訊與備忘面板 (Task 4.6)
                     if dy < -50 {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -786,11 +860,19 @@ struct ChekiDetailView: View {
                         dismiss()
                     }
                 } else {
-                    // 左右滑動 -> 切換膠卷中的上一張 / 下一張拍立得
-                    if dx < -50 {
-                        navigateFilmstrip(offset: 1)
-                    } else if dx > 50 {
-                        navigateFilmstrip(offset: -1)
+                    // 左右水平滑動 -> 判斷是否翻至上一張 / 下一張，或回彈至原位
+                    let items = filmstripItems
+                    let idx = currentIndex
+                    let threshold = min(85.0, pageStride * 0.20)
+
+                    if (dx < -threshold || predictedDx < -threshold * 1.6), idx + 1 < items.count {
+                        selectFilmstripItem(items[idx + 1])
+                    } else if (dx > threshold || predictedDx > threshold * 1.6), idx - 1 >= 0 {
+                        selectFilmstripItem(items[idx - 1])
+                    } else {
+                        withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
+                            horizontalDragOffset = 0
+                        }
                     }
                 }
             }
@@ -804,18 +886,28 @@ struct ChekiDetailView: View {
         }
     }
 
-    private func navigateFilmstrip(offset: Int) {
-        let items = filmstripItems
-        guard let currentIndex = items.firstIndex(where: { $0.id == currentItem.id }) else { return }
-        let targetIndex = currentIndex + offset
-        guard items.indices.contains(targetIndex) else { return }
-
+    private func selectFilmstripItem(_ targetItem: ChekiItem) {
+        guard targetItem.id != currentItem.id else {
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
+                horizontalDragOffset = 0
+            }
+            return
+        }
+        previousItemID = currentItem.id
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(.snappy(duration: 0.25)) {
-            currentItemID = items[targetIndex].id
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+            currentItemID = targetItem.id
+            horizontalDragOffset = 0
             isShowingBack = false
             zoomScale = 1.0
         }
+    }
+
+    private func navigateFilmstrip(offset: Int) {
+        let items = filmstripItems
+        let targetIndex = currentIndex + offset
+        guard items.indices.contains(targetIndex) else { return }
+        selectFilmstripItem(items[targetIndex])
     }
 
     private func toggleFavorite() {
