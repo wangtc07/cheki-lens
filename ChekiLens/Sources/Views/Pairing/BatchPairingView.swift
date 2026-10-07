@@ -2098,6 +2098,8 @@ struct BatchPairingView: View {
             let newItem = ChekiItem(
                 frontImageData: slot.frontPhoto.imageData,
                 backImageData: slot.backPhoto?.imageData,
+                originalFrontImageData: slot.frontPhoto.imageData,
+                originalBackImageData: slot.backPhoto?.imageData,
                 capturedAt: itemTimestamp,
                 filmFormat: selectedFilmFormat,
                 detectedAspectRatio: selectedFilmFormat == .auto ? FilmFormat.mini.aspectRatio : selectedFilmFormat.aspectRatio,
@@ -2122,6 +2124,7 @@ struct BatchPairingView: View {
                     if let jpeg = croppedUI.jpegData(compressionQuality: 0.92) {
                         newItem.frontImageData = jpeg
                     }
+                    newItem.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(detection.corners, imageSize: imgSize)
                     newItem.detectionMethod = .visionNative
                     if let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
                         newItem.ocrDate = ocrRes.date
@@ -2150,6 +2153,7 @@ struct BatchPairingView: View {
                     if let jpeg = croppedBackUI.jpegData(compressionQuality: 0.92) {
                         newItem.backImageData = jpeg
                     }
+                    newItem.backPerspectivePointsJSON = ChekiItem.encodeNormalizedCorners(backDetection.corners, imageSize: backSize)
                 }
             }
 

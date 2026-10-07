@@ -7,10 +7,10 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-* **最後更新時間**：2026-10-07
+* **最後更新時間**：2026-10-08
 * **當前所屬階段**：Phase 4 — UI 介面開發（嚴格遵循 Apple HIG 原生 iOS 17/18 SwiftUI 與 Apple 相簿 / 相機設計規範）
-* **當前進行中任務**：已完成 **Task 4.5**（`ChekiDetailView.swift` 採用 Apple iOS 18 原生相簿單張檢視介面：頂部半透明日期時間藥丸、中央 3D Y 軸翻轉查看背面手寫簽名 + 雙指縮放 + 左右滑動切換 + 上滑呼出備忘面板、底部縮圖膠卷滾動條 Filmstrip Scrubber、5 大標準工具列按鈕，並強化測試資料正反面手寫簽名與留言渲染）
-* **最新穩定 Git Commit**：feat(Detail): 完成 Task 4.5 Apple 相簿風格單張全螢幕檢視與 3D 翻轉背面手寫測試資料
+* **當前進行中任務**：已完成 **Task 4.5**（`ChekiDetailView.swift` 採用 Apple iOS 18 原生相簿單張檢視介面：頂部半透明日期時間藥丸、中央 3D Y 軸翻轉查看背面手寫簽名 + 雙指縮放 + 1:1 跟手左右滑動切換 + 上滑呼出備忘面板、底部縮圖膠卷滾動條 Filmstrip Scrubber、5 大標準工具列按鈕，並新增 `ChekiQuadCropEditorView` 全螢幕手動四頂點透視裁切與雙指縮放編輯器）
+* **最新穩定 Git Commit**：feat(Detail): 新增手動調整拍立得四頂點透視裁切、透明灰色切除遮罩與雙指縮放編輯器
 * **下一動執行指示**：執行 **Task 4.6** 實作上滑資訊與備忘面板（`ChekiInfoView.swift`）
 
 ---

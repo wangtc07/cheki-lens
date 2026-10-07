@@ -20,13 +20,21 @@ final class ChekiItem {
 
     // MARK: Image Data
 
-    /// 正面照片（拍立得影像窗）壓縮後 JPEG 二進位，nil 表示尚未掃描
+    /// 正面照片（透視裁切後之拍立得影像）壓縮後 JPEG 二進位，nil 表示尚未掃描
     @Attribute(.externalStorage)
     var frontImageData: Data?
 
-    /// 背面照片（手寫日期/簽名面）壓縮後 JPEG 二進位，nil 表示僅有正面
+    /// 背面照片（透視裁切後之手寫日期/簽名面）壓縮後 JPEG 二進位，nil 表示僅有正面
     @Attribute(.externalStorage)
     var backImageData: Data?
+
+    /// 正面原始未裁切照片（供事後重新手動調整四個頂點與透視裁切使用）
+    @Attribute(.externalStorage)
+    var originalFrontImageData: Data?
+
+    /// 背面原始未裁切照片（供事後重新手動調整背面四個頂點與透視裁切使用）
+    @Attribute(.externalStorage)
+    var originalBackImageData: Data?
 
     // MARK: Timestamp
 
@@ -54,9 +62,12 @@ final class ChekiItem {
 
     // MARK: Vision Metadata
 
-    /// Vision 透視校正時所偵測到的四角錨點（JSON 編碼的 [CGPoint] x4）
-    /// 格式：`[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]`（已正規化至 0.0~1.0）
+    /// 正面 Vision 透視校正時所偵測或手動調整的四角錨點（JSON 編碼的 [CGPoint] x4）
+    /// 格式：`[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]`（已正規化至 0.0~1.0，順序：TL, TR, BR, BL）
     var perspectivePointsJSON: String?
+
+    /// 背面 Vision 透視校正時所偵測或手動調整的四角錨點（JSON 編碼的 [CGPoint] x4，已正規化至 0.0~1.0）
+    var backPerspectivePointsJSON: String?
 
     /// Vision 使用了哪一層偵測策略
     var detectionMethod: DetectionMethod
@@ -91,6 +102,8 @@ final class ChekiItem {
         id: UUID = UUID(),
         frontImageData: Data? = nil,
         backImageData: Data? = nil,
+        originalFrontImageData: Data? = nil,
+        originalBackImageData: Data? = nil,
         capturedAt: Date = Date(),
         ocrDate: Date? = nil,
         isDateWrittenToAlbum: Bool = false,
@@ -98,6 +111,7 @@ final class ChekiItem {
         detectedAspectRatio: Double = FilmFormat.mini.aspectRatio,
         borderInsetRatio: Double = 0.0,
         perspectivePointsJSON: String? = nil,
+        backPerspectivePointsJSON: String? = nil,
         detectionMethod: DetectionMethod = .pending,
         processingState: ProcessingState = .unprocessed,
         isSyncedToPhotoLibrary: Bool = false,
@@ -107,6 +121,8 @@ final class ChekiItem {
         self.id = id
         self.frontImageData = frontImageData
         self.backImageData = backImageData
+        self.originalFrontImageData = originalFrontImageData
+        self.originalBackImageData = originalBackImageData
         self.capturedAt = capturedAt
         self.ocrDate = ocrDate
         self.isDateWrittenToAlbum = isDateWrittenToAlbum
@@ -114,6 +130,7 @@ final class ChekiItem {
         self.detectedAspectRatio = detectedAspectRatio
         self.borderInsetRatio = borderInsetRatio
         self.perspectivePointsJSON = perspectivePointsJSON
+        self.backPerspectivePointsJSON = backPerspectivePointsJSON
         self.detectionMethod = detectionMethod
         self.processingStateRaw = processingState.rawValue
         self.isSyncedToPhotoLibrary = isSyncedToPhotoLibrary
@@ -135,6 +152,44 @@ extension ChekiItem {
     /// 是否具有背面資料
     var hasBothSides: Bool {
         backImageData != nil
+    }
+
+    /// 將像素座標四角點 [TL, TR, BR, BL] 轉為正規化 (0.0~1.0) JSON 字串
+    static func encodeNormalizedCorners(_ pixelCorners: [CGPoint], imageSize: CGSize) -> String? {
+        guard pixelCorners.count == 4, imageSize.width > 0, imageSize.height > 0 else { return nil }
+        let normalized: [[Double]] = pixelCorners.map { pt in
+            [
+                max(0.0, min(1.0, Double(pt.x / imageSize.width))),
+                max(0.0, min(1.0, Double(pt.y / imageSize.height)))
+            ]
+        }
+        guard let data = try? JSONEncoder().encode(normalized) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// 將已正規化 (0.0~1.0) 的四角點 [TL, TR, BR, BL] 轉為 JSON 字串
+    static func encodeNormalizedCorners(_ normalizedCorners: [CGPoint]) -> String? {
+        guard normalizedCorners.count == 4 else { return nil }
+        let pairs: [[Double]] = normalizedCorners.map { pt in
+            [
+                max(0.0, min(1.0, Double(pt.x))),
+                max(0.0, min(1.0, Double(pt.y)))
+            ]
+        }
+        guard let data = try? JSONEncoder().encode(pairs) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// 從 JSON 字串解碼出正規化 (0.0~1.0) 四角點 [TL, TR, BR, BL]
+    static func decodeNormalizedCorners(from json: String?) -> [CGPoint]? {
+        guard let json,
+              let data = json.data(using: .utf8),
+              let pairs = try? JSONDecoder().decode([[Double]].self, from: data),
+              pairs.count == 4 else { return nil }
+        return pairs.compactMap { pair in
+            guard pair.count == 2 else { return nil }
+            return CGPoint(x: pair[0], y: pair[1])
+        }
     }
 }
 

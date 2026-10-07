@@ -171,18 +171,20 @@ struct ChekiDetailView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showingAdjustmentSheet) {
-            ChekiAdjustmentSheet(
+        .fullScreenCover(isPresented: $showingAdjustmentSheet) {
+            ChekiQuadCropEditorView(
                 item: currentItem,
+                initialEditingBackside: isShowingBack && currentItem.hasBothSides,
                 onRequestBacksidePicker: {
                     showingAdjustmentSheet = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                         isShowingBacksidePicker = true
                     }
+                },
+                onAppliedToast: { msg in
+                    showToast(msg)
                 }
             )
-            .presentationDetents([.fraction(0.48), .medium])
-            .presentationDragIndicator(.visible)
         }
         .confirmationDialog(
             "確定要刪除此張拍立得嗎？",
@@ -935,8 +937,18 @@ struct ChekiDetailView: View {
     private func swapCurrentItemSides() {
         guard let backData = currentItem.backImageData else { return }
         let frontData = currentItem.frontImageData
+        let origFront = currentItem.originalFrontImageData
+        let origBack = currentItem.originalBackImageData
+        let frontPts = currentItem.perspectivePointsJSON
+        let backPts = currentItem.backPerspectivePointsJSON
+
         currentItem.frontImageData = backData
         currentItem.backImageData = frontData
+        currentItem.originalFrontImageData = origBack
+        currentItem.originalBackImageData = origFront
+        currentItem.perspectivePointsJSON = backPts
+        currentItem.backPerspectivePointsJSON = frontPts
+
         try? modelContext.save()
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
@@ -947,7 +959,9 @@ struct ChekiDetailView: View {
               let rawImage = UIImage(data: data) else { return }
 
         let normalized = rawImage.normalizedImage
-        var finalData = normalized.jpegData(compressionQuality: 0.92) ?? data
+        let rawJPEG = normalized.jpegData(compressionQuality: 0.92) ?? data
+        var finalData = rawJPEG
+        var encodedCorners: String? = nil
 
         if let cgImage = normalized.cgImage {
             let size = CGSize(width: cgImage.width, height: cgImage.height)
@@ -961,9 +975,12 @@ struct ChekiDetailView: View {
                ),
                let croppedJPEG = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92) {
                 finalData = croppedJPEG
+                encodedCorners = ChekiItem.encodeNormalizedCorners(detection.corners, imageSize: size)
             }
         }
 
+        currentItem.originalBackImageData = rawJPEG
+        currentItem.backPerspectivePointsJSON = encodedCorners
         currentItem.backImageData = finalData
         try? modelContext.save()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -990,6 +1007,8 @@ struct ChekiDetailView: View {
             backMessage: "いつも応援ありがとう！♡\n今日もたくさん話せて嬉しかったよ☆\nまた次のイベントで会おうね！"
         ) {
             currentItem.backImageData = sampleBack
+            currentItem.originalBackImageData = nil
+            currentItem.backPerspectivePointsJSON = nil
             try? modelContext.save()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
@@ -1114,111 +1133,1045 @@ struct ChekiDetailView: View {
     }
 }
 
-// MARK: - ChekiAdjustmentSheet (第 4 顆工具列按鈕「調整」：邊界偏移微調與相紙比例鎖定面板)
+// MARK: - ChekiQuadCropEditorView (Apple Photos 風格全螢幕手動四頂點透視裁切與雙指縮放編輯器)
 
-private struct ChekiAdjustmentSheet: View {
+private struct ChekiQuadCropEditorView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
     let item: ChekiItem
+    let initialEditingBackside: Bool
     let onRequestBacksidePicker: () -> Void
+    let onAppliedToast: (String) -> Void
 
-    @State private var borderInsetPercentage: Double = 0.0
-    @State private var selectedFormat: FilmFormat = .mini
+    // 編輯正/反面狀態
+    @State private var editingBackside: Bool
 
-    init(item: ChekiItem, onRequestBacksidePicker: @escaping () -> Void) {
+    // 來源底圖（含完整外圍區域供重新手動調整四個頂點）
+    @State private var sourceUIImage: UIImage?
+    // 四個頂點（正規化 0.0 ~ 1.0，順序：[TL, TR, BR, BL]）
+    @State private var normalizedCorners: [CGPoint] = [
+        CGPoint(x: 0.12, y: 0.12),
+        CGPoint(x: 0.88, y: 0.12),
+        CGPoint(x: 0.88, y: 0.88),
+        CGPoint(x: 0.12, y: 0.88)
+    ]
+    @State private var initialCornersSnapshot: [CGPoint] = []
+    @State private var activeDraggingCornerIndex: Int? = nil
+
+    // 雙指縮放與畫布平移狀態 (Two-finger Pinch-to-Zoom & Pan)
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var activePinchScale: CGFloat = 1.0
+    @State private var panOffset: CGSize = .zero
+    @State private var activePanDelta: CGSize = .zero
+
+    // 相紙比例與邊界微調
+    @State private var selectedFormat: FilmFormat
+    @State private var borderInsetPercentage: Double
+    @State private var isProcessingCrop: Bool = false
+    @State private var statusBannerText: String? = nil
+
+    private let cornerNames = ["左上", "右上", "右下", "左下"]
+
+    init(
+        item: ChekiItem,
+        initialEditingBackside: Bool,
+        onRequestBacksidePicker: @escaping () -> Void,
+        onAppliedToast: @escaping (String) -> Void
+    ) {
         self.item = item
+        self.initialEditingBackside = initialEditingBackside
         self.onRequestBacksidePicker = onRequestBacksidePicker
-        _borderInsetPercentage = State(initialValue: item.borderInsetRatio * 100.0)
+        self.onAppliedToast = onAppliedToast
+        _editingBackside = State(initialValue: initialEditingBackside && item.hasBothSides)
         _selectedFormat = State(initialValue: item.filmFormat)
+        _borderInsetPercentage = State(initialValue: item.borderInsetRatio * 100.0)
+    }
+
+    private var effectiveZoom: CGFloat {
+        max(1.0, min(4.5, zoomScale * activePinchScale))
+    }
+
+    private var hasUnsavedChanges: Bool {
+        guard initialCornersSnapshot.count == 4, normalizedCorners.count == 4 else { return true }
+        for i in 0..<4 {
+            if hypot(normalizedCorners[i].x - initialCornersSnapshot[i].x,
+                     normalizedCorners[i].y - initialCornersSnapshot[i].y) > 0.002 {
+                return true
+            }
+        }
+        if abs(borderInsetPercentage - item.borderInsetRatio * 100.0) > 0.05 { return true }
+        if selectedFormat != item.filmFormat { return true }
+        return false
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Label("邊界微調偏移 (Inset / Outset)", systemImage: "crop")
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text(String(format: "%+.1f%%", borderInsetPercentage))
-                                .font(.subheadline.monospacedDigit().weight(.bold))
-                                .foregroundStyle(abs(borderInsetPercentage) > 0.05 ? .blue : .secondary)
-                        }
+        ZStack {
+            Color.black.ignoresSafeArea()
 
-                        Slider(value: $borderInsetPercentage, in: -3.0...3.0, step: 0.5)
-                            .onChange(of: borderInsetPercentage) { _, newValue in
-                                item.borderInsetRatio = newValue / 100.0
-                                try? modelContext.save()
-                            }
+            VStack(spacing: 0) {
+                topNavigationToolbar
 
-                        HStack(spacing: 8) {
-                            Button("-2% 去陰影") {
-                                borderInsetPercentage = -2.0
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                cropCanvasArea
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                            Button("0% 標準外框") {
-                                borderInsetPercentage = 0.0
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                bottomAdjustmentToolbar
+            }
 
-                            Button("+2% 完整留白") {
-                                borderInsetPercentage = 2.0
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
+            if isProcessingCrop {
+                ZStack {
+                    Color.black.opacity(0.45).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.large)
+                            .tint(.white)
+                        Text("正在套用四頂點透視裁切...")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
                     }
-                    .padding(.vertical, 4)
-                } header: {
-                    Text("裁切邊界微調")
-                } footer: {
-                    Text("負值（Inset）可向內收縮去除桌面黑邊陰影；正值（Outset）可向外保留完整相紙邊緣。")
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 18)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
+                .transition(.opacity)
+            }
+        }
+        .preferredColorScheme(.dark)
+        .statusBarHidden(true)
+        .onAppear {
+            loadSourceImageAndCorners(forBackside: editingBackside)
+        }
+        .onChange(of: editingBackside) { _, newValue in
+            resetZoomAndPan()
+            loadSourceImageAndCorners(forBackside: newValue)
+        }
+    }
 
-                Section("相紙規格比例鎖定") {
-                    Picker("相紙規格", selection: $selectedFormat) {
-                        ForEach(FilmFormat.allCases, id: \.self) { format in
-                            Text(format.displayName).tag(format)
-                        }
-                    }
-                    .onChange(of: selectedFormat) { _, newFormat in
-                        item.filmFormat = newFormat
-                        if newFormat != .auto {
-                            item.detectedAspectRatio = newFormat.aspectRatio
-                        }
-                        try? modelContext.save()
-                    }
+    // MARK: - 1. 頂部工具列 (Apple Photos 裁切頂部列：取消 / 還原 / 正反切換 / 完成)
+
+    private var topNavigationToolbar: some View {
+        HStack(spacing: 12) {
+            // 左側：取消 (✕)
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Color.white.opacity(0.14), in: Circle())
+            }
+            .accessibilityLabel("取消裁切")
+
+            // 還原按鈕
+            Button {
+                withAnimation(.snappy(duration: 0.24)) {
+                    resetCornersToInitial()
+                    resetZoomAndPan()
+                    borderInsetPercentage = 0.0
                 }
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } label: {
+                Text("還原")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(hasUnsavedChanges || effectiveZoom > 1.01 ? Color.yellow : Color.white.opacity(0.38))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.10), in: Capsule())
+            }
+            .disabled(!hasUnsavedChanges && effectiveZoom <= 1.01)
 
-                Section("正反雙面管理") {
+            Spacer()
+
+            // 中央：正反面切換或標題膠囊
+            if item.hasBothSides {
+                HStack(spacing: 2) {
                     Button {
-                        onRequestBacksidePicker()
+                        editingBackside = false
                     } label: {
-                        Label(
-                            item.hasBothSides ? "從相簿替換背面照片" : "從相簿補上背面照片",
-                            systemImage: "photo.badge.plus"
-                        )
+                        Text("正面")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(!editingBackside ? .black : .white.opacity(0.8))
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
+                            .background(!editingBackside ? Color.yellow : Color.clear, in: Capsule())
                     }
+                    Button {
+                        editingBackside = true
+                    } label: {
+                        Text("背面")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(editingBackside ? .black : .white.opacity(0.8))
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
+                            .background(editingBackside ? Color.yellow : Color.clear, in: Capsule())
+                    }
+                }
+                .padding(3)
+                .background(Color.white.opacity(0.14), in: Capsule())
+            } else {
+                Text("手動四頂點裁切")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+
+            Spacer()
+
+            // 縮放倍率重置標籤（當雙指放大時顯示）
+            if effectiveZoom > 1.02 {
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        resetZoomAndPan()
+                    }
+                } label: {
+                    Text(String(format: "%.1fx", effectiveZoom))
+                        .font(.caption.monospacedDigit().weight(.bold))
+                        .foregroundStyle(.yellow)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.14), in: Capsule())
                 }
             }
-            .navigationTitle("調整拍立得")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") {
-                        dismiss()
+
+            // 右側：完成 (✓)
+            Button {
+                Task {
+                    await applyManualQuadCropAndSave()
+                }
+            } label: {
+                Text("完成")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.yellow, in: Capsule())
+            }
+            .disabled(isProcessingCrop)
+            .accessibilityLabel("完成裁切")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+    }
+
+    // MARK: - 2. 中央互動畫布（透明灰色切除遮罩 + 四頂點拖曳 + 雙指縮放 + 放大鏡）
+
+    private var cropCanvasArea: some View {
+        GeometryReader { geo in
+            let viewportSize = geo.size
+            if let uiImage = sourceUIImage {
+                let baseRect = Self.aspectFitRect(imageSize: uiImage.size, in: viewportSize, padding: 26)
+                let transformedRect = Self.transformedImageRect(
+                    baseRect: baseRect,
+                    viewportSize: viewportSize,
+                    scale: effectiveZoom,
+                    pan: CGSize(
+                        width: panOffset.width + activePanDelta.width,
+                        height: panOffset.height + activePanDelta.height
+                    )
+                )
+                let screenCorners = normalizedCorners.map { pt in
+                    CGPoint(
+                        x: transformedRect.minX + pt.x * transformedRect.width,
+                        y: transformedRect.minY + pt.y * transformedRect.height
+                    )
+                }
+
+                ZStack {
+                    // 底層：原始圖片（支援雙指縮放與平移）
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: transformedRect.width, height: transformedRect.height)
+                        .position(x: transformedRect.midX, y: transformedRect.midY)
+
+                    // 切除的部分用透明灰色 (Even-Odd Fill：圖片外框減去四頂點多邊形內部)
+                    Path { path in
+                        path.addRect(transformedRect)
+                        if screenCorners.count == 4 {
+                            path.move(to: screenCorners[0])
+                            path.addLine(to: screenCorners[1])
+                            path.addLine(to: screenCorners[2])
+                            path.addLine(to: screenCorners[3])
+                            path.closeSubpath()
+                        }
                     }
-                    .fontWeight(.semibold)
+                    .fill(Color(white: 0.22).opacity(0.66), style: FillStyle(eoFill: true))
+                    .allowsHitTesting(false)
+
+                    // 雙指縮放與單指空白處拖曳平移手勢層
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(canvasPanAndPinchGesture(baseRect: baseRect, viewportSize: viewportSize))
+                        .onTapGesture(count: 2) {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                                if effectiveZoom > 1.05 {
+                                    resetZoomAndPan()
+                                } else {
+                                    zoomScale = 2.2
+                                }
+                            }
+                        }
+
+                    // 四邊形白色邊框 + 3x3 透視九宮格輔助線
+                    if screenCorners.count == 4 {
+                        quadGridAndBorderOverlay(screenCorners: screenCorners)
+                            .allowsHitTesting(false)
+                    }
+
+                    // 四個可獨立移動的頂點控制柄 (TL, TR, BR, BL)
+                    ForEach(0..<min(4, screenCorners.count), id: \.self) { index in
+                        vertexHandle(
+                            index: index,
+                            screenPoint: screenCorners[index],
+                            transformedRect: transformedRect
+                        )
+                    }
+
+                    // 拖曳頂點時的局部放大鏡 (Magnifying Loupe)
+                    if let activeIdx = activeDraggingCornerIndex,
+                       activeIdx < normalizedCorners.count {
+                        vertexLoupeView(
+                            uiImage: uiImage,
+                            normalizedPoint: normalizedCorners[activeIdx],
+                            cornerIndex: activeIdx,
+                            viewportSize: viewportSize
+                        )
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+                    }
+
+                    // 頂部操作提示膠囊
+                    VStack {
+                        if let banner = statusBannerText {
+                            Text(banner)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .padding(.top, 6)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        } else if activeDraggingCornerIndex == nil {
+                            HStack(spacing: 6) {
+                                Image(systemName: "hand.point.up.left.and.text")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.yellow)
+                                Text("拖曳四個頂點調整裁切範圍・雙指可縮放畫面")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.white.opacity(0.85))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Color.black.opacity(0.55), in: Capsule())
+                            .padding(.top, 6)
+                        }
+                        Spacer()
+                    }
+                    .allowsHitTesting(false)
+                }
+                .coordinateSpace(name: "QuadCropViewport")
+                .clipped()
+            } else {
+                ContentUnavailableView("無法載入拍立得影像", systemImage: "photo.badge.exclamationmark")
+            }
+        }
+    }
+
+    // MARK: - 四邊形格線與外框繪製
+
+    private func quadGridAndBorderOverlay(screenCorners: [CGPoint]) -> some View {
+        ZStack {
+            // 3x3 雙線性插值透視網格
+            Path { path in
+                let tl = screenCorners[0]
+                let tr = screenCorners[1]
+                let br = screenCorners[2]
+                let bl = screenCorners[3]
+
+                for step in 1...2 {
+                    let t = CGFloat(step) / 3.0
+                    // 垂直分割線 (Top -> Bottom)
+                    let topPt = CGPoint(x: tl.x + (tr.x - tl.x) * t, y: tl.y + (tr.y - tl.y) * t)
+                    let botPt = CGPoint(x: bl.x + (br.x - bl.x) * t, y: bl.y + (br.y - bl.y) * t)
+                    path.move(to: topPt)
+                    path.addLine(to: botPt)
+
+                    // 水平分割線 (Left -> Right)
+                    let leftPt = CGPoint(x: tl.x + (bl.x - tl.x) * t, y: tl.y + (bl.y - tl.y) * t)
+                    let rightPt = CGPoint(x: tr.x + (br.x - tr.x) * t, y: tr.y + (br.y - tr.y) * t)
+                    path.move(to: leftPt)
+                    path.addLine(to: rightPt)
+                }
+            }
+            .stroke(
+                Color.white.opacity(activeDraggingCornerIndex != nil ? 0.58 : 0.30),
+                style: StrokeStyle(lineWidth: 0.85)
+            )
+
+            // 邊界微調預覽虛線（當 borderInsetPercentage != 0 時顯示向內/向外偏移預覽框）
+            if abs(borderInsetPercentage) > 0.05 {
+                let insetCorners = Self.insetPolygonPoints(
+                    screenCorners,
+                    ratio: CGFloat(borderInsetPercentage / 100.0)
+                )
+                Path { path in
+                    path.move(to: insetCorners[0])
+                    path.addLine(to: insetCorners[1])
+                    path.addLine(to: insetCorners[2])
+                    path.addLine(to: insetCorners[3])
+                    path.closeSubpath()
+                }
+                .stroke(
+                    Color.yellow.opacity(0.85),
+                    style: StrokeStyle(lineWidth: 1.3, dash: [5, 4])
+                )
+            }
+
+            // 四頂點實線主外框
+            Path { path in
+                path.move(to: screenCorners[0])
+                path.addLine(to: screenCorners[1])
+                path.addLine(to: screenCorners[2])
+                path.addLine(to: screenCorners[3])
+                path.closeSubpath()
+            }
+            .stroke(Color.white, style: StrokeStyle(lineWidth: 1.8, lineJoin: .round))
+        }
+    }
+
+    // MARK: - 單一頂點控制柄 (Apple Photos L 型角標 + 圓形精準錨點)
+
+    private func vertexHandle(
+        index: Int,
+        screenPoint: CGPoint,
+        transformedRect: CGRect
+    ) -> some View {
+        let isDragging = (activeDraggingCornerIndex == index)
+
+        return ZStack {
+            // 外圈觸控光暈
+            Circle()
+                .fill(isDragging ? Color.yellow.opacity(0.28) : Color.black.opacity(0.28))
+                .frame(width: isDragging ? 42 : 30, height: isDragging ? 42 : 30)
+
+            // 白色/黃色粗框圓環 + 中心準星
+            Circle()
+                .strokeBorder(isDragging ? Color.yellow : Color.white, lineWidth: 3.0)
+                .background(Circle().fill(Color.white.opacity(0.18)))
+                .frame(width: 22, height: 22)
+                .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
+
+            Circle()
+                .fill(isDragging ? Color.yellow : Color.white)
+                .frame(width: 6, height: 6)
+        }
+        .frame(width: 52, height: 52)
+        .contentShape(Circle())
+        .position(screenPoint)
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .named("QuadCropViewport"))
+                .onChanged { value in
+                    if activeDraggingCornerIndex != index {
+                        activeDraggingCornerIndex = index
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                    guard transformedRect.width > 10, transformedRect.height > 10 else { return }
+                    let nx = (value.location.x - transformedRect.minX) / transformedRect.width
+                    let ny = (value.location.y - transformedRect.minY) / transformedRect.height
+                    let clamped = CGPoint(
+                        x: min(max(nx, 0.01), 0.99),
+                        y: min(max(ny, 0.01), 0.99)
+                    )
+                    normalizedCorners[index] = clamped
+                }
+                .onEnded { _ in
+                    // 確保四個頂點維持 [TL, TR, BR, BL] 拓撲順序避免自交翻轉
+                    normalizedCorners = VisionManager.orderPoints(normalizedCorners)
+                    activeDraggingCornerIndex = nil
+                    UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+                }
+        )
+        .accessibilityLabel("移動\(cornerNames[index])頂點")
+    }
+
+    // MARK: - 頂點局部放大鏡 (Magnifying Loupe)
+
+    private func vertexLoupeView(
+        uiImage: UIImage,
+        normalizedPoint: CGPoint,
+        cornerIndex: Int,
+        viewportSize: CGSize
+    ) -> some View {
+        let loupeDiameter: CGFloat = 104
+        let zoomFactor: CGFloat = 2.8
+        let displayedW = loupeDiameter * zoomFactor
+        let displayedH = displayedW * (uiImage.size.height / max(1, uiImage.size.width))
+        let offsetX = (0.5 - normalizedPoint.x) * displayedW
+        let offsetY = (0.5 - normalizedPoint.y) * displayedH
+
+        return VStack {
+            HStack {
+                if cornerIndex == 0 || cornerIndex == 3 {
+                    Spacer()
+                }
+                ZStack {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: displayedW, height: displayedH)
+                        .offset(x: offsetX, y: offsetY)
+
+                    // 十字準星
+                    Path { path in
+                        path.move(to: CGPoint(x: loupeDiameter / 2, y: 0))
+                        path.addLine(to: CGPoint(x: loupeDiameter / 2, y: loupeDiameter))
+                        path.move(to: CGPoint(x: 0, y: loupeDiameter / 2))
+                        path.addLine(to: CGPoint(x: loupeDiameter, y: loupeDiameter / 2))
+                    }
+                    .stroke(Color.yellow.opacity(0.9), lineWidth: 1.1)
+                }
+                .frame(width: loupeDiameter, height: loupeDiameter)
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.yellow, lineWidth: 2.5)
+                )
+                .overlay(alignment: .bottom) {
+                    Text(cornerNames[cornerIndex])
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.yellow, in: Capsule())
+                        .offset(y: 8)
+                }
+                .shadow(color: .black.opacity(0.65), radius: 10, y: 4)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+
+                if cornerIndex == 1 || cornerIndex == 2 {
+                    Spacer()
+                }
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: - 3. 底部 Apple Photos 風格控制面板（邊界刻度尺 + 自動偵測/旋轉 + 相紙比例膠囊）
+
+    private var bottomAdjustmentToolbar: some View {
+        VStack(spacing: 14) {
+            // (A) 邊界微調偏移刻度滑桿 (-3.0% ~ +3.0%)，模仿 Apple Photos 角度刻度尺
+            VStack(spacing: 6) {
+                HStack {
+                    Text("邊界微調 (Inset / Outset)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.65))
+                    Spacer()
+                    Text(String(format: "%+.1f%%", borderInsetPercentage))
+                        .font(.caption.monospacedDigit().weight(.bold))
+                        .foregroundStyle(abs(borderInsetPercentage) > 0.05 ? .yellow : .white.opacity(0.75))
+                }
+                .padding(.horizontal, 24)
+
+                ZStack {
+                    // 刻度線視覺裝飾
+                    HStack(spacing: 6) {
+                        ForEach(-15...15, id: \.self) { tick in
+                            Rectangle()
+                                .fill(
+                                    tick == 0
+                                        ? Color.yellow
+                                        : (tick % 5 == 0 ? Color.white.opacity(0.55) : Color.white.opacity(0.24))
+                                )
+                                .frame(width: tick == 0 ? 2.0 : 1.0, height: tick % 5 == 0 ? 12 : 7)
+                        }
+                    }
+                    .allowsHitTesting(false)
+
+                    Slider(value: $borderInsetPercentage, in: -3.0...3.0, step: 0.5)
+                        .tint(.yellow)
+                        .padding(.horizontal, 24)
+                }
+            }
+
+            // (B) 相紙比例鎖定膠囊列 (Auto / Mini / Square / Wide)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(FilmFormat.allCases, id: \.self) { format in
+                        let isSelected = (selectedFormat == format)
+                        Button {
+                            withAnimation(.snappy(duration: 0.22)) {
+                                selectedFormat = format
+                            }
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: format == .square ? "square" : (format == .wide ? "rectangle" : "rectangle.portrait"))
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text(format.displayName)
+                                    .font(.caption.weight(.bold))
+                            }
+                            .foregroundStyle(isSelected ? .black : .white.opacity(0.85))
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 7)
+                            .background(
+                                isSelected ? Color.yellow : Color.white.opacity(0.12),
+                                in: Capsule()
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+
+            // (C) 底部工具動作列（Vision 自動吸附 / 旋轉 90° / 滿版頂點 / 補拍背面）
+            HStack(spacing: 22) {
+                Button {
+                    Task {
+                        await runAutoDetectCorners()
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "viewfinder.rectangular")
+                            .font(.system(size: 19, weight: .semibold))
+                        Text("自動吸附")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                }
+
+                Button {
+                    rotateSourceImage90DegreesCounterClockwise()
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "rotate.left")
+                            .font(.system(size: 19, weight: .semibold))
+                        Text("旋轉 90°")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                }
+
+                Button {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        normalizedCorners = [
+                            CGPoint(x: 0.04, y: 0.04),
+                            CGPoint(x: 0.96, y: 0.04),
+                            CGPoint(x: 0.96, y: 0.96),
+                            CGPoint(x: 0.04, y: 0.96)
+                        ]
+                        borderInsetPercentage = 0.0
+                    }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 18, weight: .semibold))
+                        Text("展開四點")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                }
+
+                Button {
+                    onRequestBacksidePicker()
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 18, weight: .semibold))
+                        Text(item.hasBothSides ? "換背面圖" : "補背面圖")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+        }
+        .padding(.top, 10)
+        .background(Color(white: 0.08).opacity(0.96))
+    }
+
+    // MARK: - 4. 雙指縮放與平移手勢計算
+
+    private func canvasPanAndPinchGesture(baseRect: CGRect, viewportSize: CGSize) -> some Gesture {
+        let magnify = MagnifyGesture()
+            .onChanged { value in
+                activePinchScale = value.magnification
+            }
+            .onEnded { value in
+                zoomScale = max(1.0, min(4.5, zoomScale * value.magnification))
+                activePinchScale = 1.0
+                if zoomScale <= 1.02 {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        zoomScale = 1.0
+                        panOffset = .zero
+                    }
+                } else {
+                    panOffset = Self.clampedPanOffset(
+                        panOffset,
+                        baseRect: baseRect,
+                        viewportSize: viewportSize,
+                        scale: zoomScale
+                    )
+                }
+            }
+
+        let pan = DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                guard effectiveZoom > 1.01 else { return }
+                activePanDelta = value.translation
+            }
+            .onEnded { value in
+                guard effectiveZoom > 1.01 else {
+                    activePanDelta = .zero
+                    return
+                }
+                let rawPan = CGSize(
+                    width: panOffset.width + value.translation.width,
+                    height: panOffset.height + value.translation.height
+                )
+                panOffset = Self.clampedPanOffset(
+                    rawPan,
+                    baseRect: baseRect,
+                    viewportSize: viewportSize,
+                    scale: zoomScale
+                )
+                activePanDelta = .zero
+            }
+
+        return SimultaneousGesture(magnify, pan)
+    }
+
+    private func resetZoomAndPan() {
+        zoomScale = 1.0
+        activePinchScale = 1.0
+        panOffset = .zero
+        activePanDelta = .zero
+    }
+
+    private func resetCornersToInitial() {
+        if initialCornersSnapshot.count == 4 {
+            normalizedCorners = initialCornersSnapshot
+        }
+    }
+
+    // MARK: - 5. 載入底圖、自動偵測與套用四頂點透視裁切
+
+    private func loadSourceImageAndCorners(forBackside: Bool) {
+        if forBackside {
+            if let origBackData = item.originalBackImageData,
+               let origBackImg = UIImage(data: origBackData)?.normalizedImage {
+                sourceUIImage = origBackImg
+                if let saved = ChekiItem.decodeNormalizedCorners(from: item.backPerspectivePointsJSON) {
+                    normalizedCorners = saved
+                } else {
+                    normalizedCorners = Self.defaultQuadCorners
+                }
+            } else if let croppedBackData = item.backImageData,
+                      let croppedBackImg = UIImage(data: croppedBackData)?.normalizedImage {
+                let (canvasImg, defaultCorners) = Self.synthesizeUncroppedCanvas(around: croppedBackImg)
+                sourceUIImage = canvasImg
+                normalizedCorners = defaultCorners
+                if let jpeg = canvasImg.jpegData(compressionQuality: 0.92) {
+                    item.originalBackImageData = jpeg
+                    item.backPerspectivePointsJSON = ChekiItem.encodeNormalizedCorners(defaultCorners)
+                }
+            }
+        } else {
+            if let origFrontData = item.originalFrontImageData,
+               let origFrontImg = UIImage(data: origFrontData)?.normalizedImage {
+                sourceUIImage = origFrontImg
+                if let saved = ChekiItem.decodeNormalizedCorners(from: item.perspectivePointsJSON) {
+                    normalizedCorners = saved
+                } else {
+                    normalizedCorners = Self.defaultQuadCorners
+                }
+            } else if let croppedFrontData = item.frontImageData,
+                      let croppedFrontImg = UIImage(data: croppedFrontData)?.normalizedImage {
+                let (canvasImg, defaultCorners) = Self.synthesizeUncroppedCanvas(around: croppedFrontImg)
+                sourceUIImage = canvasImg
+                normalizedCorners = defaultCorners
+                if let jpeg = canvasImg.jpegData(compressionQuality: 0.92) {
+                    item.originalFrontImageData = jpeg
+                    item.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(defaultCorners)
+                }
+            }
+        }
+        initialCornersSnapshot = normalizedCorners
+    }
+
+    @MainActor
+    private func runAutoDetectCorners() async {
+        guard let uiImage = sourceUIImage, let cgImage = uiImage.cgImage else { return }
+        let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let visionManager = VisionManager()
+
+        if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: imgSize),
+           detection.corners.count == 4 {
+            let ordered = VisionManager.orderPoints(detection.corners)
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+                normalizedCorners = ordered.map { pt in
+                    CGPoint(
+                        x: min(max(pt.x / max(1, imgSize.width), 0.01), 0.99),
+                        y: min(max(pt.y / max(1, imgSize.height), 0.01), 0.99)
+                    )
+                }
+            }
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            showBanner("已自動吸附拍立得四個頂點")
+        } else {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+                normalizedCorners = Self.defaultQuadCorners
+            }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            showBanner("已重設為標準拍立得四頂點範圍")
+        }
+    }
+
+    private func rotateSourceImage90DegreesCounterClockwise() {
+        guard let currentImg = sourceUIImage else { return }
+        let newSize = CGSize(width: currentImg.size.height, height: currentImg.size.width)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let rotated = renderer.image { ctx in
+            ctx.cgContext.translateBy(x: newSize.width / 2, y: newSize.height / 2)
+            ctx.cgContext.rotate(by: -.pi / 2)
+            currentImg.draw(in: CGRect(
+                x: -currentImg.size.width / 2,
+                y: -currentImg.size.height / 2,
+                width: currentImg.size.width,
+                height: currentImg.size.height
+            ))
+        }
+        sourceUIImage = rotated
+        // 同步逆時針旋轉正規化頂點：(x, y) -> (y, 1 - x)
+        let rotatedPts = normalizedCorners.map { pt in
+            CGPoint(x: pt.y, y: 1.0 - pt.x)
+        }
+        normalizedCorners = VisionManager.orderPoints(rotatedPts)
+        if let jpeg = rotated.jpegData(compressionQuality: 0.92) {
+            if editingBackside {
+                item.originalBackImageData = jpeg
+            } else {
+                item.originalFrontImageData = jpeg
+            }
+        }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    @MainActor
+    private func applyManualQuadCropAndSave() async {
+        guard let uiImage = sourceUIImage, let cgImage = uiImage.cgImage else {
+            dismiss()
+            return
+        }
+
+        isProcessingCrop = true
+        defer { isProcessingCrop = false }
+
+        let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let orderedNorm = VisionManager.orderPoints(normalizedCorners)
+        let pixelCorners = orderedNorm.map { pt in
+            CGPoint(x: pt.x * imgSize.width, y: pt.y * imgSize.height)
+        }
+
+        let insetRatio = borderInsetPercentage / 100.0
+        let visionManager = VisionManager()
+        let adjustedPixelCorners = await visionManager.applyBorderInset(
+            corners: pixelCorners,
+            imageSize: imgSize,
+            ratio: insetRatio
+        )
+
+        let chekiFormat: ChekiFilmFormat = {
+            switch selectedFormat {
+            case .mini: return .mini
+            case .square: return .square
+            case .wide: return .wide
+            case .auto: return .auto
+            }
+        }()
+
+        let manualDetection = DetectionResult(
+            corners: adjustedPixelCorners,
+            method: .visionNative,
+            confidence: 1.0,
+            imageSize: imgSize
+        )
+
+        if let cropResult = try? await visionManager.perspectiveCorrect(
+            image: cgImage,
+            corners: adjustedPixelCorners,
+            detection: manualDetection,
+            format: chekiFormat
+        ),
+        let croppedJPEG = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92) {
+            let encodedJSON = ChekiItem.encodeNormalizedCorners(orderedNorm)
+            if editingBackside {
+                item.backImageData = croppedJPEG
+                item.backPerspectivePointsJSON = encodedJSON
+            } else {
+                item.frontImageData = croppedJPEG
+                item.perspectivePointsJSON = encodedJSON
+            }
+            item.borderInsetRatio = insetRatio
+            item.filmFormat = selectedFormat
+            if cropResult.outputSize.width > 0 {
+                item.detectedAspectRatio = Double(cropResult.outputSize.height / cropResult.outputSize.width)
+            }
+            try? modelContext.save()
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            onAppliedToast("已重新裁切並更新拍立得")
+            dismiss()
+        } else {
+            showBanner("裁切範圍無效，請確認四個頂點未交錯")
+        }
+    }
+
+    private func showBanner(_ text: String) {
+        withAnimation {
+            statusBannerText = text
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation {
+                if statusBannerText == text {
+                    statusBannerText = nil
                 }
             }
         }
     }
+
+    // MARK: - 6. 幾何計算與合成外框輔助函數
+
+    private static let defaultQuadCorners: [CGPoint] = [
+        CGPoint(x: 0.12, y: 0.12),
+        CGPoint(x: 0.88, y: 0.12),
+        CGPoint(x: 0.88, y: 0.88),
+        CGPoint(x: 0.12, y: 0.88)
+    ]
+
+    /// 為僅有裁切後成品圖的舊資料合成外圍桌面背景，讓使用者進入編輯器時依然能看到外圍「透明灰色切除區」並自由微調四個頂點
+    private static func synthesizeUncroppedCanvas(around croppedImage: UIImage) -> (UIImage, [CGPoint]) {
+        let marginRatio: CGFloat = 0.12
+        let innerW = max(1, croppedImage.size.width)
+        let innerH = max(1, croppedImage.size.height)
+        let canvasW = round(innerW / (1.0 - marginRatio * 2.0))
+        let canvasH = round(innerH / (1.0 - marginRatio * 2.0))
+        let originX = round((canvasW - innerW) / 2.0)
+        let originY = round((canvasH - innerH) / 2.0)
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.0
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: canvasW, height: canvasH), format: format)
+        let synthesized = renderer.image { ctx in
+            let cg = ctx.cgContext
+            // 外圍深色木紋/桌面質感底色
+            UIColor(red: 0.16, green: 0.15, blue: 0.18, alpha: 1.0).setFill()
+            cg.fill(CGRect(x: 0, y: 0, width: canvasW, height: canvasH))
+
+            // 淡淡的環境格紋讓雙指縮放與頂點拖曳有清楚的視覺參照
+            UIColor(white: 1.0, alpha: 0.04).setStroke()
+            cg.setLineWidth(1.5)
+            let step = max(24.0, min(canvasW, canvasH) / 14.0)
+            stride(from: 0.0, through: canvasW, by: step).forEach { x in
+                cg.move(to: CGPoint(x: x, y: 0))
+                cg.addLine(to: CGPoint(x: x, y: canvasH))
+            }
+            stride(from: 0.0, through: canvasH, by: step).forEach { y in
+                cg.move(to: CGPoint(x: 0, y: y))
+                cg.addLine(to: CGPoint(x: canvasW, y: y))
+            }
+            cg.strokePath()
+
+            // 繪製中央拍立得影像
+            croppedImage.draw(in: CGRect(x: originX, y: originY, width: innerW, height: innerH))
+        }
+
+        let minX = originX / canvasW
+        let minY = originY / canvasH
+        let maxX = (originX + innerW) / canvasW
+        let maxY = (originY + innerH) / canvasH
+
+        let corners = [
+            CGPoint(x: minX, y: minY),
+            CGPoint(x: maxX, y: minY),
+            CGPoint(x: maxX, y: maxY),
+            CGPoint(x: minX, y: maxY)
+        ]
+        return (synthesized, corners)
+    }
+
+    private static func aspectFitRect(imageSize: CGSize, in viewportSize: CGSize, padding: CGFloat) -> CGRect {
+        let availW = max(1, viewportSize.width - padding * 2)
+        let availH = max(1, viewportSize.height - padding * 2)
+        let imgW = max(1, imageSize.width)
+        let imgH = max(1, imageSize.height)
+        let scale = min(availW / imgW, availH / imgH)
+        let fitW = imgW * scale
+        let fitH = imgH * scale
+        return CGRect(
+            x: (viewportSize.width - fitW) / 2.0,
+            y: (viewportSize.height - fitH) / 2.0,
+            width: fitW,
+            height: fitH
+        )
+    }
+
+    private static func transformedImageRect(
+        baseRect: CGRect,
+        viewportSize: CGSize,
+        scale: CGFloat,
+        pan: CGSize
+    ) -> CGRect {
+        let clampedPan = clampedPanOffset(pan, baseRect: baseRect, viewportSize: viewportSize, scale: scale)
+        let scaledW = baseRect.width * scale
+        let scaledH = baseRect.height * scale
+        let centerX = viewportSize.width / 2.0 + clampedPan.width
+        let centerY = viewportSize.height / 2.0 + clampedPan.height
+        return CGRect(
+            x: centerX - scaledW / 2.0,
+            y: centerY - scaledH / 2.0,
+            width: scaledW,
+            height: scaledH
+        )
+    }
+
+    private static func clampedPanOffset(
+        _ pan: CGSize,
+        baseRect: CGRect,
+        viewportSize: CGSize,
+        scale: CGFloat
+    ) -> CGSize {
+        let scaledW = baseRect.width * scale
+        let scaledH = baseRect.height * scale
+        let maxOffsetX = max(40, (scaledW - viewportSize.width) / 2.0 + 60)
+        let maxOffsetY = max(40, (scaledH - viewportSize.height) / 2.0 + 60)
+        return CGSize(
+            width: min(max(pan.width, -maxOffsetX), maxOffsetX),
+            height: min(max(pan.height, -maxOffsetY), maxOffsetY)
+        )
+    }
+
+    private static func insetPolygonPoints(_ pts: [CGPoint], ratio: CGFloat) -> [CGPoint] {
+        guard pts.count == 4 else { return pts }
+        let cx = pts.map(\.x).reduce(0, +) / 4.0
+        let cy = pts.map(\.y).reduce(0, +) / 4.0
+        let scale = 1.0 + ratio
+        return pts.map { pt in
+            CGPoint(
+                x: cx + (pt.x - cx) * scale,
+                y: cy + (pt.y - cy) * scale
+            )
+        }
+    }
 }
+
 
 // MARK: - Preview
 
