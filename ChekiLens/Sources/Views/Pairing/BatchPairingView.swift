@@ -49,8 +49,43 @@ struct ChekiPairingSlot: Identifiable, Equatable {
     let id: UUID
     var frontPhoto: StagingChekiPhoto
     var backPhoto: StagingChekiPhoto?
-    /// 每張（或每組）拍立得可獨立指派歸檔成員（支援同一批上傳多位不同成員）
-    var assignedMember: IdolMember?
+    /// 每張（或每組）拍立得可獨立指派 1 至多位歸檔成員（支援多人合照或同一批上傳不同人的拍立得）
+    var assignedMembers: [IdolMember]
+
+    var assignedMember: IdolMember? {
+        get { assignedMembers.first }
+        set {
+            if let member = newValue {
+                assignedMembers = [member]
+            } else {
+                assignedMembers = []
+            }
+        }
+    }
+
+    init(
+        id: UUID,
+        frontPhoto: StagingChekiPhoto,
+        backPhoto: StagingChekiPhoto?,
+        assignedMembers: [IdolMember] = []
+    ) {
+        self.id = id
+        self.frontPhoto = frontPhoto
+        self.backPhoto = backPhoto
+        self.assignedMembers = assignedMembers
+    }
+
+    init(
+        id: UUID,
+        frontPhoto: StagingChekiPhoto,
+        backPhoto: StagingChekiPhoto?,
+        assignedMember: IdolMember?
+    ) {
+        self.id = id
+        self.frontPhoto = frontPhoto
+        self.backPhoto = backPhoto
+        self.assignedMembers = assignedMember.map { [$0] } ?? []
+    }
 
     var isPaired: Bool {
         backPhoto != nil
@@ -72,20 +107,21 @@ struct ChekiPairingSlot: Identifiable, Equatable {
         lhs.id == rhs.id &&
         lhs.frontPhoto == rhs.frontPhoto &&
         lhs.backPhoto == rhs.backPhoto &&
-        lhs.assignedMember?.id == rhs.assignedMember?.id
+        lhs.assignedMembers.map(\.id) == rhs.assignedMembers.map(\.id)
     }
 }
 
-// MARK: - BatchPairingView (Task 4.4: 批次配對工作台 — 格狀相簿檢視 + 撲克牌正反展開 + 多人歸檔設定)
+// MARK: - BatchPairingView (Task 4.4: 批次配對工作台 — 格狀相簿檢視 + 撲克牌正反展開 + 多層多選成員歸檔設定)
 
 /// 批次相簿匯入與正反面配對工作台
 /// - 採用與相簿一覽相同的 **格狀檢視 (`LazyVGrid`)**
 /// - 正反雙面配對項目採用 **撲克牌兩張扇形展開樣式 (`Playing-Card Fan`)**，直覺呈現正反疊合關係
-/// - 支援 **多人歸檔設定**：每組拍立得卡片下方皆可獨立指派所屬成員，亦支援頂部「快速指派成員筆刷」與「批次套用」
+/// - 支援 **多層選擇 Multiple Select（團體 ➔ 成員，最後可新增成員）**，並提供 **「全部套用」** 與 **「選擇套用（多選照片後確認一次套用）」**
 struct BatchPairingView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \IdolGroup.sortOrder, order: .forward) private var idolGroups: [IdolGroup]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
     @AppStorage("hasSeenBatchPairingCoachMark") private var hasSeenCoachMark: Bool = false
     @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = false
@@ -97,12 +133,15 @@ struct BatchPairingView: View {
     @State private var allPhotos: [StagingChekiPhoto] = []
     @State private var slots: [ChekiPairingSlot] = []
 
-    /// 記錄每張相片已指派的成員（切換配對模式或拆開/重組時保留各自的成員設定）
-    @State private var photoMemberAssignment: [UUID: IdolMember] = [:]
+    /// 記錄每張相片已指派的成員清單（切換配對模式或拆開/重組時保留各自的成員設定）
+    @State private var photoMemberAssignment: [UUID: [IdolMember]] = [:]
 
-    /// 快速指派成員筆刷（若開啟，點選任一成員標籤後點擊卡片即可快速指派該成員；nil 代表一般配對點擊）
-    @State private var activeBrushMember: IdolMember? = nil
-    @State private var isMemberBrushMode: Bool = false
+    /// 上方「歸檔成員」多層選擇 (Multiple Select) 當前勾選的目標成員清單
+    @State private var selectedTargetMembers: [IdolMember] = []
+
+    /// 「選擇套用」模式：開啟後可多選下方拍立得卡片，再按「確認套用」一次套用所選成員
+    @State private var isSelectingPhotosToApply: Bool = false
+    @State private var selectedSlotIDsForApply: Set<UUID> = []
 
     // 手動配對模式下，使用者點選的第一張「待配對正面」Slot ID
     @State private var selectedFirstSlotID: UUID? = nil
@@ -154,17 +193,32 @@ struct BatchPairingView: View {
         doubleFrontWarningCount + reversedWarningCount
     }
 
+    /// 上方多層多選成員選擇器目前選中的成員摘要字串
+    private var selectedTargetMembersDisplayString: String {
+        if selectedTargetMembers.isEmpty {
+            return "未分類"
+        } else if selectedTargetMembers.count == 1 {
+            return selectedTargetMembers[0].stageName
+        } else if selectedTargetMembers.count == 2 {
+            return "\(selectedTargetMembers[0].stageName)、\(selectedTargetMembers[1].stageName)"
+        } else {
+            return "\(selectedTargetMembers[0].stageName)、\(selectedTargetMembers[1].stageName) 等 \(selectedTargetMembers.count) 人"
+        }
+    }
+
     /// 目前所有卡片涵蓋的不同成員摘要（例如：「遠藤さくら、河田陽菜 等 3 人」）
     private var assignedMembersSummary: String {
         var uniqueNames: [String] = []
         var hasUncategorized = false
         for slot in slots {
-            if let name = slot.assignedMember?.stageName {
-                if !uniqueNames.contains(name) {
-                    uniqueNames.append(name)
-                }
-            } else {
+            if slot.assignedMembers.isEmpty {
                 hasUncategorized = true
+            } else {
+                for member in slot.assignedMembers {
+                    if !uniqueNames.contains(member.stageName) {
+                        uniqueNames.append(member.stageName)
+                    }
+                }
             }
         }
         if uniqueNames.isEmpty {
@@ -266,6 +320,8 @@ struct BatchPairingView: View {
                                         slots.removeAll()
                                         photoMemberAssignment.removeAll()
                                         selectedFirstSlotID = nil
+                                        isSelectingPhotosToApply = false
+                                        selectedSlotIDsForApply.removeAll()
                                         isUsingSimulatedSample = false
                                     }
                                 } label: {
@@ -292,6 +348,14 @@ struct BatchPairingView: View {
             .sheet(isPresented: $showingQuickCreateMemberSheet) {
                 QuickCreateIdolSheet()
             }
+            .onChange(of: idolMembers.count) { oldCount, newCount in
+                // 當使用者透過「新增成員」建立新成員後，自動將最新建立的成員加入上方多選目標中
+                if newCount > oldCount, let newestMember = idolMembers.last {
+                    if !selectedTargetMembers.contains(where: { $0.id == newestMember.id }) {
+                        selectedTargetMembers.append(newestMember)
+                    }
+                }
+            }
             .alert(
                 "iOS 系統相簿測試相片",
                 isPresented: Binding(
@@ -310,6 +374,9 @@ struct BatchPairingView: View {
                 hasInitialized = true
                 if defaultFallbackMember == nil {
                     defaultFallbackMember = defaultMember ?? idolMembers.first
+                }
+                if selectedTargetMembers.isEmpty, let initialTarget = defaultFallbackMember {
+                    selectedTargetMembers = [initialTarget]
                 }
                 if !initialPickerItems.isEmpty {
                     isUsingSimulatedSample = false
@@ -350,7 +417,7 @@ struct BatchPairingView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    // 1. 多人歸檔成員與相紙規格設定卡
+                    // 1. 多人歸檔成員（多層選擇 Multiple Select + 全部套用 / 選擇套用）與相紙規格設定卡
                     multiMemberAndFormatHeaderCard
 
                     // 2. Vision 防呆警示橫幅（若有雙正面或正反顛倒）
@@ -358,9 +425,9 @@ struct BatchPairingView: View {
                         warningBannerCard
                     }
 
-                    // 3. 手動配對或快速指派成員指引列
-                    if isMemberBrushMode {
-                        memberBrushInstructionBanner
+                    // 3. 「選擇套用（多選照片）」或「手動配對」指引列
+                    if isSelectingPhotosToApply {
+                        photoMultiSelectApplyBanner
                     } else if pairingMode == .manualPair || selectedFirstSlotID != nil {
                         manualPairingInstructionBanner
                     }
@@ -373,7 +440,11 @@ struct BatchPairingView: View {
 
                         Spacer()
 
-                        if isAnalyzingSides {
+                        if isSelectingPhotosToApply {
+                            Text("已勾選 \(selectedSlotIDsForApply.count) / \(slots.count) 張")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.blue)
+                        } else if isAnalyzingSides {
                             HStack(spacing: 4) {
                                 ProgressView()
                                     .controlSize(.mini)
@@ -403,126 +474,105 @@ struct BatchPairingView: View {
         }
     }
 
-    // MARK: - 2. 多人歸檔成員與規格設定卡 (Multi-Member Assignment & Format Header)
+    // MARK: - 2. 多層多選歸檔成員與規格設定卡 (Hierarchical Multiple-Select + Apply All / Select to Apply)
 
     private var multiMemberAndFormatHeaderCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // 第一列：歸檔成員摘要 + 批次套用選單
-            HStack {
+            // 第一列：歸檔成員標題 + 多層選擇 Multiple Select 下拉選單 + 「全部套用」&「選擇套用」
+            HStack(spacing: 6) {
                 Label("歸檔成員", systemImage: "person.2.crop.square.stack")
                     .font(.subheadline.weight(.medium))
+                    .layoutPriority(1)
 
-                Spacer()
+                // 多層選擇 Multiple Select（第一層：團體 ➔ 第二層：成員多選，最後可新增成員）
+                hierarchicalMultiSelectMemberMenu
 
-                Text(assignedMembersSummary)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Spacer(minLength: 2)
 
-                Menu {
-                    Section("將全部拍立得統一設為") {
-                        Button {
-                            assignMemberToAllSlots(nil)
-                        } label: {
-                            Label("全部設為「未分類」", systemImage: "tray")
-                        }
-
-                        ForEach(idolMembers) { member in
-                            Button {
-                                assignMemberToAllSlots(member)
-                            } label: {
-                                let title = member.group != nil
-                                    ? "\(member.stageName)（\(member.group!.name)）"
-                                    : member.stageName
-                                Label("全部設為 \(title)", systemImage: "person.crop.circle.badge.checkmark")
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    Button {
-                        showingQuickCreateMemberSheet = true
-                    } label: {
-                        Label("新增團體 / 成員…", systemImage: "person.badge.plus")
-                    }
+                // 1. 全部套用按鈕
+                Button {
+                    applyTargetMembersToAllSlots()
                 } label: {
                     Text("全部套用")
                         .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
                         .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 5)
                         .background(Color(.tertiarySystemFill), in: Capsule())
                 }
+                .buttonStyle(.plain)
+
+                // 2. 選擇套用按鈕（緊接在「全部套用」後面：開啟照片多選模式，選完照片後確認一次套用）
+                Button {
+                    togglePhotoSelectionApplyMode()
+                } label: {
+                    Text(isSelectingPhotosToApply ? "取消選擇" : "選擇套用")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isSelectingPhotosToApply ? .white : .blue)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(
+                            isSelectingPhotosToApply
+                                ? AnyShapeStyle(Color.blue)
+                                : AnyShapeStyle(Color.blue.opacity(0.14)),
+                            in: Capsule()
+                        )
+                }
+                .buttonStyle(.plain)
             }
 
-            // 第二列：多人快速指派成員晶片列（支援點選成員晶片後，直接點擊下方卡片快速指派不同成員）
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    // 快速指派筆刷開關提示
-                    ForEach(idolMembers) { member in
-                        let isBrushSelected = isMemberBrushMode && activeBrushMember?.id == member.id
-                        let countForMember = slots.filter { $0.assignedMember?.id == member.id }.count
-
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            withAnimation(.snappy(duration: 0.2)) {
-                                if isBrushSelected {
-                                    isMemberBrushMode = false
-                                    activeBrushMember = nil
-                                } else {
-                                    isMemberBrushMode = true
-                                    activeBrushMember = member
-                                    selectedFirstSlotID = nil
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 5) {
+            // 第二列：顯示目前在 Multiple Select 中已勾選的成員標籤（可快速點擊移除或繼續從多層選單增減）
+            if !selectedTargetMembers.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(selectedTargetMembers) { member in
+                            HStack(spacing: 4) {
                                 Circle()
                                     .fill(Self.groupColor(for: member))
-                                    .frame(width: 7, height: 7)
+                                    .frame(width: 6.5, height: 6.5)
 
                                 Text(member.stageName)
-                                    .font(.caption.weight(.semibold))
+                                    .font(.caption2.weight(.semibold))
 
-                                if countForMember > 0 {
-                                    Text("\(countForMember)")
-                                        .font(.system(size: 10, weight: .bold).monospacedDigit())
-                                        .foregroundStyle(isBrushSelected ? Color.accentColor : .white)
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 1)
-                                        .background(
-                                            isBrushSelected ? Color.white : Color.secondary.opacity(0.45),
-                                            in: Capsule()
-                                        )
+                                if let groupName = member.group?.name {
+                                    Text(groupName)
+                                        .font(.system(size: 9.5))
+                                        .foregroundStyle(.secondary)
                                 }
-                            }
-                            .foregroundStyle(isBrushSelected ? .white : .primary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                isBrushSelected ? Color.accentColor : Color(.tertiarySystemFill),
-                                in: Capsule()
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
 
-                    // 新增成員按鈕
-                    Button {
-                        showingQuickCreateMemberSheet = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus")
-                                .font(.caption2.weight(.bold))
-                            Text("新增成員")
-                                .font(.caption.weight(.medium))
+                                Button {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    withAnimation(.snappy(duration: 0.2)) {
+                                        selectedTargetMembers.removeAll { $0.id == member.id }
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(.tertiarySystemFill), in: Capsule())
                         }
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color(.tertiarySystemFill), in: Capsule())
+
+                        if selectedTargetMembers.count > 1 {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                withAnimation(.snappy(duration: 0.2)) {
+                                    selectedTargetMembers.removeAll()
+                                }
+                            } label: {
+                                Text("清空")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
 
@@ -546,32 +596,175 @@ struct BatchPairingView: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
+    /// 頂部多層級成員多選選單 (Multi-Level Multiple Select: 第一層「所屬團體」➔ 第二層「成員 (支援複選)」，最後為「＋ 新增成員」)
+    private var hierarchicalMultiSelectMemberMenu: some View {
+        let ungroupedMembers = idolMembers.filter { $0.group == nil }
+
+        return Menu {
+            Section("多層選擇成員（可複選多位成員）") {
+                // 第一層：依各偶像團體展開子選單 (Group -> Members)
+                ForEach(idolGroups) { group in
+                    let groupMembers = idolMembers.filter { $0.group?.id == group.id }
+                    if !groupMembers.isEmpty {
+                        let selectedInGroupCount = groupMembers.filter { m in
+                            selectedTargetMembers.contains(where: { $0.id == m.id })
+                        }.count
+                        let groupTitle = selectedInGroupCount > 0
+                            ? "\(group.name)（已選 \(selectedInGroupCount) 人）"
+                            : group.name
+
+                        Menu {
+                            ForEach(groupMembers) { member in
+                                let isSelected = selectedTargetMembers.contains(where: { $0.id == member.id })
+                                Button {
+                                    toggleTargetMemberSelection(member)
+                                } label: {
+                                    Label(
+                                        member.stageName,
+                                        systemImage: isSelected ? "checkmark.circle.fill" : "circle"
+                                    )
+                                }
+                                .menuActionDismissBehavior(.disabled)
+                            }
+                        } label: {
+                            Label(
+                                groupTitle,
+                                systemImage: selectedInGroupCount > 0 ? "person.2.circle.fill" : "person.2"
+                            )
+                        }
+                    }
+                }
+
+                // 未分團成員子選單（若有）
+                if !ungroupedMembers.isEmpty {
+                    let selectedUngroupedCount = ungroupedMembers.filter { m in
+                        selectedTargetMembers.contains(where: { $0.id == m.id })
+                    }.count
+                    let ungroupedTitle = selectedUngroupedCount > 0
+                        ? "未分團成員（已選 \(selectedUngroupedCount) 人）"
+                        : "未分團成員"
+
+                    Menu {
+                        ForEach(ungroupedMembers) { member in
+                            let isSelected = selectedTargetMembers.contains(where: { $0.id == member.id })
+                            Button {
+                                toggleTargetMemberSelection(member)
+                            } label: {
+                                Label(
+                                    member.stageName,
+                                    systemImage: isSelected ? "checkmark.circle.fill" : "circle"
+                                )
+                            }
+                            .menuActionDismissBehavior(.disabled)
+                        }
+                    } label: {
+                        Label(
+                            ungroupedTitle,
+                            systemImage: selectedUngroupedCount > 0 ? "person.crop.circle.fill" : "person.crop.circle"
+                        )
+                    }
+                }
+            }
+
+            Divider()
+
+            // 設為未分類（清空選擇）
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                selectedTargetMembers.removeAll()
+            } label: {
+                Label(
+                    "未分類（清空已選成員）",
+                    systemImage: selectedTargetMembers.isEmpty ? "checkmark.circle.fill" : "tray"
+                )
+            }
+
+            Divider()
+
+            // 最後一項：新增成員
+            Button {
+                showingQuickCreateMemberSheet = true
+            } label: {
+                Label("新增成員…", systemImage: "person.badge.plus")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if let firstMember = selectedTargetMembers.first {
+                    Circle()
+                        .fill(Self.groupColor(for: firstMember))
+                        .frame(width: 7, height: 7)
+                }
+                Text(selectedTargetMembersDisplayString)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
     // MARK: - 3. 格狀卡片單元：撲克牌兩張展開樣式 (Playing-Card Fan) & 單張直立樣式
 
     @ViewBuilder
     private func slotGridCell(for slot: ChekiPairingSlot) -> some View {
         let isSelectedFirst = (selectedFirstSlotID == slot.id)
+        let isSelectedForMemberApply = isSelectingPhotosToApply && selectedSlotIDsForApply.contains(slot.id)
         let hasWarning = slot.isDoubleFrontWarning || slot.isReversedOrderWarning
+
+        let borderColor: Color = {
+            if isSelectedForMemberApply || isSelectedFirst {
+                return .blue
+            } else if hasWarning {
+                return .orange.opacity(0.85)
+            } else {
+                return .primary.opacity(0.06)
+            }
+        }()
+        let borderWidth: CGFloat = (isSelectedForMemberApply || isSelectedFirst || hasWarning) ? 2.2 : 1.0
 
         VStack(spacing: 8) {
             // 上方視覺舞台：若為正反雙面則呈現「撲克牌兩張扇形展開」，若為單面則呈現單張拍立得
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(.secondarySystemGroupedBackground))
+                    .fill(
+                        isSelectedForMemberApply
+                            ? Color.blue.opacity(0.10)
+                            : Color(.secondarySystemGroupedBackground)
+                    )
                     .overlay(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(
-                                isSelectedFirst
-                                    ? Color.blue
-                                    : (hasWarning ? Color.orange.opacity(0.85) : Color.primary.opacity(0.06)),
-                                lineWidth: isSelectedFirst || hasWarning ? 2.0 : 1.0
-                            )
+                            .strokeBorder(borderColor, lineWidth: borderWidth)
                     )
 
                 if slot.isPaired, let backPhoto = slot.backPhoto {
                     playingCardFanView(slot: slot, frontPhoto: slot.frontPhoto, backPhoto: backPhoto)
                 } else {
                     singleCardStageView(slot: slot, photo: slot.frontPhoto, isSelectedFirst: isSelectedFirst)
+                }
+
+                // 當處於「選擇套用（多選照片）」模式時，在卡片右上角顯示清晰的勾選圓圈角標
+                if isSelectingPhotosToApply {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Image(systemName: isSelectedForMemberApply ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(isSelectedForMemberApply ? .blue : .white.opacity(0.85))
+                                .background(
+                                    Circle()
+                                        .fill(isSelectedForMemberApply ? Color.white : Color.black.opacity(0.35))
+                                        .padding(2)
+                                )
+                                .shadow(color: .black.opacity(0.25), radius: 3, x: 0, y: 1)
+                        }
+                        .padding(8)
+                        Spacer()
+                    }
                 }
             }
             .frame(height: 192)
@@ -583,7 +776,7 @@ struct BatchPairingView: View {
                 slotContextMenu(for: slot)
             }
 
-            // 下方：每張（或每組）拍立得獨立的「歸檔成員選擇膠囊」(支援一次上傳不同人的拍立得)
+            // 下方：每張（或每組）拍立得獨立的「多層多選歸檔成員膠囊」
             perSlotMemberSelectorPill(for: slot)
         }
     }
@@ -649,7 +842,7 @@ struct BatchPairingView: View {
             .rotationEffect(.degrees(-8), anchor: .bottom)
             .offset(x: -16, y: 0)
 
-            // 3. 頂部左右控制角標：左側序號 (#1+#2)，右側一鍵「拆開」按鈕
+            // 3. 頂部左右控制角標：左側序號 (#1+#2)，右側一鍵「拆開」按鈕（照片多選模式時隱藏拆開鈕以免誤觸）
             VStack {
                 HStack {
                     Text("#\(frontPhoto.sequenceNumber)+#\(backPhoto.sequenceNumber)")
@@ -661,30 +854,32 @@ struct BatchPairingView: View {
 
                     Spacer()
 
-                    Button {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        withAnimation(.snappy(duration: 0.24)) {
-                            unpairSlot(id: slot.id)
+                    if !isSelectingPhotosToApply {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            withAnimation(.snappy(duration: 0.24)) {
+                                unpairSlot(id: slot.id)
+                            }
+                        } label: {
+                            HStack(spacing: 2) {
+                                Image(systemName: "rectangle.on.rectangle.slash")
+                                    .font(.system(size: 9, weight: .bold))
+                                Text("拆開")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .foregroundStyle(slot.isDoubleFrontWarning ? .white : .primary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3.5)
+                            .background(
+                                slot.isDoubleFrontWarning
+                                    ? AnyShapeStyle(Color.orange)
+                                    : AnyShapeStyle(.ultraThinMaterial),
+                                in: Capsule()
+                            )
                         }
-                    } label: {
-                        HStack(spacing: 2) {
-                            Image(systemName: "rectangle.on.rectangle.slash")
-                                .font(.system(size: 9, weight: .bold))
-                            Text("拆開")
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                        .foregroundStyle(slot.isDoubleFrontWarning ? .white : .primary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3.5)
-                        .background(
-                            slot.isDoubleFrontWarning
-                                ? AnyShapeStyle(Color.orange)
-                                : AnyShapeStyle(.ultraThinMaterial),
-                            in: Capsule()
-                        )
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("解除正反面配對")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("解除正反面配對")
                 }
                 .padding(.horizontal, 8)
                 .padding(.top, 8)
@@ -692,61 +887,63 @@ struct BatchPairingView: View {
                 Spacer()
 
                 // 4. 底部中央：撲克牌交疊處的「⇄ 對調正反」或異常提示膠囊
-                HStack {
-                    if slot.isDoubleFrontWarning {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            withAnimation(.snappy(duration: 0.24)) {
-                                unpairSlot(id: slot.id)
+                if !isSelectingPhotosToApply {
+                    HStack {
+                        if slot.isDoubleFrontWarning {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                withAnimation(.snappy(duration: 0.24)) {
+                                    unpairSlot(id: slot.id)
+                                }
+                            } label: {
+                                Label("疑似雙正面 · 點此拆開", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.orange, in: Capsule())
                             }
-                        } label: {
-                            Label("疑似雙正面 · 點此拆開", systemImage: "exclamationmark.triangle.fill")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 8)
+                            .buttonStyle(.plain)
+                        } else if slot.isReversedOrderWarning {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                withAnimation(.snappy(duration: 0.24)) {
+                                    swapSlotSides(id: slot.id)
+                                }
+                            } label: {
+                                Label("順序顛倒 · 點此對調", systemImage: "arrow.left.arrow.right")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color.orange, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                withAnimation(.snappy(duration: 0.24)) {
+                                    swapSlotSides(id: slot.id)
+                                }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "arrow.left.arrow.right")
+                                        .font(.system(size: 9.5, weight: .bold))
+                                    Text("對調正反")
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 9)
                                 .padding(.vertical, 4)
-                                .background(Color.orange, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    } else if slot.isReversedOrderWarning {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            withAnimation(.snappy(duration: 0.24)) {
-                                swapSlotSides(id: slot.id)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
                             }
-                        } label: {
-                            Label("順序顛倒 · 點此對調", systemImage: "arrow.left.arrow.right")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.orange, in: Capsule())
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("對調正反面順序")
                         }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            withAnimation(.snappy(duration: 0.24)) {
-                                swapSlotSides(id: slot.id)
-                            }
-                        } label: {
-                            HStack(spacing: 3) {
-                                Image(systemName: "arrow.left.arrow.right")
-                                    .font(.system(size: 9.5, weight: .bold))
-                                Text("對調正反")
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 4)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("對調正反面順序")
                     }
+                    .padding(.bottom, 7)
                 }
-                .padding(.bottom, 7)
             }
         }
     }
@@ -783,22 +980,24 @@ struct BatchPairingView: View {
 
                     Spacer()
 
-                    Text(photo.detectedSide.rawValue)
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2.5)
-                        .background(
-                            photo.detectedSide == .likelyBack ? Color.purple.opacity(0.85) : Color.black.opacity(0.58),
-                            in: Capsule()
-                        )
+                    if !isSelectingPhotosToApply {
+                        Text(photo.detectedSide.rawValue)
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2.5)
+                            .background(
+                                photo.detectedSide == .likelyBack ? Color.purple.opacity(0.85) : Color.black.opacity(0.58),
+                                in: Capsule()
+                            )
+                    }
                 }
                 .padding(.horizontal, 8)
                 .padding(.top, 8)
 
                 Spacer()
 
-                if pairingMode != .singleOnly {
+                if pairingMode != .singleOnly && !isSelectingPhotosToApply {
                     Button {
                         handleManualTap(on: slot)
                     } label: {
@@ -825,24 +1024,46 @@ struct BatchPairingView: View {
         }
     }
 
-    /// 每組拍立得卡片正下方的「個別成員選擇膠囊」(支援同一批設定多位不同成員)
+    /// 每組拍立得卡片正下方的「多層多選成員膠囊」(支援依團體 ➔ 成員複選，最後可新增成員)
     private func perSlotMemberSelectorPill(for slot: ChekiPairingSlot) -> some View {
-        Menu {
-            Section("指派此張拍立得的歸檔成員") {
-                Button {
-                    setMember(nil, forSlotID: slot.id)
-                } label: {
-                    Label("未分類", systemImage: slot.assignedMember == nil ? "checkmark" : "tray")
+        let ungroupedMembers = idolMembers.filter { $0.group == nil }
+
+        return Menu {
+            Section("指派此張拍立得的歸檔成員（可複選）") {
+                ForEach(idolGroups) { group in
+                    let groupMembers = idolMembers.filter { $0.group?.id == group.id }
+                    if !groupMembers.isEmpty {
+                        Menu(group.name) {
+                            ForEach(groupMembers) { member in
+                                let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
+                                Button {
+                                    toggleMember(member, forSlotID: slot.id)
+                                } label: {
+                                    Label(
+                                        member.stageName,
+                                        systemImage: isAssigned ? "checkmark.circle.fill" : "circle"
+                                    )
+                                }
+                                .menuActionDismissBehavior(.disabled)
+                            }
+                        }
+                    }
                 }
 
-                ForEach(idolMembers) { member in
-                    Button {
-                        setMember(member, forSlotID: slot.id)
-                    } label: {
-                        let title = member.group != nil
-                            ? "\(member.stageName)（\(member.group!.name)）"
-                            : member.stageName
-                        Label(title, systemImage: slot.assignedMember?.id == member.id ? "checkmark" : "person")
+                if !ungroupedMembers.isEmpty {
+                    Menu("未分團成員") {
+                        ForEach(ungroupedMembers) { member in
+                            let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
+                            Button {
+                                toggleMember(member, forSlotID: slot.id)
+                            } label: {
+                                Label(
+                                    member.stageName,
+                                    systemImage: isAssigned ? "checkmark.circle.fill" : "circle"
+                                )
+                            }
+                            .menuActionDismissBehavior(.disabled)
+                        }
                     }
                 }
             }
@@ -850,26 +1071,42 @@ struct BatchPairingView: View {
             Divider()
 
             Button {
+                setMembers([], forSlotID: slot.id)
+            } label: {
+                Label("設為「未分類」", systemImage: slot.assignedMembers.isEmpty ? "checkmark" : "tray")
+            }
+
+            Divider()
+
+            Button {
                 showingQuickCreateMemberSheet = true
             } label: {
-                Label("新增團體 / 成員…", systemImage: "person.badge.plus")
+                Label("新增成員…", systemImage: "person.badge.plus")
             }
         } label: {
             HStack(spacing: 6) {
-                if let member = slot.assignedMember {
+                if let primary = slot.assignedMembers.first {
                     Circle()
-                        .fill(Self.groupColor(for: member))
+                        .fill(Self.groupColor(for: primary))
                         .frame(width: 8, height: 8)
 
-                    Text(member.stageName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+                    if slot.assignedMembers.count == 1 {
+                        Text(primary.stageName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
 
-                    if let groupName = member.group?.name {
-                        Text(groupName)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                        if let groupName = primary.group?.name {
+                            Text(groupName)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    } else {
+                        let names = slot.assignedMembers.map(\.stageName).joined(separator: "、")
+                        Text(names)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
                     }
                 } else {
@@ -919,17 +1156,31 @@ struct BatchPairingView: View {
     @ViewBuilder
     private func slotContextMenu(for slot: ChekiPairingSlot) -> some View {
         Menu {
-            Button {
-                setMember(nil, forSlotID: slot.id)
-            } label: {
-                Label("未分類", systemImage: slot.assignedMember == nil ? "checkmark" : "tray")
-            }
-            ForEach(idolMembers) { member in
-                Button {
-                    setMember(member, forSlotID: slot.id)
-                } label: {
-                    Label(member.stageName, systemImage: slot.assignedMember?.id == member.id ? "checkmark" : "person")
+            ForEach(idolGroups) { group in
+                let groupMembers = idolMembers.filter { $0.group?.id == group.id }
+                if !groupMembers.isEmpty {
+                    Menu(group.name) {
+                        ForEach(groupMembers) { member in
+                            let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
+                            Button {
+                                toggleMember(member, forSlotID: slot.id)
+                            } label: {
+                                Label(member.stageName, systemImage: isAssigned ? "checkmark.circle.fill" : "circle")
+                            }
+                        }
+                    }
                 }
+            }
+            Divider()
+            Button {
+                setMembers([], forSlotID: slot.id)
+            } label: {
+                Label("未分類", systemImage: slot.assignedMembers.isEmpty ? "checkmark" : "tray")
+            }
+            Button {
+                showingQuickCreateMemberSheet = true
+            } label: {
+                Label("新增成員…", systemImage: "person.badge.plus")
             }
         } label: {
             Label("指派歸檔成員", systemImage: "person.crop.circle")
@@ -973,7 +1224,7 @@ struct BatchPairingView: View {
         }
     }
 
-    // MARK: - 4. 警示橫幅與模式指引列
+    // MARK: - 4. 警示橫幅與「選擇套用（多選照片）」確認列
 
     private var warningBannerCard: some View {
         HStack(spacing: 12) {
@@ -1016,31 +1267,43 @@ struct BatchPairingView: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private var memberBrushInstructionBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "paintbrush.pointed.fill")
+    /// 「選擇套用」模式橫幅：多選下方拍立得卡片後，按「確認套用」一次套用上方所選成員
+    private var photoMultiSelectApplyBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.badge.questionmark.fill")
                 .font(.subheadline)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(.blue)
 
-            if let brushMember = activeBrushMember {
-                Text("快速指派模式：直接點選下方任一拍立得卡片，即可將其歸檔至「**\(brushMember.stageName)**」")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("請點選要套用「**\(selectedTargetMembersDisplayString)**」的照片（已選 \(selectedSlotIDsForApply.count) 張）")
                     .font(.caption)
                     .foregroundStyle(.primary)
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            Button("完成指派") {
+            Button(selectedSlotIDsForApply.count == slots.count ? "取消全選" : "全選") {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 withAnimation(.snappy(duration: 0.2)) {
-                    isMemberBrushMode = false
-                    activeBrushMember = nil
+                    if selectedSlotIDsForApply.count == slots.count {
+                        selectedSlotIDsForApply.removeAll()
+                    } else {
+                        selectedSlotIDsForApply = Set(slots.map(\.id))
+                    }
                 }
             }
             .buttonStyle(.bordered)
             .controlSize(.mini)
+
+            Button("確認套用") {
+                confirmApplyTargetMembersToSelectedSlots()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.mini)
+            .disabled(selectedSlotIDsForApply.isEmpty)
         }
         .padding(10)
-        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var manualPairingInstructionBanner: some View {
@@ -1128,7 +1391,12 @@ struct BatchPairingView: View {
 
                 Spacer()
 
-                if totalWarningCount > 0 {
+                if isSelectingPhotosToApply {
+                    Text("目標：\(selectedTargetMembersDisplayString)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .lineLimit(1)
+                } else if totalWarningCount > 0 {
                     Label("\(totalWarningCount) 項待確認", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
@@ -1140,17 +1408,47 @@ struct BatchPairingView: View {
                 }
             }
 
-            Button {
-                Task { await executeBatchProcessing() }
-            } label: {
-                Text("開始處理並歸檔（共 \(slots.count) 張拍立得）")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+            if isSelectingPhotosToApply {
+                HStack(spacing: 10) {
+                    Button {
+                        withAnimation(.snappy(duration: 0.2)) {
+                            isSelectingPhotosToApply = false
+                            selectedSlotIDsForApply.removeAll()
+                        }
+                    } label: {
+                        Text("取消")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: 96)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+
+                    Button {
+                        confirmApplyTargetMembersToSelectedSlots()
+                    } label: {
+                        Text("確認套用至已選照片（\(selectedSlotIDsForApply.count) 張）")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(selectedSlotIDsForApply.isEmpty)
+                }
+            } else {
+                Button {
+                    Task { await executeBatchProcessing() }
+                } label: {
+                    Text("開始處理並歸檔（共 \(slots.count) 張拍立得）")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(slots.isEmpty || isProcessingBatch)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(slots.isEmpty || isProcessingBatch)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -1183,51 +1481,115 @@ struct BatchPairingView: View {
         }
     }
 
-    // MARK: - 7. 多人成員指派與配對邏輯 (Multi-Member & Pairing Operations)
+    // MARK: - 7. 多層多選成員指派與配對邏輯 (Hierarchical Multi-Select & Photo Batch Apply)
 
-    private func setMember(_ member: IdolMember?, forSlotID slotID: UUID) {
+    private func toggleTargetMemberSelection(_ member: IdolMember) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if let idx = selectedTargetMembers.firstIndex(where: { $0.id == member.id }) {
+            selectedTargetMembers.remove(at: idx)
+        } else {
+            selectedTargetMembers.append(member)
+        }
+        defaultFallbackMember = selectedTargetMembers.first
+    }
+
+    private func setMembers(_ members: [IdolMember], forSlotID slotID: UUID) {
         guard let idx = slots.firstIndex(where: { $0.id == slotID }) else { return }
-        slots[idx].assignedMember = member
-        photoMemberAssignment[slots[idx].frontPhoto.id] = member
+        slots[idx].assignedMembers = members
+        photoMemberAssignment[slots[idx].frontPhoto.id] = members
         if let backID = slots[idx].backPhoto?.id {
-            photoMemberAssignment[backID] = member
+            photoMemberAssignment[backID] = members
         }
     }
 
-    private func assignMemberToAllSlots(_ member: IdolMember?) {
+    private func toggleMember(_ member: IdolMember, forSlotID slotID: UUID) {
+        guard let idx = slots.firstIndex(where: { $0.id == slotID }) else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        defaultFallbackMember = member
-        for idx in slots.indices {
-            slots[idx].assignedMember = member
-            photoMemberAssignment[slots[idx].frontPhoto.id] = member
-            if let backID = slots[idx].backPhoto?.id {
-                photoMemberAssignment[backID] = member
+        var current = slots[idx].assignedMembers
+        if let existingIdx = current.firstIndex(where: { $0.id == member.id }) {
+            current.remove(at: existingIdx)
+        } else {
+            current.append(member)
+        }
+        setMembers(current, forSlotID: slotID)
+    }
+
+    /// 點擊「全部套用」：將上方多層選擇器目前選中的成員清單套用至全部拍立得卡片
+    private func applyTargetMembersToAllSlots() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        defaultFallbackMember = selectedTargetMembers.first
+        withAnimation(.snappy(duration: 0.22)) {
+            for idx in slots.indices {
+                slots[idx].assignedMembers = selectedTargetMembers
+                photoMemberAssignment[slots[idx].frontPhoto.id] = selectedTargetMembers
+                if let backID = slots[idx].backPhoto?.id {
+                    photoMemberAssignment[backID] = selectedTargetMembers
+                }
+            }
+            isSelectingPhotosToApply = false
+            selectedSlotIDsForApply.removeAll()
+        }
+    }
+
+    /// 點擊「選擇套用」：切換照片多選模式
+    private func togglePhotoSelectionApplyMode() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.snappy(duration: 0.22)) {
+            isSelectingPhotosToApply.toggle()
+            selectedFirstSlotID = nil
+            if !isSelectingPhotosToApply {
+                selectedSlotIDsForApply.removeAll()
             }
         }
     }
 
-    private func resolvedMember(for photo: StagingChekiPhoto, slotIndex: Int) -> IdolMember? {
+    /// 在「選擇套用」模式下，點選「確認套用」將上方已選成員一次套用至所有勾選的拍立得照片
+    private func confirmApplyTargetMembersToSelectedSlots() {
+        guard !selectedSlotIDsForApply.isEmpty else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        defaultFallbackMember = selectedTargetMembers.first
+        withAnimation(.snappy(duration: 0.24)) {
+            for idx in slots.indices where selectedSlotIDsForApply.contains(slots[idx].id) {
+                slots[idx].assignedMembers = selectedTargetMembers
+                photoMemberAssignment[slots[idx].frontPhoto.id] = selectedTargetMembers
+                if let backID = slots[idx].backPhoto?.id {
+                    photoMemberAssignment[backID] = selectedTargetMembers
+                }
+            }
+            selectedSlotIDsForApply.removeAll()
+            isSelectingPhotosToApply = false
+        }
+    }
+
+    private func resolvedMembers(for photo: StagingChekiPhoto, slotIndex: Int) -> [IdolMember] {
         if let existing = photoMemberAssignment[photo.id] {
             return existing
         }
-        if let defaultMember = defaultFallbackMember {
-            return defaultMember
+        if !selectedTargetMembers.isEmpty {
+            return selectedTargetMembers
         }
-        guard !idolMembers.isEmpty else { return nil }
-        return idolMembers[slotIndex % idolMembers.count]
+        if let defaultMember = defaultFallbackMember {
+            return [defaultMember]
+        }
+        guard !idolMembers.isEmpty else { return [] }
+        return [idolMembers[slotIndex % idolMembers.count]]
     }
 
     private func handleCellTap(on slot: ChekiPairingSlot) {
-        // 若開啟了頂部「快速指派成員筆刷」，點擊卡片直接將該卡片指派給筆刷選中的成員
-        if isMemberBrushMode, let brushMember = activeBrushMember {
+        // 1. 若處於「選擇套用（多選照片）」模式，點擊卡片即勾選 / 取消勾選該張拍立得
+        if isSelectingPhotosToApply {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            withAnimation(.snappy(duration: 0.2)) {
-                setMember(brushMember, forSlotID: slot.id)
+            withAnimation(.snappy(duration: 0.18)) {
+                if selectedSlotIDsForApply.contains(slot.id) {
+                    selectedSlotIDsForApply.remove(slot.id)
+                } else {
+                    selectedSlotIDsForApply.insert(slot.id)
+                }
             }
             return
         }
 
-        // 若為單面卡片且非「直接執行」模式，點擊可進行手動正反配對
+        // 2. 若為單面卡片且非「直接執行」模式，點擊可進行手動正反配對
         if !slot.isPaired && pairingMode != .singleOnly {
             handleManualTap(on: slot)
         }
@@ -1248,7 +1610,7 @@ struct BatchPairingView: View {
                     id: UUID(),
                     frontPhoto: photo,
                     backPhoto: nil,
-                    assignedMember: resolvedMember(for: photo, slotIndex: idx)
+                    assignedMembers: resolvedMembers(for: photo, slotIndex: idx)
                 )
             }
 
@@ -1258,7 +1620,7 @@ struct BatchPairingView: View {
             var pairIdx = 0
             while idx < orderedPhotos.count {
                 let first = orderedPhotos[idx]
-                let member = resolvedMember(for: first, slotIndex: pairIdx)
+                let members = resolvedMembers(for: first, slotIndex: pairIdx)
                 if idx + 1 < orderedPhotos.count {
                     let second = orderedPhotos[idx + 1]
                     newSlots.append(
@@ -1266,7 +1628,7 @@ struct BatchPairingView: View {
                             id: UUID(),
                             frontPhoto: first,
                             backPhoto: second,
-                            assignedMember: member
+                            assignedMembers: members
                         )
                     )
                     idx += 2
@@ -1276,7 +1638,7 @@ struct BatchPairingView: View {
                             id: UUID(),
                             frontPhoto: first,
                             backPhoto: nil,
-                            assignedMember: member
+                            assignedMembers: members
                         )
                     )
                     idx += 1
@@ -1292,7 +1654,7 @@ struct BatchPairingView: View {
                         id: UUID(),
                         frontPhoto: photo,
                         backPhoto: nil,
-                        assignedMember: resolvedMember(for: photo, slotIndex: idx)
+                        assignedMembers: resolvedMembers(for: photo, slotIndex: idx)
                     )
                 }
             }
@@ -1304,13 +1666,13 @@ struct BatchPairingView: View {
         var resolved: [ChekiPairingSlot] = []
         for slot in slots {
             if slot.isDoubleFrontWarning, let backPhoto = slot.backPhoto {
-                let secondMember = photoMemberAssignment[backPhoto.id] ?? slot.assignedMember
+                let secondMembers = photoMemberAssignment[backPhoto.id] ?? slot.assignedMembers
                 resolved.append(
                     ChekiPairingSlot(
                         id: UUID(),
                         frontPhoto: slot.frontPhoto,
                         backPhoto: nil,
-                        assignedMember: slot.assignedMember
+                        assignedMembers: slot.assignedMembers
                     )
                 )
                 resolved.append(
@@ -1318,7 +1680,7 @@ struct BatchPairingView: View {
                         id: UUID(),
                         frontPhoto: backPhoto,
                         backPhoto: nil,
-                        assignedMember: secondMember
+                        assignedMembers: secondMembers
                     )
                 )
             } else if slot.isReversedOrderWarning, let backPhoto = slot.backPhoto {
@@ -1327,7 +1689,7 @@ struct BatchPairingView: View {
                         id: slot.id,
                         frontPhoto: backPhoto,
                         backPhoto: slot.frontPhoto,
-                        assignedMember: slot.assignedMember
+                        assignedMembers: slot.assignedMembers
                     )
                 )
             } else {
@@ -1343,11 +1705,11 @@ struct BatchPairingView: View {
               let backPhoto = slots[index].backPhoto else { return }
 
         let frontPhoto = slots[index].frontPhoto
-        let currentMember = slots[index].assignedMember
-        let backMember = photoMemberAssignment[backPhoto.id] ?? currentMember
+        let currentMembers = slots[index].assignedMembers
+        let backMembers = photoMemberAssignment[backPhoto.id] ?? currentMembers
 
-        let slotA = ChekiPairingSlot(id: UUID(), frontPhoto: frontPhoto, backPhoto: nil, assignedMember: currentMember)
-        let slotB = ChekiPairingSlot(id: UUID(), frontPhoto: backPhoto, backPhoto: nil, assignedMember: backMember)
+        let slotA = ChekiPairingSlot(id: UUID(), frontPhoto: frontPhoto, backPhoto: nil, assignedMembers: currentMembers)
+        let slotB = ChekiPairingSlot(id: UUID(), frontPhoto: backPhoto, backPhoto: nil, assignedMembers: backMembers)
 
         slots.replaceSubrange(index...index, with: [slotA, slotB])
     }
@@ -1367,6 +1729,7 @@ struct BatchPairingView: View {
         if selectedFirstSlotID == id {
             selectedFirstSlotID = nil
         }
+        selectedSlotIDsForApply.remove(id)
         slots.removeAll { $0.id == id }
         allPhotos = collectAllPhotosInOrder()
     }
@@ -1397,12 +1760,14 @@ struct BatchPairingView: View {
 
             let frontPhoto = slots[firstIndex].frontPhoto
             let backPhoto = slots[secondIndex].frontPhoto
-            let member = slots[firstIndex].assignedMember ?? slots[secondIndex].assignedMember
+            let members = !slots[firstIndex].assignedMembers.isEmpty
+                ? slots[firstIndex].assignedMembers
+                : slots[secondIndex].assignedMembers
             let combinedSlot = ChekiPairingSlot(
                 id: UUID(),
                 frontPhoto: frontPhoto,
                 backPhoto: backPhoto,
-                assignedMember: member
+                assignedMembers: members
             )
 
             withAnimation(.snappy(duration: 0.25)) {
@@ -1460,8 +1825,10 @@ struct BatchPairingView: View {
                 detectedSide: .analyzing,
                 detectionNote: "Vision 分析中…"
             )
-            if let fallback = defaultFallbackMember {
-                photoMemberAssignment[staging.id] = fallback
+            if !selectedTargetMembers.isEmpty {
+                photoMemberAssignment[staging.id] = selectedTargetMembers
+            } else if let fallback = defaultFallbackMember {
+                photoMemberAssignment[staging.id] = [fallback]
             }
             newlyLoaded.append(staging)
             nextSequence += 1
@@ -1557,7 +1924,7 @@ struct BatchPairingView: View {
         ]
 
         var generated: [StagingChekiPhoto] = []
-        var assignments: [UUID: IdolMember] = [:]
+        var assignments: [UUID: [IdolMember]] = [:]
 
         for spec in sampleSpecs {
             let img = Self.renderSampleChekiImage(
@@ -1570,7 +1937,7 @@ struct BatchPairingView: View {
             let data = img.jpegData(compressionQuality: 0.9) ?? Data()
             let photoID = UUID()
             if !idolMembers.isEmpty {
-                assignments[photoID] = idolMembers[spec.memberIdx % idolMembers.count]
+                assignments[photoID] = [idolMembers[spec.memberIdx % idolMembers.count]]
             }
             generated.append(
                 StagingChekiPhoto(
@@ -1683,7 +2050,7 @@ struct BatchPairingView: View {
         for (index, slot) in slots.enumerated() {
             // 同一組拍立得的正反面賦予完全相同的秒數 (Task 3.3)
             let itemTimestamp = baseTimestamp.addingTimeInterval(TimeInterval(-index))
-            let targetMember = slot.assignedMember
+            let targetMember = slot.assignedMembers.first
 
             let newItem = ChekiItem(
                 frontImageData: slot.frontPhoto.imageData,
@@ -1743,40 +2110,50 @@ struct BatchPairingView: View {
                 }
             }
 
+            var hashtags = slot.isPaired ? ["#雙面配對", "#批次匯入"] : ["#單面匯入"]
+            if slot.assignedMembers.count > 1 {
+                for coMember in slot.assignedMembers {
+                    hashtags.append("#\(coMember.stageName)")
+                }
+            }
+
             let memo = ChekiMemo(
                 eventName: "批次配對匯入",
                 noteText: slot.isPaired
                     ? "透過批次配對工作台合成正反雙面（\(slot.frontPhoto.title)）"
                     : "透過批次工作台單面匯入（\(slot.frontPhoto.title)）",
-                hashtags: slot.isPaired ? ["#雙面配對", "#批次匯入"] : ["#單面匯入"],
+                hashtags: hashtags,
                 chekiItem: newItem
             )
             newItem.memo = memo
             newItem.processingState = .completed
 
-            // 3. 若開啟系統相簿同步，依每張拍立得各自指派的 targetMember 分別寫入對應成員相簿 (Task 3.3 & 3.4)
+            // 3. 若開啟系統相簿同步，依每張拍立得各自指派的成員寫入對應成員相簿 (Task 3.3 & 3.4)
             if autoSyncToPhotos {
                 let syncDate = newItem.displayDate
-                let albumName = targetMember?.stageName ?? "ChekiLens"
-                let folderName = targetMember?.group?.name
-                if let album = try? await PhotoLibraryManager.shared.getOrCreateAlbum(
-                    albumName: albumName,
-                    inFolder: folderName
-                ) {
-                    _ = try? await PhotoLibraryManager.shared.saveImage(
-                        finalFrontUIImage,
-                        creationDate: syncDate,
-                        to: album
-                    )
-                    if let backImg = finalBackUIImage {
+                let membersToSync = slot.assignedMembers.isEmpty ? [nil as IdolMember?] : slot.assignedMembers.map { Optional($0) }
+                for memberOpt in membersToSync {
+                    let albumName = memberOpt?.stageName ?? "ChekiLens"
+                    let folderName = memberOpt?.group?.name
+                    if let album = try? await PhotoLibraryManager.shared.getOrCreateAlbum(
+                        albumName: albumName,
+                        inFolder: folderName
+                    ) {
                         _ = try? await PhotoLibraryManager.shared.saveImage(
-                            backImg,
+                            finalFrontUIImage,
                             creationDate: syncDate,
                             to: album
                         )
+                        if let backImg = finalBackUIImage {
+                            _ = try? await PhotoLibraryManager.shared.saveImage(
+                                backImg,
+                                creationDate: syncDate,
+                                to: album
+                            )
+                        }
+                        newItem.isSyncedToPhotoLibrary = true
+                        newItem.isDateWrittenToAlbum = (newItem.ocrDate != nil)
                     }
-                    newItem.isSyncedToPhotoLibrary = true
-                    newItem.isDateWrittenToAlbum = (newItem.ocrDate != nil)
                 }
             }
 
