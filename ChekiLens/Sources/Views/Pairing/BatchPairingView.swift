@@ -1300,11 +1300,10 @@ struct BatchPairingView: View {
                 .font(.subheadline)
                 .foregroundStyle(.blue)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("請點選要套用「**\(selectedTargetMembersDisplayString)**」的照片（已選 \(selectedSlotIDsForApply.count) 張）")
-                    .font(.caption)
-                    .foregroundStyle(.primary)
-            }
+            Text("請點選要套用「**\(selectedTargetMembersDisplayString)**」的照片")
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
 
             Spacer(minLength: 4)
 
@@ -1321,7 +1320,7 @@ struct BatchPairingView: View {
             .buttonStyle(.bordered)
             .controlSize(.mini)
 
-            Button("確認套用") {
+            Button("確認套用(\(selectedSlotIDsForApply.count)張)") {
                 confirmApplyTargetMembersToSelectedSlots()
             }
             .buttonStyle(.borderedProminent)
@@ -1406,7 +1405,7 @@ struct BatchPairingView: View {
     // MARK: - 6. 底部原生行動列 & 進度遮罩
 
     private var bottomActionToolbar: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             HStack {
                 Label(
                     "雙面 \(pairedCount) 組 · 單面 \(singleCount) 張",
@@ -1435,7 +1434,7 @@ struct BatchPairingView: View {
             }
 
             if isSelectingPhotosToApply {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Button {
                         withAnimation(.snappy(duration: 0.2)) {
                             isSelectingPhotosToApply = false
@@ -1444,22 +1443,27 @@ struct BatchPairingView: View {
                     } label: {
                         Text("取消")
                             .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: 96)
-                            .padding(.vertical, 6)
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 8)
+                            .background(Color(.tertiarySystemFill), in: Capsule())
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .buttonStyle(.plain)
 
                     Button {
                         confirmApplyTargetMembersToSelectedSlots()
                     } label: {
-                        Text("確認套用至已選照片（\(selectedSlotIDsForApply.count) 張）")
-                            .font(.headline)
+                        Text("確認套用(\(selectedSlotIDsForApply.count)張)")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 8)
+                            .background(
+                                selectedSlotIDsForApply.isEmpty ? Color.blue.opacity(0.4) : Color.blue,
+                                in: Capsule()
+                            )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .buttonStyle(.plain)
                     .disabled(selectedSlotIDsForApply.isEmpty)
                 }
             } else {
@@ -1467,18 +1471,22 @@ struct BatchPairingView: View {
                     Task { await executeBatchProcessing() }
                 } label: {
                     Text("開始處理並歸檔（共 \(slots.count) 張拍立得）")
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 8.5)
+                        .background(
+                            (slots.isEmpty || isProcessingBatch) ? Color.blue.opacity(0.4) : Color.blue,
+                            in: Capsule()
+                        )
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .buttonStyle(.plain)
                 .disabled(slots.isEmpty || isProcessingBatch)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
         .background(.bar)
     }
 
