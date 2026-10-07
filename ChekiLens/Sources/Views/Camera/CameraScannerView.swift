@@ -350,6 +350,8 @@ struct CameraScannerView: View {
 
     // 正反雙面連續拍攝狀態（先拍正面 -> 提示翻面 -> 再拍背面）
     @State private var pendingFrontImageData: Data? = nil
+    @State private var pendingOriginalFrontImageData: Data? = nil
+    @State private var pendingFrontPointsJSON: String? = nil
     @State private var pendingFrontOCRDate: Date? = nil
     @State private var pendingFrontFormat: FilmFormat = .mini
     @State private var statusBannerMessage: String? = nil
@@ -861,13 +863,15 @@ struct CameraScannerView: View {
         let isCapturingBackside = (captureMode == .frontAndBack && pendingFrontImageData != nil)
         guard let rawImage = await camera.capturePhoto(isBacksideSimulated: isCapturingBackside) else { return }
 
-        let (processedData, recognizedDate, resolvedFormat) = await processCapturedImage(rawImage)
+        let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(rawImage)
         let now = Date()
 
         if captureMode == .frontAndBack {
             if pendingFrontImageData == nil {
                 // 第一步：已拍下正面，等待翻面拍背面
                 pendingFrontImageData = processedData
+                pendingOriginalFrontImageData = originalRawData
+                pendingFrontPointsJSON = pointsJSON
                 pendingFrontOCRDate = recognizedDate
                 pendingFrontFormat = resolvedFormat
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -882,10 +886,14 @@ struct CameraScannerView: View {
                 let newItem = ChekiItem(
                     frontImageData: pendingFrontImageData,
                     backImageData: processedData,
+                    originalFrontImageData: pendingOriginalFrontImageData ?? pendingFrontImageData,
+                    originalBackImageData: originalRawData ?? processedData,
                     capturedAt: captureDate,
                     ocrDate: finalOCR != nil ? captureDate : nil,
                     filmFormat: format,
                     detectedAspectRatio: format.aspectRatio,
+                    perspectivePointsJSON: pendingFrontPointsJSON,
+                    backPerspectivePointsJSON: pointsJSON,
                     processingState: .completed,
                     idolMember: defaultMember
                 )
@@ -893,6 +901,8 @@ struct CameraScannerView: View {
                 try? modelContext.save()
 
                 pendingFrontImageData = nil
+                pendingOriginalFrontImageData = nil
+                pendingFrontPointsJSON = nil
                 pendingFrontOCRDate = nil
                 pendingFrontFormat = .mini
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -907,10 +917,12 @@ struct CameraScannerView: View {
             let newItem = ChekiItem(
                 frontImageData: processedData,
                 backImageData: nil,
+                originalFrontImageData: originalRawData ?? processedData,
                 capturedAt: captureDate,
                 ocrDate: recognizedDate != nil ? captureDate : nil,
                 filmFormat: format,
                 detectedAspectRatio: format.aspectRatio,
+                perspectivePointsJSON: pointsJSON,
                 processingState: .completed,
                 idolMember: defaultMember
             )
@@ -924,9 +936,11 @@ struct CameraScannerView: View {
         }
     }
 
-    private func processCapturedImage(_ image: UIImage) async -> (Data?, Date?, FilmFormat) {
-        guard let cgImage = image.cgImage else {
-            return (image.jpegData(compressionQuality: 0.92), nil, .mini)
+    private func processCapturedImage(_ image: UIImage) async -> (Data?, Data?, String?, Date?, FilmFormat) {
+        let normalized = image.normalizedImage
+        let rawJPEG = normalized.jpegData(compressionQuality: 0.92)
+        guard let cgImage = normalized.cgImage else {
+            return (rawJPEG, rawJPEG, nil, nil, .mini)
         }
         let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
         let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
@@ -954,10 +968,11 @@ struct CameraScannerView: View {
                 ocrDate = await manager.recognizeDate(from: cgImage)?.date
             }
             let jpeg = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92)
-            return (jpeg, ocrDate, resolvedFormat)
+            let pointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imageSize)
+            return (jpeg, rawJPEG, pointsJSON, ocrDate, resolvedFormat)
         } catch {
             let ocrDate = await manager.recognizeDate(from: cgImage)?.date
-            return (image.jpegData(compressionQuality: 0.92), ocrDate, .mini)
+            return (rawJPEG, rawJPEG, nil, ocrDate, .mini)
         }
     }
 }

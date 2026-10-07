@@ -87,6 +87,12 @@ final class ChekiItem {
     /// 是否已同步至 iOS 系統相簿
     var isSyncedToPhotoLibrary: Bool
 
+    /// 正面照片對應之 iOS 系統相簿 `PHAsset.localIdentifier`（直接修改原圖不新增重複照片，並支援復原原圖）
+    var frontAssetIdentifier: String?
+
+    /// 背面照片對應之 iOS 系統相簿 `PHAsset.localIdentifier`
+    var backAssetIdentifier: String?
+
     // MARK: Relations
 
     /// 所屬偶像成員（可為 nil，表示尚未分類）
@@ -115,14 +121,16 @@ final class ChekiItem {
         detectionMethod: DetectionMethod = .pending,
         processingState: ProcessingState = .unprocessed,
         isSyncedToPhotoLibrary: Bool = false,
+        frontAssetIdentifier: String? = nil,
+        backAssetIdentifier: String? = nil,
         idolMember: IdolMember? = nil,
         memo: ChekiMemo? = nil
     ) {
         self.id = id
         self.frontImageData = frontImageData
         self.backImageData = backImageData
-        self.originalFrontImageData = originalFrontImageData
-        self.originalBackImageData = originalBackImageData
+        self.originalFrontImageData = originalFrontImageData ?? frontImageData
+        self.originalBackImageData = originalBackImageData ?? backImageData
         self.capturedAt = capturedAt
         self.ocrDate = ocrDate
         self.isDateWrittenToAlbum = isDateWrittenToAlbum
@@ -134,6 +142,8 @@ final class ChekiItem {
         self.detectionMethod = detectionMethod
         self.processingStateRaw = processingState.rawValue
         self.isSyncedToPhotoLibrary = isSyncedToPhotoLibrary
+        self.frontAssetIdentifier = frontAssetIdentifier
+        self.backAssetIdentifier = backAssetIdentifier
         self.idolMember = idolMember
         self.memo = memo
     }
@@ -152,6 +162,30 @@ extension ChekiItem {
     /// 是否具有背面資料
     var hasBothSides: Bool {
         backImageData != nil
+    }
+
+    /// 指定面（正面或背面）是否保留有可復原的原始未裁切圖片
+    func canRevertToOriginal(backside: Bool = false) -> Bool {
+        if backside {
+            guard let orig = originalBackImageData else { return false }
+            return backPerspectivePointsJSON != nil || orig != backImageData
+        } else {
+            guard let orig = originalFrontImageData else { return false }
+            return perspectivePointsJSON != nil || orig != frontImageData
+        }
+    }
+
+    /// 將指定面（正面或背面）直接復原為原始未裁切圖片（不新增照片，保留原始圖片）
+    func revertToOriginal(backside: Bool = false) {
+        if backside {
+            guard let orig = originalBackImageData else { return }
+            backImageData = orig
+            backPerspectivePointsJSON = nil
+        } else {
+            guard let orig = originalFrontImageData else { return }
+            frontImageData = orig
+            perspectivePointsJSON = nil
+        }
     }
 
     /// 將像素座標四角點 [TL, TR, BR, BL] 轉為正規化 (0.0~1.0) JSON 字串

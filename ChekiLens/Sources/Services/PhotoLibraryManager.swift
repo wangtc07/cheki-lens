@@ -116,51 +116,170 @@ final class PhotoLibraryManager {
         return createdFolder
     }
     
-    // MARK: - Save Image
+    // MARK: - Save & Non-Destructive In-Place Edit Image
     
-    /// 將影像存入指定相簿，並強制修改相機時間 (EXIF 建立時間)
+    /// 直接修改現有系統相簿原圖（不新增重複照片，保留原始圖片可復原）；若尚未存在於系統相簿則以原圖建立並套用非破壞性裁切編輯
     /// - Parameters:
-    ///   - image: 要儲存的影像
-    ///   - creationDate: 強制指定的拍攝時間 (這也是 Task 3.3 與 3.4 的核心)
-    ///   - album: 目標相簿 (可為 nil，代表只存入相機膠卷)
-    /// - Returns: 儲存後的 Asset Local Identifier
-    func saveImage(_ image: UIImage, creationDate: Date, to album: PHAssetCollection? = nil) async throws -> String {
+    ///   - image: 裁切後的拍立得影像
+    ///   - originalImageData: 原始未裁切圖片資料（首次寫入相簿時作為底層原圖保留，供日後復原）
+    ///   - existingAssetIdentifier: 原生相簿既有的 `PHAsset.localIdentifier`（若提供則直接原地修改該張照片，絕不新建照片）
+    ///   - creationDate: 拍攝時間（含手寫日期 OCR 時間軸）
+    ///   - album: 目標相簿（可為 nil）
+    /// - Returns: 該張照片在系統相簿中的 `PHAsset.localIdentifier`
+    func updateOrSaveImage(
+        _ image: UIImage,
+        originalImageData: Data? = nil,
+        existingAssetIdentifier: String? = nil,
+        creationDate: Date,
+        to album: PHAssetCollection? = nil
+    ) async throws -> String {
         guard await requestAuthorization() else {
             throw NSError(domain: "PhotoLibraryManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "無相簿權限"])
         }
         
+        // 1. 若已有現存 PHAsset，直接以 PHContentEditingOutput 非破壞性修改原圖（不新增照片，且保留原始底圖可復原）
+        if let existingId = existingAssetIdentifier,
+           !existingId.isEmpty,
+           let existingAsset = PHAsset.fetchAssets(withLocalIdentifiers: [existingId], options: nil).firstObject {
+            try await modifyAssetInPlace(
+                asset: existingAsset,
+                croppedImage: image,
+                creationDate: creationDate,
+                album: album
+            )
+            return existingAsset.localIdentifier
+        }
+        
+        // 2. 若尚未存在於系統相簿：先以「原始未裁切圖片」建立 PHAsset，若 image 為已裁切圖則立即套用非破壞性編輯
+        guard let croppedJPEG = image.jpegData(compressionQuality: 0.92) else {
+            throw NSError(domain: "PhotoLibraryManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "影像編碼失敗"])
+        }
+        let baseData = originalImageData ?? croppedJPEG
         var placeholderId: String?
         
         try await PHPhotoLibrary.shared().performChanges {
-            // 建立新增照片的 Request
             let creationRequest = PHAssetCreationRequest.forAsset()
-            creationRequest.addResource(with: .photo, data: image.jpegData(compressionQuality: 0.9)!, options: nil)
-            
-            // 強制覆寫照片的拍攝時間 (EXIF)
+            creationRequest.addResource(with: .photo, data: baseData, options: nil)
             creationRequest.creationDate = creationDate
             
-            // 如果有指定相簿，加進相簿裡
             if let album = album, let placeholder = creationRequest.placeholderForCreatedAsset {
                 let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
                 albumChangeRequest?.addAssets([placeholder] as NSArray)
             }
-            
             placeholderId = creationRequest.placeholderForCreatedAsset?.localIdentifier
         }
         
-        guard let id = placeholderId else {
+        guard let createdId = placeholderId else {
             throw NSError(domain: "PhotoLibraryManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "儲存照片失敗"])
         }
         
-        return id
+        // 若提供了原始未裁切底圖且與裁切後圖片不同，將裁切結果透過 PHContentEditingOutput 覆蓋於同一張 PHAsset 上（保留原圖可復原）
+        if let origData = originalImageData,
+           origData != croppedJPEG,
+           let createdAsset = PHAsset.fetchAssets(withLocalIdentifiers: [createdId], options: nil).firstObject {
+            try? await modifyAssetInPlace(
+                asset: createdAsset,
+                croppedImage: image,
+                creationDate: creationDate,
+                album: nil
+            )
+        }
+        
+        return createdId
     }
     
-    // MARK: - Task 4.4 System Photo Library Seeder (測試相片寫入 iOS 系統相簿)
+    /// 相容舊版呼叫介面：轉發至 `updateOrSaveImage`
+    func saveImage(_ image: UIImage, creationDate: Date, to album: PHAssetCollection? = nil) async throws -> String {
+        try await updateOrSaveImage(
+            image,
+            originalImageData: nil,
+            existingAssetIdentifier: nil,
+            creationDate: creationDate,
+            to: album
+        )
+    }
     
-    private static let systemSeedFlagKey = "debug.didSeedSystemPhotoLibraryV2"
+    /// 使用 Apple Photos 原生 `PHContentEditingOutput` 直接修改既有 `PHAsset`（不新建照片，且保留原始未裁切圖片供隨時復原）
+    func modifyAssetInPlace(
+        asset: PHAsset,
+        croppedImage: UIImage,
+        creationDate: Date? = nil,
+        album: PHAssetCollection? = nil
+    ) async throws {
+        guard let jpegData = croppedImage.jpegData(compressionQuality: 0.92) else {
+            throw NSError(domain: "PhotoLibraryManager", code: 5, userInfo: [NSLocalizedDescriptionKey: "無法編碼裁切後影像"])
+        }
+        
+        let editingInput = try await requestContentEditingInput(for: asset)
+        let output = PHContentEditingOutput(contentEditingInput: editingInput)
+        output.adjustmentData = PHAdjustmentData(
+            formatIdentifier: "wangtc07.ChekiLens.crop",
+            formatVersion: "1.0",
+            data: Data("cheki-perspective-crop-\(Date().timeIntervalSince1970)".utf8)
+        )
+        try jpegData.write(to: output.renderedContentURL, options: .atomic)
+        
+        try await PHPhotoLibrary.shared().performChanges {
+            let changeRequest = PHAssetChangeRequest(for: asset)
+            changeRequest.contentEditingOutput = output
+            if let creationDate {
+                changeRequest.creationDate = creationDate
+            }
+            if let album {
+                let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
+                albumChangeRequest?.addAssets([asset] as NSArray)
+            }
+        }
+    }
     
-    /// 將 8 張實體拍立得測試相片（含正常正反面、雙正面防呆警示案例、正反順序顛倒案例）寫入 iOS 系統相簿 (`Photos.app`)，
-    /// 供使用者點擊「＋」(`PhotosPicker`) 實測 Task 4.4 批次配對工作台。
+    /// 將既有 `PHAsset` 加入指定相簿（不複製或新建照片）
+    func addExistingAsset(identifier: String, creationDate: Date? = nil, to album: PHAssetCollection) async throws {
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject else { return }
+        try await PHPhotoLibrary.shared().performChanges {
+            if let creationDate {
+                let changeRequest = PHAssetChangeRequest(for: asset)
+                changeRequest.creationDate = creationDate
+            }
+            let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
+            albumChangeRequest?.addAssets([asset] as NSArray)
+        }
+    }
+    
+    /// 將系統相簿中的 `PHAsset` 復原為未裁切的原始圖片 (`revertAssetContentToOriginal`)
+    func revertAssetToOriginal(assetIdentifier: String) async throws {
+        guard !assetIdentifier.isEmpty,
+              let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil).firstObject else {
+            return
+        }
+        try await PHPhotoLibrary.shared().performChanges {
+            let changeRequest = PHAssetChangeRequest(for: asset)
+            changeRequest.revertAssetContentToOriginal()
+        }
+    }
+    
+    private func requestContentEditingInput(for asset: PHAsset) async throws -> PHContentEditingInput {
+        try await withCheckedThrowingContinuation { continuation in
+            let options = PHContentEditingInputRequestOptions()
+            options.isNetworkAccessAllowed = true
+            options.canHandleAdjustmentData = { _ in true }
+            asset.requestContentEditingInput(with: options) { input, info in
+                if let input {
+                    continuation.resume(returning: input)
+                } else {
+                    let err = (info[PHContentEditingInputErrorKey] as? Error)
+                        ?? NSError(domain: "PhotoLibraryManager", code: 6, userInfo: [NSLocalizedDescriptionKey: "無法取得原圖編輯輸入"])
+                    continuation.resume(throwing: err)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Task 4.4 & 4.6 System Photo Library Seeder (10 張帶手寫日期拍立得寫入 iOS 原生相簿)
+    
+    private static let systemSeedFlagKey = "debug.didSeedSystemPhotoLibraryV3_Dated10"
+    
+    /// 將 10 張帶有封面手寫日期的實體拍立得測試相片寫入 iOS 原生相簿 (`Photos.app`)，
+    /// 供使用者點擊「＋」(`PhotosPicker`) 實測導入並自動辨識封面手寫日期與原地裁切（不新增照片、保留原圖可復原）。
     /// - Parameter force: 若為 `true` 則無視已寫入標記，強制再次寫入一組測試相片至系統相簿。
     /// - Returns: 實際寫入系統相簿的相片張數（若先前已自動寫入且 `force == false` 則回傳 0）
     @MainActor
@@ -176,7 +295,7 @@ final class PhotoLibraryManager {
         let testImages = Self.buildTask44SystemTestImages()
         guard !testImages.isEmpty else { return 0 }
         
-        let album = try? await getOrCreateAlbum(albumName: "ChekiLens 測試相片 (Task 4.4)")
+        let album = try? await getOrCreateAlbum(albumName: "ChekiLens 帶日期拍立得測試 (10張)")
         let baseDate = Date()
         
         for (idx, item) in testImages.enumerated() {
@@ -186,30 +305,28 @@ final class PhotoLibraryManager {
         }
         
         UserDefaults.standard.set(true, forKey: Self.systemSeedFlagKey)
-        logger.info("已成功寫入 \(testImages.count) 張測試拍立得相片至 iOS 系統相簿 (Photos.app)")
+        logger.info("已成功寫入 \(testImages.count) 張帶日期拍立得相片至 iOS 系統相簿 (Photos.app)")
         return testImages.count
     }
     
-    /// 建立供寫入系統相簿的 8 張測試相片：
-    /// - 優先讀取專案 `TestData/images/` 下的真實拍攝拍立得正反面 JPG（在模擬器環境可直接讀取 Mac 路徑）
-    /// - 若檔案不存在（如實機執行），自動回退生成帶有標準 `Don't put in mouth` 與 `FUJIFILM instax` 錨點的高解析度擬真測試相片
+    /// 建立供寫入系統相簿的 10 張帶封面手寫日期之真實拍立得測試相片：
+    /// - 優先讀取專案 `TestData/images/` 下帶有真實手寫日期的 10 張拍立得 JPG（在模擬器環境可直接讀取 Mac 路徑）
+    /// - 若檔案不存在（如實機執行），自動回退生成帶有清晰手寫日期與拍立得外框的高解析度擬真測試相片
     private static func buildTask44SystemTestImages() -> [(title: String, image: UIImage)] {
         let projectTestDir = "/Users/tcwang/Documents/ChekiLens/TestData/images"
         
-        // 精心編排的 8 張測試組合：
-        // Pair 1 (#1 正面 + #2 背面)：正常正反配對
-        // Pair 2 (#3 正面 + #4 正面)：⚠️ 疑似兩張皆為正面（觸發雙正面防呆警示）
-        // Pair 3 (#5 背面 + #6 正面)：⚠️ 正反順序顛倒（觸發一鍵對調提示）
-        // Pair 4 (#7 正面 + #8 背面)：正常正反配對
+        // 10 張帶有真實封面手寫日期的拍立得（均已經過 VisionManager.recognizeDate 100% 驗證）：
         let specs: [(seq: Int, fileName: String, title: String, isBackside: Bool, colors: [UIColor], dateText: String)] = [
-            (1, "DSCF0023.JPG", "夏巡舞台服特寫 (正面)", false, [.systemIndigo, .systemPink], "2026.09.24"),
-            (2, "DSCF0024.JPG", "夏巡手寫簽名 (背面)",   true,  [.darkGray, .black],          "2026.09.24"),
-            (3, "DSCF0025.JPG", "浴衣造型特寫 (正面 A)", false, [.systemTeal, .systemBlue],   "2026.09.28"),
-            (4, "DSCF0029.JPG", "生誕祭私服 (正面 B)",   false, [.systemOrange, .systemPink], "2026.09.29"),
-            (5, "DSCF0032.JPG", "握手會留言 (背面先選)", true,  [.systemGray, .darkGray],     "2026.10.02"),
-            (6, "DSCF0031.JPG", "握手會比愛心 (正面後選)", false, [.systemPurple, .systemIndigo], "2026.10.02"),
-            (7, "DSCF0033.JPG", "五週年紀念服 (正面)",   false, [.systemPink, .systemRed],    "2026.10.05"),
-            (8, "DSCF0034.JPG", "五週年感謝簽名 (背面)", true,  [.darkGray, .systemIndigo],   "2026.10.05")
+            (1,  "DSCF0073.JPG",        "手寫日期 2025.11.3 (正面)",  false, [.systemPink, .systemIndigo],   "2025.11.3"),
+            (2,  "DSCF0010.JPG",        "手寫日期 2025.07.31 (正面)", false, [.systemPurple, .systemPink],   "2025.07.31"),
+            (3,  "193422_DSCF1405.JPG", "手寫日期 2026.06.26 (正面)", false, [.systemTeal, .systemBlue],     "2026.06.26"),
+            (4,  "193424_DSCF1411.JPG", "手寫日期 2026.07.31 (正面)", false, [.systemOrange, .systemPink],   "2026.07.31"),
+            (5,  "193425_DSCF1414.JPG", "手寫日期 2026.8-5 (正面)",   false, [.systemIndigo, .systemCyan],   "2026.8-5"),
+            (6,  "193426_DSCF1417.JPG", "手寫日期 2026.8.11 (正面)",  false, [.systemBlue, .systemPurple],   "2026.8.11"),
+            (7,  "193427_DSCF1421.JPG", "手寫日期 2026.08.23 (正面)", false, [.systemRed, .systemOrange],    "2026.08.23"),
+            (8,  "193428_DSCF1424.JPG", "手寫日期 2026.8.22 (正面)",  false, [.systemMint, .systemTeal],     "2026.8.22"),
+            (9,  "193430_DSCF1429.JPG", "手寫日期 2026.08.24 (正面)", false, [.systemPink, .systemPurple],   "2026.08.24"),
+            (10, "193430_DSCF1430.JPG", "手寫日期 2026.8.28 (正面)",  false, [.systemIndigo, .systemBlue],   "2026.8.28")
         ]
         
         var results: [(title: String, image: UIImage)] = []

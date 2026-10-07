@@ -243,7 +243,8 @@ struct LibraryView: View {
                         selection: $selectedPhotos,
                         maxSelectionCount: nil,
                         matching: .images,
-                        preferredItemEncoding: .automatic
+                        preferredItemEncoding: .automatic,
+                        photoLibrary: .shared()
                     ) {
                         Image(systemName: "plus")
                             .font(.subheadline.weight(.semibold))
@@ -310,13 +311,13 @@ struct LibraryView: View {
                                 Task {
                                     do {
                                         let count = try await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: true)
-                                        systemPhotoSeedAlertMessage = "已成功將 \(count) 張測試拍立得（含正常正反面、雙正面防呆案例、正反顛倒案例）寫入 iOS 系統相簿 (Photos.app)。\n\n現在請點選右上角「＋」從系統相簿選取相片，即可實測 Task 4.4 批次配對！"
+                                        systemPhotoSeedAlertMessage = "已成功將 \(count) 張帶封面手寫日期的拍立得相片寫入 iOS 原生相簿 (Photos.app)。\n\n現在請點選右上角「＋」從系統相簿選取相片，即可實測導入與自動日期判斷！"
                                     } catch {
                                         systemPhotoSeedAlertMessage = error.localizedDescription
                                     }
                                 }
                             } label: {
-                                Label("寫入 8 張測試相片至系統相簿 (Photos.app)", systemImage: "photo.badge.plus")
+                                Label("寫入 10 張帶日期拍立得至系統相簿 (Photos.app)", systemImage: "photo.badge.plus")
                             }
 
                             Button {
@@ -507,7 +508,8 @@ struct LibraryView: View {
                 PhotosPicker(
                     selection: $selectedPhotos,
                     maxSelectionCount: nil,
-                    matching: .images
+                    matching: .images,
+                    photoLibrary: .shared()
                 ) {
                     Label("從相簿選擇照片（不限張數）", systemImage: "photo.badge.plus")
                 }
@@ -589,13 +591,26 @@ struct LibraryView: View {
                   let originalUIImage = UIImage(data: data) else { continue }
 
             let uiImage = originalUIImage.normalizedImage
-            let newItem = ChekiItem()
-            newItem.frontImageData = data
-            newItem.capturedAt = Date()
-            newItem.processingState = .unprocessed
+            let normalizedData = uiImage.jpegData(compressionQuality: 0.92) ?? data
 
-            modelContext.insert(newItem)
-            await VisionPhotoProcessor.process(newItem, image: uiImage)
+            if let assetId = item.itemIdentifier,
+               !assetId.isEmpty,
+               let existingItem = chekiItems.first(where: { $0.frontAssetIdentifier == assetId }) {
+                if existingItem.originalFrontImageData == nil {
+                    existingItem.originalFrontImageData = normalizedData
+                }
+                await VisionPhotoProcessor.process(existingItem, image: uiImage)
+            } else {
+                let newItem = ChekiItem(
+                    frontImageData: normalizedData,
+                    originalFrontImageData: normalizedData,
+                    capturedAt: Date(),
+                    processingState: .unprocessed,
+                    frontAssetIdentifier: item.itemIdentifier
+                )
+                modelContext.insert(newItem)
+                await VisionPhotoProcessor.process(newItem, image: uiImage)
+            }
         }
 
         try? modelContext.save()
@@ -1168,7 +1183,8 @@ struct AlbumHeroDetailView: View {
                         PhotosPicker(
                             selection: $selectedPhotos,
                             maxSelectionCount: nil,
-                            matching: .images
+                            matching: .images,
+                            photoLibrary: .shared()
                         ) {
                             Label("從相簿多選匯入（不限張數）", systemImage: "photo.badge.plus")
                         }
@@ -1470,14 +1486,27 @@ struct AlbumHeroDetailView: View {
                   let originalUIImage = UIImage(data: data) else { continue }
 
             let uiImage = originalUIImage.normalizedImage
-            let newItem = ChekiItem()
-            newItem.frontImageData = data
-            newItem.capturedAt = Date()
-            newItem.processingState = .unprocessed
-            newItem.idolMember = defaultMember
+            let normalizedData = uiImage.jpegData(compressionQuality: 0.92) ?? data
 
-            modelContext.insert(newItem)
-            await VisionPhotoProcessor.process(newItem, image: uiImage)
+            if let assetId = pickerItem.itemIdentifier,
+               !assetId.isEmpty,
+               let existingItem = items.first(where: { $0.frontAssetIdentifier == assetId }) {
+                if existingItem.originalFrontImageData == nil {
+                    existingItem.originalFrontImageData = normalizedData
+                }
+                await VisionPhotoProcessor.process(existingItem, image: uiImage)
+            } else {
+                let newItem = ChekiItem(
+                    frontImageData: normalizedData,
+                    originalFrontImageData: normalizedData,
+                    capturedAt: Date(),
+                    processingState: .unprocessed,
+                    frontAssetIdentifier: pickerItem.itemIdentifier,
+                    idolMember: defaultMember
+                )
+                modelContext.insert(newItem)
+                await VisionPhotoProcessor.process(newItem, image: uiImage)
+            }
         }
 
         try? modelContext.save()
@@ -1799,16 +1828,41 @@ private enum VisionPhotoProcessor {
                 detection: adjustedDetection,
                 format: .auto
             )
+            var recognizedDate = await manager.recognizeDate(from: cropResult.cgImage)?.date
+            if recognizedDate == nil {
+                recognizedDate = await manager.recognizeDate(from: cgImage)?.date
+            }
+            let resolvedFormat = FilmFormat.resolvedConcreteFormat(
+                preferred: .auto,
+                specName: cropResult.filmSpecification?.format.rawValue,
+                outputSize: cropResult.outputSize
+            )
             await MainActor.run {
-                item.originalFrontImageData = image.jpegData(compressionQuality: 0.92)
+                if item.originalFrontImageData == nil {
+                    item.originalFrontImageData = image.jpegData(compressionQuality: 0.92)
+                }
                 item.frontImageData = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92)
                 item.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imageSize)
                 item.borderInsetRatio = insetRatio
+                item.filmFormat = resolvedFormat
+                item.detectedAspectRatio = resolvedFormat.aspectRatio
+                if let recognizedDate {
+                    let merged = ChekiItem.mergeRecognizedDate(recognizedDate, into: item.capturedAt)
+                    item.ocrDate = merged
+                    item.capturedAt = merged
+                }
                 item.processingState = .completed
             }
         } catch {
+            let manager = VisionManager()
+            let recognizedDate = await manager.recognizeDate(from: cgImage)?.date
             await MainActor.run {
-                item.processingState = .error
+                if let recognizedDate {
+                    let merged = ChekiItem.mergeRecognizedDate(recognizedDate, into: item.capturedAt)
+                    item.ocrDate = merged
+                    item.capturedAt = merged
+                }
+                item.processingState = .completed
             }
         }
     }

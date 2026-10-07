@@ -149,7 +149,8 @@ struct ChekiDetailView: View {
         .photosPicker(
             isPresented: $isShowingBacksidePicker,
             selection: $backsidePickerItem,
-            matching: .images
+            matching: .images,
+            photoLibrary: .shared()
         )
         .onChange(of: backsidePickerItem) { _, newPickerItem in
             guard let newPickerItem else { return }
@@ -335,6 +336,16 @@ struct ChekiDetailView: View {
                     showingAdjustmentSheet = true
                 } label: {
                     Label("調整邊界與相紙比例", systemImage: "slider.horizontal.3")
+                }
+
+                if currentItem.canRevertToOriginal(backside: isShowingBack && currentItem.hasBothSides) {
+                    Button {
+                        Task {
+                            await revertCurrentItemToOriginal(backside: isShowingBack && currentItem.hasBothSides)
+                        }
+                    } label: {
+                        Label("復原為原始圖片（取消裁切）", systemImage: "arrow.uturn.backward.circle")
+                    }
                 }
 
                 Button {
@@ -936,6 +947,8 @@ struct ChekiDetailView: View {
         let origBack = currentItem.originalBackImageData
         let frontPts = currentItem.perspectivePointsJSON
         let backPts = currentItem.backPerspectivePointsJSON
+        let frontAsset = currentItem.frontAssetIdentifier
+        let backAsset = currentItem.backAssetIdentifier
 
         currentItem.frontImageData = backData
         currentItem.backImageData = frontData
@@ -943,9 +956,26 @@ struct ChekiDetailView: View {
         currentItem.originalBackImageData = origFront
         currentItem.perspectivePointsJSON = backPts
         currentItem.backPerspectivePointsJSON = frontPts
+        currentItem.frontAssetIdentifier = backAsset
+        currentItem.backAssetIdentifier = frontAsset
 
         try? modelContext.save()
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    @MainActor
+    private func revertCurrentItemToOriginal(backside: Bool) async {
+        guard currentItem.canRevertToOriginal(backside: backside) else { return }
+        currentItem.revertToOriginal(backside: backside)
+        try? modelContext.save()
+
+        let assetID = backside ? currentItem.backAssetIdentifier : currentItem.frontAssetIdentifier
+        if let assetID, !assetID.isEmpty {
+            _ = try? await PhotoLibraryManager.shared.revertAssetToOriginal(assetIdentifier: assetID)
+        }
+
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showToast(backside ? "已復原背面為原始未裁切圖片" : "已復原為原始未裁切圖片")
     }
 
     @MainActor
@@ -984,6 +1014,7 @@ struct ChekiDetailView: View {
         currentItem.originalBackImageData = rawJPEG
         currentItem.backPerspectivePointsJSON = encodedCorners
         currentItem.backImageData = finalData
+        currentItem.backAssetIdentifier = pickerItem.itemIdentifier
         try? modelContext.save()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
@@ -1009,7 +1040,7 @@ struct ChekiDetailView: View {
             backMessage: "いつも応援ありがとう！♡\n今日もたくさん話せて嬉しかったよ☆\nまた次のイベントで会おうね！"
         ) {
             currentItem.backImageData = sampleBack
-            currentItem.originalBackImageData = nil
+            currentItem.originalBackImageData = sampleBack
             currentItem.backPerspectivePointsJSON = nil
             try? modelContext.save()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -1033,23 +1064,30 @@ struct ChekiDetailView: View {
                 albumName: albumName,
                 inFolder: folderName
             )
-            _ = try await PhotoLibraryManager.shared.saveImage(
+            let updatedFrontAssetID = try await PhotoLibraryManager.shared.updateOrSaveImage(
                 frontImage,
+                originalImageData: currentItem.originalFrontImageData,
+                existingAssetIdentifier: currentItem.frontAssetIdentifier,
                 creationDate: syncDate,
                 to: album
             )
+            currentItem.frontAssetIdentifier = updatedFrontAssetID
+
             if let backData = currentItem.backImageData,
                let backImage = UIImage(data: backData) {
-                _ = try await PhotoLibraryManager.shared.saveImage(
+                let updatedBackAssetID = try await PhotoLibraryManager.shared.updateOrSaveImage(
                     backImage,
+                    originalImageData: currentItem.originalBackImageData,
+                    existingAssetIdentifier: currentItem.backAssetIdentifier,
                     creationDate: syncDate,
                     to: album
                 )
+                currentItem.backAssetIdentifier = updatedBackAssetID
             }
             currentItem.isSyncedToPhotoLibrary = true
             currentItem.isDateWrittenToAlbum = (currentItem.ocrDate != nil)
             try? modelContext.save()
-            showToast("已同秒寫入系統相簿（\(albumName)）")
+            showToast("已原地更新系統相簿原圖（\(albumName)）")
         } catch {
             showToast("相簿同步需要開啟照片存取權限")
         }
@@ -1331,11 +1369,31 @@ private struct ChekiQuadCropEditorView: View {
                 Text("還原")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(hasUnsavedChanges || effectiveZoom > 1.01 ? Color.yellow : Color.white.opacity(0.38))
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Color.white.opacity(0.10), in: Capsule())
             }
             .disabled(!hasUnsavedChanges && effectiveZoom <= 1.01)
+
+            // 復原原始未裁切圖片按鈕
+            if item.canRevertToOriginal(backside: editingBackside) {
+                Button {
+                    Task {
+                        await revertToOriginalAndDismiss()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("復原原圖")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.16), in: Capsule())
+                }
+            }
 
             Spacer()
 
@@ -2038,6 +2096,22 @@ private struct ChekiQuadCropEditorView: View {
     }
 
     @MainActor
+    private func revertToOriginalAndDismiss() async {
+        guard item.canRevertToOriginal(backside: editingBackside) else { return }
+        item.revertToOriginal(backside: editingBackside)
+        try? modelContext.save()
+
+        let assetID = editingBackside ? item.backAssetIdentifier : item.frontAssetIdentifier
+        if let assetID, !assetID.isEmpty {
+            _ = try? await PhotoLibraryManager.shared.revertAssetToOriginal(assetIdentifier: assetID)
+        }
+
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        onAppliedToast(editingBackside ? "已復原背面為原始未裁切圖片" : "已復原為原始未裁切圖片")
+        dismiss()
+    }
+
+    @MainActor
     private func applyManualQuadCropAndSave() async {
         guard let uiImage = sourceUIImage, let cgImage = uiImage.cgImage else {
             dismiss()
@@ -2078,36 +2152,68 @@ private struct ChekiQuadCropEditorView: View {
             detection: manualDetection,
             format: chekiFormat,
             preserveCornerOrder: true
-        ),
-        let croppedJPEG = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92) {
-            let encodedJSON = ChekiItem.encodeNormalizedCorners(manualNorm)
-            if editingBackside {
-                item.backImageData = croppedJPEG
-                item.backPerspectivePointsJSON = encodedJSON
-            } else {
-                item.frontImageData = croppedJPEG
-                item.perspectivePointsJSON = encodedJSON
-                if item.ocrDate == nil,
-                   let ocrRes = await visionManager.recognizeDate(from: cropResult.cgImage) {
-                    let mergedDate = ChekiItem.mergeRecognizedDate(ocrRes.date, into: item.capturedAt)
-                    item.ocrDate = mergedDate
-                    item.capturedAt = mergedDate
+        ) {
+            let croppedUIImage = UIImage(cgImage: cropResult.cgImage)
+            if let croppedJPEG = croppedUIImage.jpegData(compressionQuality: 0.92) {
+                let encodedJSON = ChekiItem.encodeNormalizedCorners(manualNorm)
+                if editingBackside {
+                    if item.originalBackImageData == nil {
+                        item.originalBackImageData = item.backImageData ?? uiImage.jpegData(compressionQuality: 0.92)
+                    }
+                    item.backImageData = croppedJPEG
+                    item.backPerspectivePointsJSON = encodedJSON
+                } else {
+                    if item.originalFrontImageData == nil {
+                        item.originalFrontImageData = item.frontImageData ?? uiImage.jpegData(compressionQuality: 0.92)
+                    }
+                    item.frontImageData = croppedJPEG
+                    item.perspectivePointsJSON = encodedJSON
+                    if item.ocrDate == nil,
+                       let ocrRes = await visionManager.recognizeDate(from: cropResult.cgImage) {
+                        let mergedDate = ChekiItem.mergeRecognizedDate(ocrRes.date, into: item.capturedAt)
+                        item.ocrDate = mergedDate
+                        item.capturedAt = mergedDate
+                    }
                 }
+                item.borderInsetRatio = defaultBorderInsetPercentage / 100.0
+                let resolvedFormat = FilmFormat.resolvedConcreteFormat(
+                    preferred: selectedFormat,
+                    specName: cropResult.filmSpecification?.format.rawValue,
+                    outputSize: cropResult.outputSize
+                )
+                item.filmFormat = resolvedFormat
+                if cropResult.outputSize.width > 0 {
+                    item.detectedAspectRatio = Double(cropResult.outputSize.height / cropResult.outputSize.width)
+                }
+                try? modelContext.save()
+
+                // 若此照片關聯系統相簿 PHAsset，直接修改原圖（不新增重複照片，且保留原始底圖供復原）
+                let targetAssetID = editingBackside ? item.backAssetIdentifier : item.frontAssetIdentifier
+                let origData = editingBackside ? item.originalBackImageData : item.originalFrontImageData
+                if targetAssetID != nil || item.isSyncedToPhotoLibrary {
+                    let albumName = item.idolMember?.stageName ?? "ChekiLens"
+                    let folderName = item.idolMember?.group?.name
+                    if let album = try? await PhotoLibraryManager.shared.getOrCreateAlbum(albumName: albumName, inFolder: folderName),
+                       let updatedID = try? await PhotoLibraryManager.shared.updateOrSaveImage(
+                           croppedUIImage,
+                           originalImageData: origData,
+                           existingAssetIdentifier: targetAssetID,
+                           creationDate: item.displayDate,
+                           to: album
+                       ) {
+                        if editingBackside {
+                            item.backAssetIdentifier = updatedID
+                        } else {
+                            item.frontAssetIdentifier = updatedID
+                        }
+                        try? modelContext.save()
+                    }
+                }
+
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                onAppliedToast("已原地修改裁切並保留原始圖片")
+                dismiss()
             }
-            item.borderInsetRatio = defaultBorderInsetPercentage / 100.0
-            let resolvedFormat = FilmFormat.resolvedConcreteFormat(
-                preferred: selectedFormat,
-                specName: cropResult.filmSpecification?.format.rawValue,
-                outputSize: cropResult.outputSize
-            )
-            item.filmFormat = resolvedFormat
-            if cropResult.outputSize.width > 0 {
-                item.detectedAspectRatio = Double(cropResult.outputSize.height / cropResult.outputSize.width)
-            }
-            try? modelContext.save()
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            onAppliedToast("已重新裁切並更新拍立得")
-            dismiss()
         } else {
             showBanner("裁切範圍無效，請確認四個頂點未交錯")
         }

@@ -29,7 +29,9 @@ struct StagingChekiPhoto: Identifiable, Equatable {
     /// 原始匯入順序編號（從 1 開始）
     var sequenceNumber: Int
     var title: String
-    /// 原始未裁切圖片資料（供事後進入四頂點手動編輯器時保留完整外圍區域）
+    /// 對應 iOS 原生相簿之 `PHAsset.localIdentifier`（確保直接修改原圖不新增重複照片）
+    var assetIdentifier: String? = nil
+    /// 原始未裁切圖片資料（供事後進入四頂點手動編輯器或復原原圖時保留完整外圍區域）
     var imageData: Data
     var uiImage: UIImage
     var detectedSide: DetectedPhotoSide
@@ -48,20 +50,27 @@ struct StagingChekiPhoto: Identifiable, Equatable {
     var isDetectingBoundary: Bool = false
     /// 是否已完成背景邊界偵測
     var hasCompletedBoundaryDetection: Bool = false
+    /// 使用者是否選擇復原為原始未裁切圖片
+    var isRevertedToOriginal: Bool = false
 
-    /// 工作台卡片優先顯示已裁切預覽圖；若尚在背景偵測中或未偵測到邊框則顯示原圖
+    /// 工作台卡片優先顯示已裁切預覽圖；若已選擇復原原圖或尚在背景偵測中則顯示原圖
     var displayUIImage: UIImage {
-        croppedUIImage ?? uiImage
+        if isRevertedToOriginal {
+            return uiImage
+        }
+        return croppedUIImage ?? uiImage
     }
 
     static func == (lhs: StagingChekiPhoto, rhs: StagingChekiPhoto) -> Bool {
         lhs.id == rhs.id &&
         lhs.sequenceNumber == rhs.sequenceNumber &&
         lhs.title == rhs.title &&
+        lhs.assetIdentifier == rhs.assetIdentifier &&
         lhs.detectedSide == rhs.detectedSide &&
         lhs.detectionNote == rhs.detectionNote &&
         lhs.isDetectingBoundary == rhs.isDetectingBoundary &&
         lhs.hasCompletedBoundaryDetection == rhs.hasCompletedBoundaryDetection &&
+        lhs.isRevertedToOriginal == rhs.isRevertedToOriginal &&
         lhs.normalizedCornersJSON == rhs.normalizedCornersJSON &&
         lhs.detectedOCRDate == rhs.detectedOCRDate &&
         lhs.resolvedFilmFormat == rhs.resolvedFilmFormat &&
@@ -147,6 +156,7 @@ struct BatchPairingView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var existingChekiItems: [ChekiItem]
     @Query(sort: \IdolGroup.sortOrder, order: .forward) private var idolGroups: [IdolGroup]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
     @AppStorage("hasSeenBatchPairingCoachMark") private var hasSeenCoachMark: Bool = false
@@ -312,7 +322,8 @@ struct BatchPairingView: View {
                             selection: $additionalPickerItems,
                             maxSelectionCount: nil,
                             matching: .images,
-                            preferredItemEncoding: .automatic
+                            preferredItemEncoding: .automatic,
+                            photoLibrary: .shared()
                         ) {
                             Image(systemName: "plus")
                         }
@@ -324,13 +335,13 @@ struct BatchPairingView: View {
                                 Task {
                                     do {
                                         let count = try await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: true)
-                                        systemPhotoSeedAlertMessage = "已成功將 \(count) 張測試拍立得（含正常正反面、雙正面防呆案例、正反顛倒案例）寫入 iOS 系統相簿 (Photos.app)。\n\n現在可點選上方「＋」直接從系統相簿勾選這 8 張相片進行匯入測試！"
+                                        systemPhotoSeedAlertMessage = "已成功將 \(count) 張帶封面手寫日期的拍立得相片寫入 iOS 原生相簿 (Photos.app)。\n\n現在可點選上方「＋」直接從系統相簿選取這 \(count) 張相片進行導入與自動日期判斷測試！"
                                     } catch {
                                         systemPhotoSeedAlertMessage = error.localizedDescription
                                     }
                                 }
                             } label: {
-                                Label("寫入 8 張測試相片至系統相簿 (Photos.app)", systemImage: "photo.badge.plus")
+                                Label("寫入 10 張帶日期拍立得至系統相簿 (Photos.app)", systemImage: "photo.badge.plus")
                             }
 
                             Button {
@@ -1302,6 +1313,19 @@ struct BatchPairingView: View {
             }
         }
 
+        if slot.frontPhoto.croppedImageData != nil {
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    togglePhotoRevertToOriginal(photoID: slot.frontPhoto.id)
+                }
+            } label: {
+                Label(
+                    slot.frontPhoto.isRevertedToOriginal ? "套用自動邊界裁切" : "復原為原始未裁切圖片",
+                    systemImage: slot.frontPhoto.isRevertedToOriginal ? "crop" : "arrow.uturn.backward.circle"
+                )
+            }
+        }
+
         Divider()
 
         Button(role: .destructive) {
@@ -1310,6 +1334,20 @@ struct BatchPairingView: View {
             }
         } label: {
             Label("從本次匯入移除", systemImage: "trash")
+        }
+    }
+
+    private func togglePhotoRevertToOriginal(photoID: UUID) {
+        if let idx = allPhotos.firstIndex(where: { $0.id == photoID }) {
+            allPhotos[idx].isRevertedToOriginal.toggle()
+        }
+        for i in slots.indices {
+            if slots[i].frontPhoto.id == photoID {
+                slots[i].frontPhoto.isRevertedToOriginal.toggle()
+            }
+            if slots[i].backPhoto?.id == photoID {
+                slots[i].backPhoto?.isRevertedToOriginal.toggle()
+            }
         }
     }
 
@@ -1449,7 +1487,8 @@ struct BatchPairingView: View {
                     selection: $additionalPickerItems,
                     maxSelectionCount: nil,
                     matching: .images,
-                    preferredItemEncoding: .automatic
+                    preferredItemEncoding: .automatic,
+                    photoLibrary: .shared()
                 ) {
                     Label("從相簿選取照片（無張數上限）", systemImage: "photo.badge.plus")
                 }
@@ -1937,6 +1976,7 @@ struct BatchPairingView: View {
                 id: UUID(),
                 sequenceNumber: nextSequence,
                 title: "匯入相片 \(nextSequence)",
+                assetIdentifier: item.itemIdentifier,
                 imageData: normalizedData,
                 uiImage: normalized,
                 detectedSide: .analyzing,
@@ -2333,7 +2373,7 @@ struct BatchPairingView: View {
         }
     }
 
-    // MARK: - 10. 執行批次歸檔儲存（直接重用背景已完成的邊界預裁切與 OCR 結果，若尚有未完成照片則即時補齊）
+    // MARK: - 10. 執行批次歸檔儲存（直接重用背景已完成的邊界預裁切與 OCR 結果，不新增重複照片、直接修改原圖並保留原始圖片可復原）
 
     @MainActor
     private func executeBatchProcessing() async {
@@ -2356,29 +2396,82 @@ struct BatchPairingView: View {
                 ? slot.frontPhoto.resolvedFilmFormat.concreteFormat
                 : selectedFilmFormat.concreteFormat
 
-            let newItem = ChekiItem(
-                frontImageData: slot.frontPhoto.croppedImageData ?? slot.frontPhoto.imageData,
-                backImageData: slot.backPhoto?.croppedImageData ?? slot.backPhoto?.imageData,
-                originalFrontImageData: slot.frontPhoto.imageData,
-                originalBackImageData: slot.backPhoto?.imageData,
-                capturedAt: itemTimestamp,
-                filmFormat: concreteFormat,
-                detectedAspectRatio: concreteFormat.aspectRatio,
-                borderInsetRatio: defaultInsetRatio,
-                processingState: .detecting,
-                idolMember: targetMember
-            )
-            modelContext.insert(newItem)
+            let initialFrontData = slot.frontPhoto.isRevertedToOriginal
+                ? slot.frontPhoto.imageData
+                : (slot.frontPhoto.croppedImageData ?? slot.frontPhoto.imageData)
+            let initialBackData = slot.backPhoto.map { back in
+                back.isRevertedToOriginal ? back.imageData : (back.croppedImageData ?? back.imageData)
+            }
+
+            // 若該張照片已存在於典藏庫（依系統相簿 assetIdentifier 或原始圖片比對），直接原地修改該筆紀錄而不新建重複照片
+            let targetItem: ChekiItem
+            if let existing = existingChekiItems.first(where: { item in
+                if let assetId = slot.frontPhoto.assetIdentifier, !assetId.isEmpty, item.frontAssetIdentifier == assetId {
+                    return true
+                }
+                if let origData = item.originalFrontImageData, origData == slot.frontPhoto.imageData {
+                    return true
+                }
+                return false
+            }) {
+                targetItem = existing
+                if targetItem.originalFrontImageData == nil {
+                    targetItem.originalFrontImageData = slot.frontPhoto.imageData
+                }
+                targetItem.frontImageData = initialFrontData
+                if let backPhoto = slot.backPhoto {
+                    if targetItem.originalBackImageData == nil {
+                        targetItem.originalBackImageData = backPhoto.imageData
+                    }
+                    targetItem.backImageData = initialBackData
+                    if let backAssetId = backPhoto.assetIdentifier {
+                        targetItem.backAssetIdentifier = backAssetId
+                    }
+                }
+                if let frontAssetId = slot.frontPhoto.assetIdentifier {
+                    targetItem.frontAssetIdentifier = frontAssetId
+                }
+                targetItem.filmFormat = concreteFormat
+                targetItem.detectedAspectRatio = concreteFormat.aspectRatio
+                targetItem.borderInsetRatio = defaultInsetRatio
+                if let targetMember {
+                    targetItem.idolMember = targetMember
+                }
+            } else {
+                let newItem = ChekiItem(
+                    frontImageData: initialFrontData,
+                    backImageData: initialBackData,
+                    originalFrontImageData: slot.frontPhoto.imageData,
+                    originalBackImageData: slot.backPhoto?.imageData,
+                    capturedAt: itemTimestamp,
+                    filmFormat: concreteFormat,
+                    detectedAspectRatio: concreteFormat.aspectRatio,
+                    borderInsetRatio: defaultInsetRatio,
+                    processingState: .detecting,
+                    frontAssetIdentifier: slot.frontPhoto.assetIdentifier,
+                    backAssetIdentifier: slot.backPhoto?.assetIdentifier,
+                    idolMember: targetMember
+                )
+                modelContext.insert(newItem)
+                targetItem = newItem
+            }
 
             // 1. 正面：優先直接使用背景已完成的邊界裁切與封面手寫日期 OCR 結果
             var finalFrontUIImage = slot.frontPhoto.displayUIImage
             var recognizedDate: Date? = slot.frontPhoto.detectedOCRDate
-            if slot.frontPhoto.hasCompletedBoundaryDetection {
-                if let preCroppedData = slot.frontPhoto.croppedImageData {
-                    newItem.frontImageData = preCroppedData
-                    newItem.detectionMethod = .visionNative
+            if slot.frontPhoto.isRevertedToOriginal {
+                targetItem.frontImageData = slot.frontPhoto.imageData
+                targetItem.perspectivePointsJSON = nil
+                finalFrontUIImage = slot.frontPhoto.uiImage
+                if recognizedDate == nil, let frontCG = slot.frontPhoto.uiImage.cgImage {
+                    recognizedDate = await visionManager.recognizeDate(from: frontCG)?.date
                 }
-                newItem.perspectivePointsJSON = slot.frontPhoto.normalizedCornersJSON
+            } else if slot.frontPhoto.hasCompletedBoundaryDetection {
+                if let preCroppedData = slot.frontPhoto.croppedImageData {
+                    targetItem.frontImageData = preCroppedData
+                    targetItem.detectionMethod = .visionNative
+                }
+                targetItem.perspectivePointsJSON = slot.frontPhoto.normalizedCornersJSON
                 if recognizedDate == nil, let frontCG = slot.frontPhoto.displayUIImage.cgImage {
                     recognizedDate = await visionManager.recognizeDate(from: frontCG)?.date
                 }
@@ -2400,17 +2493,17 @@ struct BatchPairingView: View {
                         let croppedUI = UIImage(cgImage: cropRes.cgImage)
                         finalFrontUIImage = croppedUI
                         if let jpeg = croppedUI.jpegData(compressionQuality: 0.92) {
-                            newItem.frontImageData = jpeg
+                            targetItem.frontImageData = jpeg
                         }
-                        newItem.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imgSize)
-                        newItem.detectionMethod = .visionNative
+                        targetItem.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imgSize)
+                        targetItem.detectionMethod = .visionNative
                         concreteFormat = FilmFormat.resolvedConcreteFormat(
                             preferred: selectedFilmFormat,
                             specName: cropRes.filmSpecification?.format.rawValue,
                             outputSize: cropRes.outputSize
                         )
-                        newItem.filmFormat = concreteFormat
-                        newItem.detectedAspectRatio = concreteFormat.aspectRatio
+                        targetItem.filmFormat = concreteFormat
+                        targetItem.detectedAspectRatio = concreteFormat.aspectRatio
 
                         if let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
                             recognizedDate = ocrRes.date
@@ -2428,11 +2521,15 @@ struct BatchPairingView: View {
             // 2. 背面：優先直接使用背景已完成的邊界裁切結果
             var finalBackUIImage: UIImage? = slot.backPhoto?.displayUIImage
             if let backPhoto = slot.backPhoto {
-                if backPhoto.hasCompletedBoundaryDetection {
+                if backPhoto.isRevertedToOriginal {
+                    targetItem.backImageData = backPhoto.imageData
+                    targetItem.backPerspectivePointsJSON = nil
+                    finalBackUIImage = backPhoto.uiImage
+                } else if backPhoto.hasCompletedBoundaryDetection {
                     if let preCroppedBackData = backPhoto.croppedImageData {
-                        newItem.backImageData = preCroppedBackData
+                        targetItem.backImageData = preCroppedBackData
                     }
-                    newItem.backPerspectivePointsJSON = backPhoto.normalizedCornersJSON
+                    targetItem.backPerspectivePointsJSON = backPhoto.normalizedCornersJSON
                     if recognizedDate == nil {
                         recognizedDate = backPhoto.detectedOCRDate
                     }
@@ -2453,9 +2550,9 @@ struct BatchPairingView: View {
                             let croppedBackUI = UIImage(cgImage: backCrop.cgImage)
                             finalBackUIImage = croppedBackUI
                             if let jpeg = croppedBackUI.jpegData(compressionQuality: 0.92) {
-                                newItem.backImageData = jpeg
+                                targetItem.backImageData = jpeg
                             }
-                            newItem.backPerspectivePointsJSON = ChekiItem.encodeNormalizedCorners(adjustedBackCorners, imageSize: backSize)
+                            targetItem.backPerspectivePointsJSON = ChekiItem.encodeNormalizedCorners(adjustedBackCorners, imageSize: backSize)
                         }
                     }
                 }
@@ -2464,39 +2561,63 @@ struct BatchPairingView: View {
             // 若辨識出拍立得封面（或背面）手寫日期，自動填入拍攝日期（保留當下時分秒）
             if let recognizedDate {
                 let mergedDate = ChekiItem.mergeRecognizedDate(recognizedDate, into: itemTimestamp)
-                newItem.ocrDate = mergedDate
-                newItem.capturedAt = mergedDate
+                targetItem.ocrDate = mergedDate
+                targetItem.capturedAt = mergedDate
             }
 
             // 備忘預設保持空白（不自動塞入系統匯入文字）
-            newItem.memo = nil
-            newItem.processingState = .completed
+            targetItem.processingState = .completed
 
-            // 3. 若開啟系統相簿同步，依每張拍立得各自指派的成員寫入對應成員相簿 (Task 3.3 & 3.4)
+            // 3. 若開啟系統相簿同步，直接原地修改系統相簿原圖（不新增重複照片，保留原始底圖可復原）
             if autoSyncToPhotos {
-                let syncDate = newItem.displayDate
+                let syncDate = targetItem.displayDate
                 let membersToSync = slot.assignedMembers.isEmpty ? [nil as IdolMember?] : slot.assignedMembers.map { Optional($0) }
-                for memberOpt in membersToSync {
+                for (memberIdx, memberOpt) in membersToSync.enumerated() {
                     let albumName = memberOpt?.stageName ?? "ChekiLens"
                     let folderName = memberOpt?.group?.name
                     if let album = try? await PhotoLibraryManager.shared.getOrCreateAlbum(
                         albumName: albumName,
                         inFolder: folderName
                     ) {
-                        _ = try? await PhotoLibraryManager.shared.saveImage(
-                            finalFrontUIImage,
-                            creationDate: syncDate,
-                            to: album
-                        )
-                        if let backImg = finalBackUIImage {
-                            _ = try? await PhotoLibraryManager.shared.saveImage(
-                                backImg,
+                        if memberIdx == 0 {
+                            if let updatedFrontId = try? await PhotoLibraryManager.shared.updateOrSaveImage(
+                                finalFrontUIImage,
+                                originalImageData: targetItem.originalFrontImageData,
+                                existingAssetIdentifier: targetItem.frontAssetIdentifier,
                                 creationDate: syncDate,
                                 to: album
-                            )
+                            ) {
+                                targetItem.frontAssetIdentifier = updatedFrontId
+                            }
+                            if let backImg = finalBackUIImage {
+                                if let updatedBackId = try? await PhotoLibraryManager.shared.updateOrSaveImage(
+                                    backImg,
+                                    originalImageData: targetItem.originalBackImageData,
+                                    existingAssetIdentifier: targetItem.backAssetIdentifier,
+                                    creationDate: syncDate,
+                                    to: album
+                                ) {
+                                    targetItem.backAssetIdentifier = updatedBackId
+                                }
+                            }
+                        } else {
+                            if let frontId = targetItem.frontAssetIdentifier {
+                                try? await PhotoLibraryManager.shared.addExistingAsset(
+                                    identifier: frontId,
+                                    creationDate: syncDate,
+                                    to: album
+                                )
+                            }
+                            if let backId = targetItem.backAssetIdentifier {
+                                try? await PhotoLibraryManager.shared.addExistingAsset(
+                                    identifier: backId,
+                                    creationDate: syncDate,
+                                    to: album
+                                )
+                            }
                         }
-                        newItem.isSyncedToPhotoLibrary = true
-                        newItem.isDateWrittenToAlbum = (newItem.ocrDate != nil)
+                        targetItem.isSyncedToPhotoLibrary = true
+                        targetItem.isDateWrittenToAlbum = (targetItem.ocrDate != nil)
                     }
                 }
             }
