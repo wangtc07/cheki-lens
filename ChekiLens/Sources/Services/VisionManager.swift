@@ -7,11 +7,11 @@ import Vision
 // MARK: - ChekiFilmFormat
 
 /// 拍立得相紙規格（比例鎖定用）
-nonisolated enum ChekiFilmFormat: Sendable {
-    case mini   // 86×54mm → ratio 1.593
-    case square // 86×72mm → ratio 1.194
-    case wide   // 108×86mm → ratio 1.256
-    case auto   // Vision 偵測後自動判斷
+nonisolated enum ChekiFilmFormat: String, Sendable {
+    case mini   = "mini"   // 86×54mm → ratio 1.593
+    case square = "square" // 86×72mm → ratio 1.194
+    case wide   = "wide"   // 108×86mm → ratio 1.256
+    case auto   = "auto"   // Vision 偵測後自動判斷
 
     /// 長邊 / 短邊比
     var aspectRatio: Double {

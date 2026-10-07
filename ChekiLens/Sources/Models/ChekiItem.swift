@@ -191,6 +191,29 @@ extension ChekiItem {
             return CGPoint(x: pair[0], y: pair[1])
         }
     }
+
+    /// 統一拍攝日期格式化：`yyyy年M月d日 EEEE`（例如 `2025年11月3日 星期一`）
+    static func formatFullDateWithWeekday(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hant_TW")
+        formatter.dateFormat = "yyyy年M月d日 EEEE"
+        return formatter.string(from: date)
+    }
+
+    /// 將封面手寫辨識出的日期（年、月、日）合併至目標時間戳（保留原時、分、秒）
+    static func mergeRecognizedDate(_ recognizedDate: Date, into baseTimestamp: Date) -> Date {
+        let cal = Calendar.current
+        let dateComps = cal.dateComponents([.year, .month, .day], from: recognizedDate)
+        let timeComps = cal.dateComponents([.hour, .minute, .second], from: baseTimestamp)
+        var merged = DateComponents()
+        merged.year = dateComps.year
+        merged.month = dateComps.month
+        merged.day = dateComps.day
+        merged.hour = timeComps.hour ?? 12
+        merged.minute = timeComps.minute ?? 0
+        merged.second = timeComps.second ?? 0
+        return cal.date(from: merged) ?? recognizedDate
+    }
 }
 
 // MARK: - FilmFormat
@@ -206,13 +229,58 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     /// 自動識別（Vision 偵測後自動落入對應規格）
     case auto   = "auto"
 
+    /// 三種實體拍立得規格（資訊卡片中固定顯示與切換此三種）
+    static let concreteFormats: [FilmFormat] = [.mini, .square, .wide]
+
+    /// 若為 `.auto` 則正規化為三種具體規格之一（預設 `.mini`）
+    var concreteFormat: FilmFormat {
+        switch self {
+        case .mini, .square, .wide:
+            return self
+        case .auto:
+            return .mini
+        }
+    }
+
+    /// 根據使用者偏好、Vision 透視規格或裁切尺寸，解析為三種具體規格之一（基本上為 `.mini`）
+    static func resolvedConcreteFormat(
+        preferred: FilmFormat = .auto,
+        specName: String? = nil,
+        outputSize: CGSize? = nil
+    ) -> FilmFormat {
+        if preferred != .auto {
+            return preferred
+        }
+        if let specName {
+            if specName.localizedCaseInsensitiveContains("Square") {
+                return .square
+            }
+            if specName.localizedCaseInsensitiveContains("Wide") {
+                return .wide
+            }
+            if specName.localizedCaseInsensitiveContains("Mini") {
+                return .mini
+            }
+        }
+        if let size = outputSize, size.width > 0, size.height > 0 {
+            if size.width > size.height * 1.06 {
+                return .wide
+            }
+            let ratio = max(size.width, size.height) / min(size.width, size.height)
+            if ratio < 1.30 {
+                return .square
+            }
+        }
+        return .mini
+    }
+
     /// 長邊 / 短邊比例（用於 CIPerspectiveCorrection 比例鎖定）
     var aspectRatio: Double {
         switch self {
         case .mini:   return 86.0 / 54.0   // ≈ 1.593
         case .square: return 86.0 / 72.0   // ≈ 1.194
         case .wide:   return 108.0 / 86.0  // ≈ 1.256
-        case .auto:   return 0.0           // 由 Vision 動態取得
+        case .auto:   return 86.0 / 54.0   // 預設落入 Instax Mini
         }
     }
 
@@ -222,7 +290,7 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
         case .mini:   return (86, 54)
         case .square: return (86, 72)
         case .wide:   return (108, 86)
-        case .auto:   return (0, 0)
+        case .auto:   return (86, 54)
         }
     }
 
@@ -232,6 +300,21 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
         case .square: return "Instax Square"
         case .wide:   return "Instax Wide"
         case .auto:   return "自動識別"
+        }
+    }
+
+    /// 具體規格顯示名稱（即使舊資料存為 `.auto` 也顯示為 `Instax Mini`）
+    var concreteDisplayName: String {
+        concreteFormat.displayName
+    }
+
+    /// 含毫米尺寸的完整顯示名稱
+    var detailDisplayName: String {
+        switch concreteFormat {
+        case .mini:   return "Instax Mini (86×54mm)"
+        case .square: return "Instax Square (86×72mm)"
+        case .wide:   return "Instax Wide (86×108mm)"
+        case .auto:   return "Instax Mini (86×54mm)"
         }
     }
 }

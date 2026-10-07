@@ -350,6 +350,8 @@ struct CameraScannerView: View {
 
     // 正反雙面連續拍攝狀態（先拍正面 -> 提示翻面 -> 再拍背面）
     @State private var pendingFrontImageData: Data? = nil
+    @State private var pendingFrontOCRDate: Date? = nil
+    @State private var pendingFrontFormat: FilmFormat = .mini
     @State private var statusBannerMessage: String? = nil
 
     // 點擊對焦黃框狀態
@@ -859,23 +861,31 @@ struct CameraScannerView: View {
         let isCapturingBackside = (captureMode == .frontAndBack && pendingFrontImageData != nil)
         guard let rawImage = await camera.capturePhoto(isBacksideSimulated: isCapturingBackside) else { return }
 
-        let processedData = await processCapturedImage(rawImage)
+        let (processedData, recognizedDate, resolvedFormat) = await processCapturedImage(rawImage)
+        let now = Date()
 
         if captureMode == .frontAndBack {
             if pendingFrontImageData == nil {
                 // 第一步：已拍下正面，等待翻面拍背面
                 pendingFrontImageData = processedData
+                pendingFrontOCRDate = recognizedDate
+                pendingFrontFormat = resolvedFormat
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 withAnimation {
                     statusBannerMessage = "正面已鎖定！請將拍立得翻至背面再按一次快門"
                 }
             } else {
                 // 第二步：背面拍攝完成，自動配對存入同一張 ChekiItem
+                let finalOCR = pendingFrontOCRDate ?? recognizedDate
+                let captureDate = finalOCR.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
+                let format = pendingFrontFormat.concreteFormat
                 let newItem = ChekiItem(
                     frontImageData: pendingFrontImageData,
                     backImageData: processedData,
-                    capturedAt: Date(),
-                    filmFormat: .mini,
+                    capturedAt: captureDate,
+                    ocrDate: finalOCR != nil ? captureDate : nil,
+                    filmFormat: format,
+                    detectedAspectRatio: format.aspectRatio,
                     processingState: .completed,
                     idolMember: defaultMember
                 )
@@ -883,6 +893,8 @@ struct CameraScannerView: View {
                 try? modelContext.save()
 
                 pendingFrontImageData = nil
+                pendingFrontOCRDate = nil
+                pendingFrontFormat = .mini
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 withAnimation {
                     statusBannerMessage = "正反雙面拍立得已配對典藏！"
@@ -890,11 +902,15 @@ struct CameraScannerView: View {
             }
         } else {
             // 單張正面拍攝完成
+            let captureDate = recognizedDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
+            let format = resolvedFormat.concreteFormat
             let newItem = ChekiItem(
                 frontImageData: processedData,
                 backImageData: nil,
-                capturedAt: Date(),
-                filmFormat: .mini,
+                capturedAt: captureDate,
+                ocrDate: recognizedDate != nil ? captureDate : nil,
+                filmFormat: format,
+                detectedAspectRatio: format.aspectRatio,
                 processingState: .completed,
                 idolMember: defaultMember
             )
@@ -908,14 +924,14 @@ struct CameraScannerView: View {
         }
     }
 
-    private func processCapturedImage(_ image: UIImage) async -> Data? {
+    private func processCapturedImage(_ image: UIImage) async -> (Data?, Date?, FilmFormat) {
         guard let cgImage = image.cgImage else {
-            return image.jpegData(compressionQuality: 0.92)
+            return (image.jpegData(compressionQuality: 0.92), nil, .mini)
         }
         let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
         let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
+        let manager = VisionManager()
         do {
-            let manager = VisionManager()
             let detection = try await manager.detectQuad(in: cgImage, imageSize: imageSize)
             let adjustedCorners = await manager.applyBorderInset(
                 corners: detection.corners,
@@ -928,9 +944,20 @@ struct CameraScannerView: View {
                 detection: detection,
                 format: .auto
             )
-            return UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92)
+            let resolvedFormat = FilmFormat.resolvedConcreteFormat(
+                preferred: .auto,
+                specName: cropResult.filmSpecification?.format.rawValue,
+                outputSize: cropResult.outputSize
+            )
+            var ocrDate = await manager.recognizeDate(from: cropResult.cgImage)?.date
+            if ocrDate == nil {
+                ocrDate = await manager.recognizeDate(from: cgImage)?.date
+            }
+            let jpeg = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92)
+            return (jpeg, ocrDate, resolvedFormat)
         } catch {
-            return image.jpegData(compressionQuality: 0.92)
+            let ocrDate = await manager.recognizeDate(from: cgImage)?.date
+            return (image.jpegData(compressionQuality: 0.92), ocrDate, .mini)
         }
     }
 }

@@ -159,17 +159,12 @@ struct ChekiDetailView: View {
         .sheet(isPresented: $showingInfoSheet) {
             NavigationStack {
                 ChekiInfoView(item: currentItem)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") {
-                                showingInfoSheet = false
-                            }
-                            .fontWeight(.semibold)
-                        }
-                    }
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+        .task(id: currentItem.id) {
+            await ensureCoverDateAndFormatNormalized(for: currentItem)
         }
         .fullScreenCover(isPresented: $showingAdjustmentSheet) {
             ChekiQuadCropEditorView(
@@ -1118,18 +1113,71 @@ struct ChekiDetailView: View {
         }
     }
 
-    // MARK: - 6. 日期藥丸格式化工具 (Apple Photos Pill Formatter)
+    // MARK: - 6. 日期藥丸格式化與背景封面手寫日期補齊
+
+    @MainActor
+    private func ensureCoverDateAndFormatNormalized(for target: ChekiItem) async {
+        var didMutate = false
+
+        // 1. 確保規格為三種具體規格之一（Instax Mini / Square / Wide）
+        if target.filmFormat == .auto {
+            var imgSize: CGSize? = nil
+            if let data = target.frontImageData, let img = UIImage(data: data) {
+                imgSize = img.size
+            }
+            let concrete = FilmFormat.resolvedConcreteFormat(
+                preferred: .auto,
+                specName: nil,
+                outputSize: imgSize
+            )
+            target.filmFormat = concrete
+            target.detectedAspectRatio = concrete.aspectRatio
+            didMutate = true
+        }
+
+        // 2. 清除舊版自動塞入的系統匯入備忘文字
+        if let memo = target.memo {
+            if let note = memo.noteText,
+               (note.hasPrefix("透過批次配對工作台") || note.hasPrefix("透過批次工作台")) {
+                memo.noteText = nil
+                didMutate = true
+            }
+            if memo.eventName == "批次配對匯入" {
+                memo.eventName = nil
+                didMutate = true
+            }
+        }
+
+        if didMutate {
+            try? modelContext.save()
+        }
+
+        // 3. 若尚未辨識出封面手寫日期，自動於背景辨識並填入拍攝日期
+        guard target.ocrDate == nil else { return }
+        guard let data = target.frontImageData ?? target.originalFrontImageData,
+              let uiImage = UIImage(data: data)?.normalizedImage,
+              let cgImage = uiImage.cgImage else { return }
+
+        let visionManager = VisionManager()
+        if let ocrResult = await visionManager.recognizeDate(from: cgImage) {
+            let mergedDate = ChekiItem.mergeRecognizedDate(ocrResult.date, into: target.capturedAt)
+            target.ocrDate = mergedDate
+            target.capturedAt = mergedDate
+            try? modelContext.save()
+        } else if let origData = target.originalFrontImageData,
+                  origData != data,
+                  let origUI = UIImage(data: origData)?.normalizedImage,
+                  let origCG = origUI.cgImage,
+                  let fallbackResult = await visionManager.recognizeDate(from: origCG) {
+            let mergedDate = ChekiItem.mergeRecognizedDate(fallbackResult.date, into: target.capturedAt)
+            target.ocrDate = mergedDate
+            target.capturedAt = mergedDate
+            try? modelContext.save()
+        }
+    }
 
     static func datePillPrimaryString(from date: Date) -> String {
-        let calendar = Calendar.current
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_Hant_TW")
-        if calendar.component(.year, from: date) == calendar.component(.year, from: Date()) {
-            formatter.dateFormat = "M月d日"
-        } else {
-            formatter.dateFormat = "yyyy年M月d日"
-        }
-        return formatter.string(from: date)
+        ChekiItem.formatFullDateWithWeekday(date)
     }
 
     static func datePillTimeString(from date: Date) -> String {
@@ -2039,9 +2087,20 @@ private struct ChekiQuadCropEditorView: View {
             } else {
                 item.frontImageData = croppedJPEG
                 item.perspectivePointsJSON = encodedJSON
+                if item.ocrDate == nil,
+                   let ocrRes = await visionManager.recognizeDate(from: cropResult.cgImage) {
+                    let mergedDate = ChekiItem.mergeRecognizedDate(ocrRes.date, into: item.capturedAt)
+                    item.ocrDate = mergedDate
+                    item.capturedAt = mergedDate
+                }
             }
             item.borderInsetRatio = defaultBorderInsetPercentage / 100.0
-            item.filmFormat = selectedFormat
+            let resolvedFormat = FilmFormat.resolvedConcreteFormat(
+                preferred: selectedFormat,
+                specName: cropResult.filmSpecification?.format.rawValue,
+                outputSize: cropResult.outputSize
+            )
+            item.filmFormat = resolvedFormat
             if cropResult.outputSize.width > 0 {
                 item.detectedAspectRatio = Double(cropResult.outputSize.height / cropResult.outputSize.width)
             }

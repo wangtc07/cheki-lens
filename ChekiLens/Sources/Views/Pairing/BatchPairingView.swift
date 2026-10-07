@@ -42,6 +42,8 @@ struct StagingChekiPhoto: Identifiable, Equatable {
     var normalizedCornersJSON: String? = nil
     /// 背景預先辨識出的手寫日期 OCR 結果
     var detectedOCRDate: Date? = nil
+    /// 背景預先辨識出的具體相紙規格（Instax Mini / Square / Wide）
+    var resolvedFilmFormat: FilmFormat = .mini
     /// 是否正在背景執行邊界偵測
     var isDetectingBoundary: Bool = false
     /// 是否已完成背景邊界偵測
@@ -61,6 +63,8 @@ struct StagingChekiPhoto: Identifiable, Equatable {
         lhs.isDetectingBoundary == rhs.isDetectingBoundary &&
         lhs.hasCompletedBoundaryDetection == rhs.hasCompletedBoundaryDetection &&
         lhs.normalizedCornersJSON == rhs.normalizedCornersJSON &&
+        lhs.detectedOCRDate == rhs.detectedOCRDate &&
+        lhs.resolvedFilmFormat == rhs.resolvedFilmFormat &&
         lhs.croppedImageData?.count == rhs.croppedImageData?.count
     }
 }
@@ -1980,12 +1984,13 @@ struct BatchPairingView: View {
             let (side, note) = await Self.classifyPhotoSide(cgImage: cgImage)
             updatePhotoSide(id: photoID, side: side, note: note)
 
-            // Step 2: 背景偵測拍立得邊界 + 套用設定邊界微調 + 透視拉直預裁切 + 日期 OCR
+            // Step 2: 背景偵測拍立得邊界 + 套用設定邊界微調 + 透視拉直預裁切 + 封面手寫日期 OCR + 規格判定
             let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
             var croppedData: Data? = nil
             var croppedUI: UIImage? = nil
             var cornersJSON: String? = nil
             var ocrDate: Date? = nil
+            var resolvedFormat: FilmFormat = selectedFilmFormat.concreteFormat
 
             if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: imgSize) {
                 let adjustedCorners = await visionManager.applyBorderInset(
@@ -2003,13 +2008,19 @@ struct BatchPairingView: View {
                     croppedUI = uiImg
                     croppedData = uiImg.jpegData(compressionQuality: 0.92)
                     cornersJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imgSize)
+                    resolvedFormat = FilmFormat.resolvedConcreteFormat(
+                        preferred: selectedFilmFormat,
+                        specName: cropRes.filmSpecification?.format.rawValue,
+                        outputSize: cropRes.outputSize
+                    )
 
-                    if side != .likelyBack,
-                       let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
+                    if let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
                         ocrDate = ocrRes.date
+                    } else if let fallbackOCR = await visionManager.recognizeDate(from: cgImage) {
+                        ocrDate = fallbackOCR.date
                     }
                 }
-            } else if side != .likelyBack {
+            } else {
                 if let ocrRes = await visionManager.recognizeDate(from: cgImage) {
                     ocrDate = ocrRes.date
                 }
@@ -2021,7 +2032,8 @@ struct BatchPairingView: View {
                     croppedData: croppedData,
                     croppedImage: croppedUI,
                     cornersJSON: cornersJSON,
-                    ocrDate: ocrDate
+                    ocrDate: ocrDate,
+                    resolvedFormat: resolvedFormat
                 )
             }
         }
@@ -2056,13 +2068,19 @@ struct BatchPairingView: View {
             ) {
                 let uiImg = UIImage(cgImage: cropRes.cgImage)
                 let jpeg = uiImg.jpegData(compressionQuality: 0.92)
+                let resolvedFormat = FilmFormat.resolvedConcreteFormat(
+                    preferred: format,
+                    specName: cropRes.filmSpecification?.format.rawValue,
+                    outputSize: cropRes.outputSize
+                )
                 withAnimation(.snappy(duration: 0.2)) {
                     updatePhotoBoundaryResult(
                         id: photo.id,
                         croppedData: jpeg,
                         croppedImage: uiImg,
                         cornersJSON: cornersJSON,
-                        ocrDate: photo.detectedOCRDate
+                        ocrDate: photo.detectedOCRDate,
+                        resolvedFormat: resolvedFormat
                     )
                 }
             }
@@ -2122,13 +2140,15 @@ struct BatchPairingView: View {
         croppedData: Data?,
         croppedImage: UIImage?,
         cornersJSON: String?,
-        ocrDate: Date?
+        ocrDate: Date?,
+        resolvedFormat: FilmFormat = .mini
     ) {
         if let idx = allPhotos.firstIndex(where: { $0.id == id }) {
             allPhotos[idx].croppedImageData = croppedData
             allPhotos[idx].croppedUIImage = croppedImage
             allPhotos[idx].normalizedCornersJSON = cornersJSON
             allPhotos[idx].detectedOCRDate = ocrDate
+            allPhotos[idx].resolvedFilmFormat = resolvedFormat
             allPhotos[idx].isDetectingBoundary = false
             allPhotos[idx].hasCompletedBoundaryDetection = true
         }
@@ -2138,6 +2158,7 @@ struct BatchPairingView: View {
                 slots[i].frontPhoto.croppedUIImage = croppedImage
                 slots[i].frontPhoto.normalizedCornersJSON = cornersJSON
                 slots[i].frontPhoto.detectedOCRDate = ocrDate
+                slots[i].frontPhoto.resolvedFilmFormat = resolvedFormat
                 slots[i].frontPhoto.isDetectingBoundary = false
                 slots[i].frontPhoto.hasCompletedBoundaryDetection = true
             }
@@ -2146,6 +2167,7 @@ struct BatchPairingView: View {
                 slots[i].backPhoto?.croppedUIImage = croppedImage
                 slots[i].backPhoto?.normalizedCornersJSON = cornersJSON
                 slots[i].backPhoto?.detectedOCRDate = ocrDate
+                slots[i].backPhoto?.resolvedFilmFormat = resolvedFormat
                 slots[i].backPhoto?.isDetectingBoundary = false
                 slots[i].backPhoto?.hasCompletedBoundaryDetection = true
             }
@@ -2222,6 +2244,7 @@ struct BatchPairingView: View {
                     detectionNote: spec.note,
                     croppedImageData: data,
                     croppedUIImage: img,
+                    resolvedFilmFormat: .mini,
                     isDetectingBoundary: false,
                     hasCompletedBoundaryDetection: true
                 )
@@ -2329,6 +2352,9 @@ struct BatchPairingView: View {
             // 同一組拍立得的正反面賦予完全相同的秒數 (Task 3.3)
             let itemTimestamp = baseTimestamp.addingTimeInterval(TimeInterval(-index))
             let targetMember = slot.assignedMembers.first
+            var concreteFormat: FilmFormat = selectedFilmFormat == .auto
+                ? slot.frontPhoto.resolvedFilmFormat.concreteFormat
+                : selectedFilmFormat.concreteFormat
 
             let newItem = ChekiItem(
                 frontImageData: slot.frontPhoto.croppedImageData ?? slot.frontPhoto.imageData,
@@ -2336,25 +2362,28 @@ struct BatchPairingView: View {
                 originalFrontImageData: slot.frontPhoto.imageData,
                 originalBackImageData: slot.backPhoto?.imageData,
                 capturedAt: itemTimestamp,
-                filmFormat: selectedFilmFormat,
-                detectedAspectRatio: selectedFilmFormat == .auto ? FilmFormat.mini.aspectRatio : selectedFilmFormat.aspectRatio,
+                filmFormat: concreteFormat,
+                detectedAspectRatio: concreteFormat.aspectRatio,
                 borderInsetRatio: defaultInsetRatio,
                 processingState: .detecting,
                 idolMember: targetMember
             )
             modelContext.insert(newItem)
 
-            // 1. 正面：優先直接使用背景已完成的邊界裁切與 OCR 結果
+            // 1. 正面：優先直接使用背景已完成的邊界裁切與封面手寫日期 OCR 結果
             var finalFrontUIImage = slot.frontPhoto.displayUIImage
+            var recognizedDate: Date? = slot.frontPhoto.detectedOCRDate
             if slot.frontPhoto.hasCompletedBoundaryDetection {
                 if let preCroppedData = slot.frontPhoto.croppedImageData {
                     newItem.frontImageData = preCroppedData
                     newItem.detectionMethod = .visionNative
                 }
                 newItem.perspectivePointsJSON = slot.frontPhoto.normalizedCornersJSON
-                newItem.ocrDate = slot.frontPhoto.detectedOCRDate
+                if recognizedDate == nil, let frontCG = slot.frontPhoto.displayUIImage.cgImage {
+                    recognizedDate = await visionManager.recognizeDate(from: frontCG)?.date
+                }
             } else if let frontCG = slot.frontPhoto.uiImage.cgImage {
-                // 若使用者在背景偵測尚未跑完前就按下歸檔，則即時補跑該張照片（含設定邊界微調）
+                // 若使用者在背景偵測尚未跑完前就按下歸檔，則即時補跑該張照片（含設定邊界微調與手寫日期 OCR）
                 let imgSize = CGSize(width: frontCG.width, height: frontCG.height)
                 if let detection = try? await visionManager.detectQuad(in: frontCG, imageSize: imgSize) {
                     let adjustedCorners = await visionManager.applyBorderInset(
@@ -2375,13 +2404,23 @@ struct BatchPairingView: View {
                         }
                         newItem.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imgSize)
                         newItem.detectionMethod = .visionNative
+                        concreteFormat = FilmFormat.resolvedConcreteFormat(
+                            preferred: selectedFilmFormat,
+                            specName: cropRes.filmSpecification?.format.rawValue,
+                            outputSize: cropRes.outputSize
+                        )
+                        newItem.filmFormat = concreteFormat
+                        newItem.detectedAspectRatio = concreteFormat.aspectRatio
+
                         if let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
-                            newItem.ocrDate = ocrRes.date
+                            recognizedDate = ocrRes.date
+                        } else if let fallbackOCR = await visionManager.recognizeDate(from: frontCG) {
+                            recognizedDate = fallbackOCR.date
                         }
                     }
                 } else {
                     if let ocrRes = await visionManager.recognizeDate(from: frontCG) {
-                        newItem.ocrDate = ocrRes.date
+                        recognizedDate = ocrRes.date
                     }
                 }
             }
@@ -2394,6 +2433,9 @@ struct BatchPairingView: View {
                         newItem.backImageData = preCroppedBackData
                     }
                     newItem.backPerspectivePointsJSON = backPhoto.normalizedCornersJSON
+                    if recognizedDate == nil {
+                        recognizedDate = backPhoto.detectedOCRDate
+                    }
                 } else if let backCG = backPhoto.uiImage.cgImage {
                     let backSize = CGSize(width: backCG.width, height: backCG.height)
                     if let backDetection = try? await visionManager.detectQuad(in: backCG, imageSize: backSize) {
@@ -2419,22 +2461,15 @@ struct BatchPairingView: View {
                 }
             }
 
-            var hashtags = slot.isPaired ? ["#雙面配對", "#批次匯入"] : ["#單面匯入"]
-            if slot.assignedMembers.count > 1 {
-                for coMember in slot.assignedMembers {
-                    hashtags.append("#\(coMember.stageName)")
-                }
+            // 若辨識出拍立得封面（或背面）手寫日期，自動填入拍攝日期（保留當下時分秒）
+            if let recognizedDate {
+                let mergedDate = ChekiItem.mergeRecognizedDate(recognizedDate, into: itemTimestamp)
+                newItem.ocrDate = mergedDate
+                newItem.capturedAt = mergedDate
             }
 
-            let memo = ChekiMemo(
-                eventName: "批次配對匯入",
-                noteText: slot.isPaired
-                    ? "透過批次配對工作台合成正反雙面（\(slot.frontPhoto.title)）"
-                    : "透過批次工作台單面匯入（\(slot.frontPhoto.title)）",
-                hashtags: hashtags,
-                chekiItem: newItem
-            )
-            newItem.memo = memo
+            // 備忘預設保持空白（不自動塞入系統匯入文字）
+            newItem.memo = nil
             newItem.processingState = .completed
 
             // 3. 若開啟系統相簿同步，依每張拍立得各自指派的成員寫入對應成員相簿 (Task 3.3 & 3.4)
