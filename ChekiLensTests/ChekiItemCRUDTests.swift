@@ -386,28 +386,28 @@ final class PreviewDataTests: XCTestCase {
         let container = try ModelContainerProvider.preview(withSampleData: true)
         let context = container.mainContext
 
-        // Assert：應有 3 個團體（日向坂46、乃木坂46、櫻坂46）
+        // Assert：應有 4 個團體（日向坂46、乃木坂46、櫻坂46、=LOVE）
         let groups = try context.fetch(FetchDescriptor<IdolGroup>())
-        XCTAssertEqual(groups.count, 3, "PreviewData 應生成 3 個偶像團體")
+        XCTAssertEqual(groups.count, 4, "PreviewData 應生成 4 個偶像團體")
 
-        // 應有 6 位成員
+        // 應有 9 位成員
         let members = try context.fetch(FetchDescriptor<IdolMember>())
-        XCTAssertEqual(members.count, 6, "PreviewData 應生成 6 位偶像成員")
+        XCTAssertEqual(members.count, 9, "PreviewData 應生成 9 位偶像成員")
 
-        // 應有 13 張拍立得（12 張已歸類 + 1 張未分類）
+        // 應有 20 張拍立得（18 張已歸類 + 2 張未分類）
         let items = try context.fetch(FetchDescriptor<ChekiItem>())
-        XCTAssertEqual(items.count, 13, "PreviewData 應生成 13 張測試拍立得")
-        XCTAssertEqual(items.filter { $0.idolMember == nil }.count, 1, "應包含 1 張未分類拍立得供篩選測試")
-        XCTAssertGreaterThan(items.filter(\.hasBothSides).count, 5, "應包含多張正反雙面拍立得")
+        XCTAssertEqual(items.count, 20, "PreviewData 應生成 20 張測試拍立得")
+        XCTAssertEqual(items.filter { $0.idolMember == nil }.count, 2, "應包含 2 張未分類拍立得供篩選測試")
+        XCTAssertGreaterThan(items.filter(\.hasBothSides).count, 8, "應包含多張正反雙面拍立得")
 
         // 應有多條含 #標籤 的備忘錄
         let memos = try context.fetch(FetchDescriptor<ChekiMemo>())
-        XCTAssertGreaterThanOrEqual(memos.count, 10, "PreviewData 應生成豐富的活動與對話備忘")
+        XCTAssertGreaterThanOrEqual(memos.count, 15, "PreviewData 應生成豐富的活動與對話備忘")
 
         // 測試 seedIfEmpty 冪等性（重複呼叫不會重複塞入資料）
         PreviewData.seedIfEmpty(into: context)
         let itemsAfterReseed = try context.fetch(FetchDescriptor<ChekiItem>())
-        XCTAssertEqual(itemsAfterReseed.count, 13, "seedIfEmpty 在已有資料時不應重複新增")
+        XCTAssertEqual(itemsAfterReseed.count, 20, "seedIfEmpty 在已有資料時不應重複新增")
     }
 
     func test_libraryView_matchesSearch() throws {
@@ -424,12 +424,60 @@ final class PreviewDataTests: XCTestCase {
         XCTAssertEqual(hinaItems.count, 3, "河田陽菜 應有 3 張拍立得")
 
         // 搜尋 #標籤
-        let hashtagItems = items.filter { LibraryView.matchesSearch(item: $0, query: "#神對應") }
-        XCTAssertGreaterThanOrEqual(hashtagItems.count, 2, "搜尋 #神對應 應能命中對應備忘錄的拍立得")
+        let hashtagItems = items.filter { LibraryView.matchesSearch(item: $0, query: "#神対応") }
+        XCTAssertGreaterThanOrEqual(hashtagItems.count, 2, "搜尋 #神対応 應能命中對應備忘錄的拍立得")
 
         // 搜尋未分類
         let uncategorized = items.filter { LibraryView.matchesSearch(item: $0, query: "未分類") }
-        XCTAssertEqual(uncategorized.count, 1, "搜尋「未分類」應命中 1 張未歸類拍立得")
+        XCTAssertEqual(uncategorized.count, 2, "搜尋「未分類」應命中 2 張未歸類拍立得")
+    }
+
+    func test_batchPairingSlot_doubleFrontAndReversedWarnings() {
+        let dummyImage = UIImage(systemName: "photo") ?? UIImage()
+        let frontA = StagingChekiPhoto(
+            id: UUID(),
+            sequenceNumber: 1,
+            title: "正面 A",
+            imageData: Data(),
+            uiImage: dummyImage,
+            detectedSide: .likelyFront,
+            detectionNote: "正面"
+        )
+        let frontB = StagingChekiPhoto(
+            id: UUID(),
+            sequenceNumber: 2,
+            title: "正面 B",
+            imageData: Data(),
+            uiImage: dummyImage,
+            detectedSide: .likelyFront,
+            detectionNote: "正面"
+        )
+        let backC = StagingChekiPhoto(
+            id: UUID(),
+            sequenceNumber: 3,
+            title: "背面 C",
+            imageData: Data(),
+            uiImage: dummyImage,
+            detectedSide: .likelyBack,
+            detectionNote: "背面"
+        )
+
+        // 1. 正常正反配對
+        let validSlot = ChekiPairingSlot(id: UUID(), frontPhoto: frontA, backPhoto: backC)
+        XCTAssertTrue(validSlot.isPaired)
+        XCTAssertFalse(validSlot.isDoubleFrontWarning)
+        XCTAssertFalse(validSlot.isReversedOrderWarning)
+
+        // 2. 雙正面防呆警示
+        let doubleFrontSlot = ChekiPairingSlot(id: UUID(), frontPhoto: frontA, backPhoto: frontB)
+        XCTAssertTrue(doubleFrontSlot.isDoubleFrontWarning, "連續兩張正面應觸發雙正面防呆警示")
+        XCTAssertFalse(doubleFrontSlot.isReversedOrderWarning)
+
+        // 3. 正反顛倒警示
+        let reversedSlot = ChekiPairingSlot(id: UUID(), frontPhoto: backC, backPhoto: frontA)
+        XCTAssertFalse(reversedSlot.isDoubleFrontWarning)
+        XCTAssertTrue(reversedSlot.isReversedOrderWarning, "背面在前、正面在後應觸發正反顛倒提示")
     }
 }
+
 

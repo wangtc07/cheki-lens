@@ -93,16 +93,16 @@ enum PreviewData {
             context.insert(group)
         }
 
-        // 追加 1 張「未分類」的單獨掃描拍立得，測試未分類篩選情境
-        let uncategorizedFront = makePolaroidImageData(
+        // 追加 2 張「未分類」的拍立得（1 張單面、1 張經批次配對合成的正反雙面），測試未分類相冊與雙面篩選情境
+        let uncategorizedFront1 = makePolaroidImageData(
             width: 270,
             height: 430,
             topRGB: (65, 88, 208),
             bottomRGB: (200, 80, 192),
             isBackside: false
         )
-        let uncategorizedItem = ChekiItem(
-            frontImageData: uncategorizedFront,
+        let uncategorizedItem1 = ChekiItem(
+            frontImageData: uncategorizedFront1,
             backImageData: nil,
             capturedAt: Date(timeIntervalSinceNow: -3600 * 18),
             ocrDate: nil,
@@ -115,14 +115,51 @@ enum PreviewData {
             isSyncedToPhotoLibrary: false,
             idolMember: nil
         )
-        let uncategorizedMemo = ChekiMemo(
+        let uncategorizedMemo1 = ChekiMemo(
             eventName: "秋葉原 チェキチャ特典会",
             noteText: "剛翻拍還沒歸檔成員的測試拍立得",
             hashtags: ["#未分類", "#測試資料"],
-            chekiItem: uncategorizedItem
+            chekiItem: uncategorizedItem1
         )
-        uncategorizedItem.memo = uncategorizedMemo
-        context.insert(uncategorizedItem)
+        uncategorizedItem1.memo = uncategorizedMemo1
+        context.insert(uncategorizedItem1)
+
+        let uncategorizedFront2 = makePolaroidImageData(
+            width: 270,
+            height: 430,
+            topRGB: (16, 185, 129),
+            bottomRGB: (59, 130, 246),
+            isBackside: false
+        )
+        let uncategorizedBack2 = makePolaroidImageData(
+            width: 270,
+            height: 430,
+            topRGB: (59, 130, 246),
+            bottomRGB: (16, 185, 129),
+            isBackside: true
+        )
+        let uncategorizedItem2 = ChekiItem(
+            frontImageData: uncategorizedFront2,
+            backImageData: uncategorizedBack2,
+            capturedAt: Date(timeIntervalSinceNow: -3600 * 6),
+            ocrDate: Calendar.current.date(byAdding: .day, value: -2, to: Date()),
+            isDateWrittenToAlbum: true,
+            filmFormat: .mini,
+            detectedAspectRatio: FilmFormat.mini.aspectRatio,
+            borderInsetRatio: 0.0,
+            detectionMethod: .visionNative,
+            processingState: .completed,
+            isSyncedToPhotoLibrary: true,
+            idolMember: nil
+        )
+        let uncategorizedMemo2 = ChekiMemo(
+            eventName: "渋谷 タワレコ リリイベ",
+            noteText: "使用批次配對工作台自動合成正反雙面的測試卡片",
+            hashtags: ["#未分類", "#雙面配對", "#批次匯入"],
+            chekiItem: uncategorizedItem2
+        )
+        uncategorizedItem2.memo = uncategorizedMemo2
+        context.insert(uncategorizedItem2)
 
         try? context.save()
     }
@@ -152,7 +189,14 @@ enum PreviewData {
             sortOrder: 2
         )
 
-        // 日向坂46 成員
+        // 4. =LOVE
+        let equalLove = IdolGroup(
+            name: "=LOVE",
+            colorHex: "#EC4899",
+            sortOrder: 3
+        )
+
+        // 日向坂46 成員 (共 7 張)
         let member1 = makeSampleMember(
             stageName: "河田陽菜",
             realName: "Kawata Hina",
@@ -181,7 +225,7 @@ enum PreviewData {
             paletteIndex: 2
         )
 
-        // 乃木坂46 成員
+        // 乃木坂46 成員 (共 6 張)
         let member4 = makeSampleMember(
             stageName: "遠藤さくら",
             realName: "Endo Sakura",
@@ -200,23 +244,53 @@ enum PreviewData {
             chekiCount: 2,
             paletteIndex: 4
         )
-
-        // 櫻坂46 成員
         let member6 = makeSampleMember(
+            stageName: "賀喜遥香",
+            realName: "Kaki Haruka",
+            tags: ["#かっきー", "#4期生"],
+            group: nogizaka,
+            sortOrder: 2,
+            chekiCount: 2,
+            paletteIndex: 5
+        )
+
+        // 櫻坂46 成員 (共 3 張)
+        let member7 = makeSampleMember(
             stageName: "森田ひかる",
             realName: "Morita Hikaru",
             tags: ["#るんちゃん", "#櫻坂46"],
             group: sakurazaka,
             sortOrder: 0,
+            chekiCount: 2,
+            paletteIndex: 6
+        )
+        let member8 = makeSampleMember(
+            stageName: "山﨑天",
+            realName: "Yamasaki Ten",
+            tags: ["#てんちゃん", "#2期生"],
+            group: sakurazaka,
+            sortOrder: 1,
             chekiCount: 1,
-            paletteIndex: 5
+            paletteIndex: 7
+        )
+
+        // =LOVE 成員 (共 2 張)
+        let member9 = makeSampleMember(
+            stageName: "佐々木舞香",
+            realName: "Sasaki Maika",
+            tags: ["#舞香ちゃん", "#イコラブ"],
+            group: equalLove,
+            sortOrder: 0,
+            chekiCount: 2,
+            paletteIndex: 8
         )
 
         hinatazaka.members = [member1, member2, member3]
-        nogizaka.members = [member4, member5]
-        sakurazaka.members = [member6]
+        nogizaka.members = [member4, member5, member6]
+        sakurazaka.members = [member7, member8]
+        equalLove.members = [member9]
 
-        return [hinatazaka, nogizaka, sakurazaka]
+        return [hinatazaka, nogizaka, sakurazaka, equalLove]
     }
 
     // MARK: Single Member Factory

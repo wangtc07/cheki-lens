@@ -7,11 +7,11 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-* **最後更新時間**：2026-10-06
+* **最後更新時間**：2026-10-07
 * **當前所屬階段**：Phase 4 — UI 介面開發（嚴格遵循 Apple HIG 原生 iOS 17/18 SwiftUI 與 Apple 相簿 / 相機設計規範）
-* **當前進行中任務**：已完成 **Task 4.3**（`CameraScannerView.swift` 採用 Apple 原生相機介面：頂部閃光燈 / 曝光補償 `-0.3` / 進階抽屜、中央 4:3 取景窗 + 3×3 九宮格 + 綠色拍立得虛線追蹤框 + 對焦黃框 + `0.5/1×/2` 倍率切換圈、底部黃字模式轉盤與雙層白色快門鈕）
-* **最新穩定 Git Commit**：feat(Camera): 完成 Task 4.3 Apple 原生相機風格即時拍立得掃描器
-* **下一動執行指示**：執行 **Task 4.4** 實作批次配對工作台（`BatchPairingView.swift`）
+* **當前進行中任務**：已完成 **Task 4.4**（`BatchPairingView.swift` 採用 Apple iOS 18 原生 Inset Grouped Sheet 與重複項目合併風格：支援 `PhotosPicker` 無上限多選匯入、三段 Segmented Control `直接執行 / 自動配對 / 手動配對`、Vision 雙正面與順序顛倒防呆警示、左滑與按鈕解除配對，並擴充 8 張工作台測試照片與 4 團 9 成員 20 張典藏測試資料集）
+* **最新穩定 Git Commit**：feat(Pairing): 完成 Task 4.4 Apple 原生風格批次配對工作台與測試資料擴充
+* **下一動執行指示**：執行 **Task 4.5** 實作單張全螢幕檢視（`ChekiDetailView.swift`）
 
 ---
 
@@ -207,10 +207,11 @@
   * AVFoundation 相機預覽流（含模擬器擬真取景器 Fallback）
   * 3×3 九宮格 ＋ 綠色拍立得虛線追蹤框 ＋ 點擊對焦黃框 ＋ `.5 / 1× / 2` 倍率切換圈
   * 頂部曝光指示（`-0.3`）與閃燈控制、底部黃字模式轉盤（防反光 / 拍照 / 正反雙面）與雙環白色快門鈕
-- [ ] **Task 4.4**: 實作「04. ペアリング 批次配對工作台」
-  * PhotosPicker 多選匯入（不設張數上限）
-  * 三段模式切換（直接執行 / ⚡自動配對 / 手動配對）
-  * Vision 雙正面防呆警示標記與解除配對手勢
+- [x] **Task 4.4**: 實作「04. ペアリング 批次配對工作台 (`BatchPairingView.swift`)」（嚴格遵循 Apple iOS 18 原生 HIG 規範）
+  * `PhotosPicker` 多選匯入（`maxSelectionCount: nil` 不設張數上限）與工作台內追加照片
+  * 原生 Segmented Control 三段模式切換（`直接執行` / `自動配對` / `手動配對`）與成員、相紙規格選單
+  * Apple Vision 雙正面防呆警示、正反順序顛倒提示、一鍵自動修正、左滑（`swipeActions`）解除配對與對調手勢
+  * 內建 8 張工作台測試照片組（含雙正面與正反顛倒警示案例），並將 `PreviewData` 擴充至 4 個團體、9 位成員、20 張拍立得
 - [ ] **Task 4.5**: 實作「05. 写真詳細 單張全螢幕檢視」
   * 頂部半透明日期時間藥丸 (`9月17日 16:26`)
   * 底部縮圖膠卷 (Filmstrip Scrubber) 滾動切換

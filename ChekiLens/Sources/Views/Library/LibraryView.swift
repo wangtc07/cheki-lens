@@ -39,6 +39,7 @@ struct LibraryView: View {
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
+    @State private var showingBatchPairingSheet: Bool = false
 
     // 排序與篩選
     @State private var sortAscending: Bool = false
@@ -150,6 +151,11 @@ struct LibraryView: View {
             .sheet(isPresented: $showingSettingsSheet) {
                 SettingsView()
             }
+            .sheet(isPresented: $showingBatchPairingSheet, onDismiss: {
+                processingItems = []
+            }) {
+                BatchPairingView(initialPickerItems: processingItems)
+            }
             .fullScreenCover(isPresented: $showingCameraScanner) {
                 CameraScannerView()
             }
@@ -210,7 +216,7 @@ struct LibraryView: View {
 
                     PhotosPicker(
                         selection: $selectedPhotos,
-                        maxSelectionCount: 50,
+                        maxSelectionCount: nil,
                         matching: .images,
                         preferredItemEncoding: .automatic
                     ) {
@@ -220,12 +226,12 @@ struct LibraryView: View {
                             .frame(width: 36, height: 36)
                             .background(.ultraThinMaterial, in: Circle())
                     }
-                    .accessibilityLabel("匯入拍立得照片")
+                    .accessibilityLabel("匯入拍立得照片（進入配對工作台）")
                     .onChange(of: selectedPhotos) { _, newItems in
                         guard !newItems.isEmpty else { return }
                         processingItems = newItems
                         selectedPhotos = []
-                        Task { await processImportedPhotos(processingItems) }
+                        showingBatchPairingSheet = true
                     }
 
                     Menu {
@@ -266,6 +272,13 @@ struct LibraryView: View {
                         }
 
                         Section("管理") {
+                            Button {
+                                processingItems = []
+                                showingBatchPairingSheet = true
+                            } label: {
+                                Label("批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
+                            }
+
                             Button {
                                 showingQuickCreateSheet = true
                             } label: {
@@ -447,12 +460,20 @@ struct LibraryView: View {
             VStack(spacing: 12) {
                 PhotosPicker(
                     selection: $selectedPhotos,
-                    maxSelectionCount: 50,
+                    maxSelectionCount: nil,
                     matching: .images
                 ) {
-                    Label("從相簿選擇照片", systemImage: "photo.badge.plus")
+                    Label("從相簿選擇照片（不限張數）", systemImage: "photo.badge.plus")
                 }
                 .buttonStyle(.borderedProminent)
+
+                Button {
+                    processingItems = []
+                    showingBatchPairingSheet = true
+                } label: {
+                    Label("開啟批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
+                }
+                .buttonStyle(.bordered)
 
                 Button {
                     withAnimation {
@@ -591,6 +612,7 @@ struct AlbumsRootView: View {
     @State private var hierarchyMode: AlbumHierarchyMode = .groups
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
+    @State private var showingBatchPairingSheet: Bool = false
 
     private let albumColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -653,6 +675,9 @@ struct AlbumsRootView: View {
             .sheet(isPresented: $showingSettingsSheet) {
                 SettingsView()
             }
+            .sheet(isPresented: $showingBatchPairingSheet) {
+                BatchPairingView()
+            }
             .navigationDestination(for: IdolGroup.self) { group in
                 GroupMembersAlbumView(group: group, allItems: chekiItems)
             }
@@ -702,6 +727,12 @@ struct AlbumsRootView: View {
                     .accessibilityLabel("新增團體或成員相冊")
 
                     Menu {
+                        Button {
+                            showingBatchPairingSheet = true
+                        } label: {
+                            Label("批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
+                        }
+
                         Button {
                             showingQuickCreateSheet = true
                         } label: {
@@ -1026,6 +1057,7 @@ struct AlbumHeroDetailView: View {
     @State private var showDeleteConfirm: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
+    @State private var showingBatchPairingSheet: Bool = false
 
     @State private var sortAscending: Bool = false
     @State private var filterDualSideOnly: Bool = false
@@ -1089,10 +1121,17 @@ struct AlbumHeroDetailView: View {
 
                         PhotosPicker(
                             selection: $selectedPhotos,
-                            maxSelectionCount: 50,
+                            maxSelectionCount: nil,
                             matching: .images
                         ) {
-                            Label("匯入拍立得至此相冊", systemImage: "photo.badge.plus")
+                            Label("從相簿多選匯入（不限張數）", systemImage: "photo.badge.plus")
+                        }
+
+                        Button {
+                            processingItems = []
+                            showingBatchPairingSheet = true
+                        } label: {
+                            Label("開啟批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
                         }
 
                         Menu {
@@ -1169,7 +1208,7 @@ struct AlbumHeroDetailView: View {
             guard !newItems.isEmpty else { return }
             processingItems = newItems
             selectedPhotos = []
-            Task { await processImportedPhotos(processingItems) }
+            showingBatchPairingSheet = true
         }
         .safeAreaInset(edge: .bottom) {
             if isSelectionMode {
@@ -1207,6 +1246,11 @@ struct AlbumHeroDetailView: View {
         }
         .sheet(isPresented: $showingSettingsSheet) {
             SettingsView()
+        }
+        .sheet(isPresented: $showingBatchPairingSheet, onDismiss: {
+            processingItems = []
+        }) {
+            BatchPairingView(initialPickerItems: processingItems, defaultMember: defaultMember)
         }
         .fullScreenCover(isPresented: $showingCameraScanner) {
             CameraScannerView(defaultMember: defaultMember)
