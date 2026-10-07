@@ -478,6 +478,33 @@ final class PreviewDataTests: XCTestCase {
         XCTAssertFalse(reversedSlot.isDoubleFrontWarning)
         XCTAssertTrue(reversedSlot.isReversedOrderWarning, "背面在前、正面在後應觸發正反顛倒提示")
     }
+
+    func test_chekiDetailView_datePillAndHandwrittenBacksideData() throws {
+        var comps = DateComponents()
+        comps.year = 2026
+        comps.month = 9
+        comps.day = 17
+        comps.hour = 16
+        comps.minute = 26
+        let sampleDate = Calendar.current.date(from: comps)!
+
+        let primaryStr = ChekiDetailView.datePillPrimaryString(from: sampleDate)
+        let timeStr = ChekiDetailView.datePillTimeString(from: sampleDate)
+
+        XCTAssertTrue(primaryStr.contains("9月17日"), "日期藥丸應格式化出 9月17日")
+        XCTAssertEqual(timeStr, "16:26", "時間藥丸應格式化出 16:26")
+
+        // 確認 PreviewData 產生的背面手寫圖可正常解碼為 UIImage
+        let backData = PreviewData.makePolaroidImageData(
+            width: 360,
+            height: 572,
+            topRGB: (79, 70, 229),
+            bottomRGB: (219, 39, 119),
+            isBackside: true,
+            signatureText: "河田陽菜 直筆サイン",
+            dateText: "2026.09.17"
+        )
+        XCTAssertNotNil(backData)
+        XCTAssertNotNil(backData.flatMap { UIImage(data: $0) })
+    }
 }
-
-

@@ -342,24 +342,42 @@ enum PreviewData {
         ]
         let chosenPalette = palettes[abs(paletteIndex) % palettes.count]
 
-        let frontData = makePolaroidImageData(
-            width: 270,
-            height: 430,
-            topRGB: chosenPalette.0,
-            bottomRGB: chosenPalette.1,
-            isBackside: false
-        )
-        let backData = (index % 2 == 0) ? makePolaroidImageData(
-            width: 270,
-            height: 430,
-            topRGB: chosenPalette.1,
-            bottomRGB: chosenPalette.0,
-            isBackside: true
-        ) : nil
-
         let daysAgo = TimeInterval(-(index + 1 + paletteIndex) * 86400 * 5)
         let capturedAt = Date(timeIntervalSinceNow: daysAgo)
         let ocrDate = Calendar.current.date(byAdding: .day, value: -1, to: capturedAt)
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy.MM.dd"
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        let dateString = dateFormatter.string(from: ocrDate ?? capturedAt)
+
+        let backMessages = [
+            "いつも応援ありがとう！♡\n今日も会えて嬉しかったよ☆\nまた来週のライブでね！",
+            "チェキありがとう〜！\n浴衣ほめてくれて嬉しい♪\n絶対また愛に来てね♡",
+            "生誕祭ありがとう！！\nこれからもずっと推してね☆\n大好きだよ〜♡",
+            "初選抜お祝いありがとう！\nたくさん話せて楽しかった♪\n風邪ひかないでね！"
+        ]
+        let chosenBackMessage = backMessages[(index + paletteIndex) % backMessages.count]
+
+        let frontData = makePolaroidImageData(
+            width: 360,
+            height: 572,
+            topRGB: chosenPalette.0,
+            bottomRGB: chosenPalette.1,
+            isBackside: false,
+            signatureText: "\(member.stageName) ♡",
+            dateText: dateString
+        )
+        let backData = (index % 2 == 0) ? makePolaroidImageData(
+            width: 360,
+            height: 572,
+            topRGB: chosenPalette.1,
+            bottomRGB: chosenPalette.0,
+            isBackside: true,
+            signatureText: "\(member.stageName) 直筆裏書き",
+            dateText: dateString,
+            backMessage: chosenBackMessage
+        ) : nil
 
         let formats: [FilmFormat] = [.mini, .square, .wide]
         let chosenFormat = formats[index % formats.count]
@@ -392,9 +410,9 @@ enum PreviewData {
             "雙人比愛心成功！燈光很自然，邊框裁切也超正。"
         ]
         let sampleTags = [
-            ["#推し", "#浴衣", "#ミートアンドグリート"],
+            ["#推し", "#浴衣", "#ミートアンドグリート", "#最愛"],
             ["#生誕祭", "#神対応", "#チェキ"],
-            ["#握手会", "#新衣装", "#直筆サイン"]
+            ["#握手会", "#新衣装", "#直筆サイン", "#最愛"]
         ]
 
         let memo = ChekiMemo(
@@ -410,138 +428,160 @@ enum PreviewData {
 
     // MARK: Realistic Polaroid Card Image Generator
 
-    /// 使用 CoreGraphics 產生具備拍立得白邊相紙比例（上窄白邊、下寬下巴、中央漸層相片窗）的擬真測試圖
-    private static func makePolaroidImageData(
+    /// 使用 UIGraphicsImageRenderer 產生具備拍立得白邊相紙比例、正面手寫日期簽名與背面手寫留言的擬真測試圖
+    static func makePolaroidImageData(
         width: Int,
         height: Int,
         topRGB: (UInt8, UInt8, UInt8),
         bottomRGB: (UInt8, UInt8, UInt8),
-        isBackside: Bool
+        isBackside: Bool,
+        signatureText: String = "Cheki ♡",
+        dateText: String = "2026.09.24",
+        backMessage: String = "いつも応援ありがとう！♡\nまた来週のライブで会おうね☆"
     ) -> Data? {
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width * 4,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else {
-            return nil
-        }
+        let size = CGSize(width: width, height: height)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.0
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
 
-        // 1. 相紙基底色（正面溫暖白框 #FAF9F6，背面深灰膠帶感或淺背紙）
-        if isBackside {
-            context.setFillColor(red: 0.94, green: 0.94, blue: 0.96, alpha: 1.0)
-        } else {
-            context.setFillColor(red: 0.98, green: 0.98, blue: 0.97, alpha: 1.0)
-        }
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = renderer.image { rendererCtx in
+            let context = rendererCtx.cgContext
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
 
-        // 2. 內部影像窗（模擬 Instax Mini 86x54mm 的上下左右邊距）
-        let sideMargin = CGFloat(width) * 0.075
-        let topMargin = CGFloat(height) * 0.065
-        let bottomChin = CGFloat(height) * 0.22
-        let photoRect = CGRect(
-            x: sideMargin,
-            y: bottomChin, // CoreGraphics 原點在左下，y = bottomChin 代表下方留寬下巴
-            width: CGFloat(width) - sideMargin * 2,
-            height: CGFloat(height) - topMargin - bottomChin
-        )
+            // 1. 相紙基底色
+            if isBackside {
+                context.setFillColor(red: 0.95, green: 0.95, blue: 0.97, alpha: 1.0)
+            } else {
+                context.setFillColor(red: 0.99, green: 0.99, blue: 0.98, alpha: 1.0)
+            }
+            context.fill(CGRect(origin: .zero, size: size))
 
-        context.saveGState()
-        context.addRect(photoRect)
-        context.clip()
-
-        let colors = [
-            CGColor(
-                red: CGFloat(topRGB.0) / 255.0,
-                green: CGFloat(topRGB.1) / 255.0,
-                blue: CGFloat(topRGB.2) / 255.0,
-                alpha: isBackside ? 0.28 : 1.0
-            ),
-            CGColor(
-                red: CGFloat(bottomRGB.0) / 255.0,
-                green: CGFloat(bottomRGB.1) / 255.0,
-                blue: CGFloat(bottomRGB.2) / 255.0,
-                alpha: isBackside ? 0.18 : 1.0
+            let sideMargin = CGFloat(width) * 0.075
+            let topMargin = CGFloat(height) * 0.065
+            let bottomChin = CGFloat(height) * 0.22
+            let photoRect = CGRect(
+                x: sideMargin,
+                y: topMargin,
+                width: CGFloat(width) - sideMargin * 2,
+                height: CGFloat(height) - topMargin - bottomChin
             )
-        ] as CFArray
 
-        if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: [0.0, 1.0]) {
-            context.drawLinearGradient(
-                gradient,
-                start: CGPoint(x: photoRect.minX, y: photoRect.maxY),
-                end: CGPoint(x: photoRect.maxX, y: photoRect.minY),
-                options: []
-            )
+            context.saveGState()
+            context.addRect(photoRect)
+            context.clip()
+
+            let colors = [
+                CGColor(
+                    red: CGFloat(topRGB.0) / 255.0,
+                    green: CGFloat(topRGB.1) / 255.0,
+                    blue: CGFloat(topRGB.2) / 255.0,
+                    alpha: isBackside ? 0.16 : 1.0
+                ),
+                CGColor(
+                    red: CGFloat(bottomRGB.0) / 255.0,
+                    green: CGFloat(bottomRGB.1) / 255.0,
+                    blue: CGFloat(bottomRGB.2) / 255.0,
+                    alpha: isBackside ? 0.10 : 1.0
+                )
+            ] as CFArray
+
+            if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: [0.0, 1.0]) {
+                context.drawLinearGradient(
+                    gradient,
+                    start: CGPoint(x: photoRect.minX, y: photoRect.minY),
+                    end: CGPoint(x: photoRect.maxX, y: photoRect.maxY),
+                    options: []
+                )
+            }
+
+            if !isBackside {
+                // 正面：柔和散景光斑與人物半身輪廓
+                context.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.18)
+                context.fillEllipse(in: CGRect(
+                    x: photoRect.minX + photoRect.width * 0.62,
+                    y: photoRect.minY + photoRect.height * 0.12,
+                    width: photoRect.width * 0.28,
+                    height: photoRect.width * 0.28
+                ))
+                context.fillEllipse(in: CGRect(
+                    x: photoRect.minX + photoRect.width * 0.10,
+                    y: photoRect.minY + photoRect.height * 0.24,
+                    width: photoRect.width * 0.20,
+                    height: photoRect.width * 0.20
+                ))
+
+                context.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.28)
+                let headDiameter = photoRect.width * 0.34
+                context.fillEllipse(in: CGRect(
+                    x: photoRect.midX - headDiameter / 2,
+                    y: photoRect.minY + photoRect.height * 0.24,
+                    width: headDiameter,
+                    height: headDiameter
+                ))
+                let shouldersWidth = photoRect.width * 0.68
+                let shouldersHeight = photoRect.height * 0.46
+                context.fillEllipse(in: CGRect(
+                    x: photoRect.midX - shouldersWidth / 2,
+                    y: photoRect.minY + photoRect.height * 0.60,
+                    width: shouldersWidth,
+                    height: shouldersHeight
+                ))
+            } else {
+                // 背面：頂部警告字樣 + 中央手寫感謝留言 + 底部 FUJIFILM instax 標誌
+                let warnAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.monospacedSystemFont(ofSize: max(9, CGFloat(width) * 0.032), weight: .semibold),
+                    .foregroundColor: UIColor.secondaryLabel
+                ]
+                NSAttributedString(string: "Don't put in mouth.", attributes: warnAttrs)
+                    .draw(at: CGPoint(x: photoRect.minX + 16, y: photoRect.minY + 14))
+
+                let msgParagraph = NSMutableParagraphStyle()
+                msgParagraph.lineSpacing = 6
+                let msgAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: max(13, CGFloat(width) * 0.048), weight: .semibold),
+                    .foregroundColor: UIColor(red: 0.18, green: 0.16, blue: 0.28, alpha: 0.92),
+                    .paragraphStyle: msgParagraph
+                ]
+                NSAttributedString(string: backMessage, attributes: msgAttrs)
+                    .draw(in: CGRect(
+                        x: photoRect.minX + 18,
+                        y: photoRect.minY + photoRect.height * 0.26,
+                        width: photoRect.width - 36,
+                        height: photoRect.height * 0.55
+                    ))
+
+                let brandAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.monospacedSystemFont(ofSize: max(10, CGFloat(width) * 0.036), weight: .bold),
+                    .foregroundColor: UIColor.tertiaryLabel
+                ]
+                NSAttributedString(string: "FUJIFILM instax", attributes: brandAttrs)
+                    .draw(at: CGPoint(x: photoRect.midX - CGFloat(width) * 0.18, y: photoRect.maxY - 28))
+            }
+            context.restoreGState()
+
+            // 3. 下巴區域：左側偶像簽名、右側手寫日期
+            let chinTopY = CGFloat(height) - bottomChin
+            let sigAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: max(12, CGFloat(width) * 0.045), weight: .bold),
+                .foregroundColor: UIColor(
+                    red: CGFloat(topRGB.0) / 255.0 * 0.75,
+                    green: CGFloat(topRGB.1) / 255.0 * 0.75,
+                    blue: CGFloat(topRGB.2) / 255.0 * 0.75,
+                    alpha: 0.92
+                )
+            ]
+            NSAttributedString(string: signatureText, attributes: sigAttrs)
+                .draw(at: CGPoint(x: sideMargin + 6, y: chinTopY + bottomChin * 0.24))
+
+            let dateAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.monospacedSystemFont(ofSize: max(11, CGFloat(width) * 0.040), weight: .semibold),
+                .foregroundColor: UIColor(white: 0.25, alpha: 0.9)
+            ]
+            NSAttributedString(string: dateText, attributes: dateAttrs)
+                .draw(at: CGPoint(x: sideMargin + 6, y: chinTopY + bottomChin * 0.56))
         }
 
-        if !isBackside {
-            // 繪製柔和散景光斑與人物剪影，使相冊封面與 Hero 大圖更具辨識度
-            context.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.16)
-            context.fillEllipse(in: CGRect(
-                x: photoRect.minX + photoRect.width * 0.62,
-                y: photoRect.minY + photoRect.height * 0.68,
-                width: photoRect.width * 0.32,
-                height: photoRect.width * 0.32
-            ))
-            context.fillEllipse(in: CGRect(
-                x: photoRect.minX + photoRect.width * 0.10,
-                y: photoRect.minY + photoRect.height * 0.52,
-                width: photoRect.width * 0.22,
-                height: photoRect.width * 0.22
-            ))
-
-            // 偶像半身輪廓裝飾
-            context.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.26)
-            let headDiameter = photoRect.width * 0.34
-            context.fillEllipse(in: CGRect(
-                x: photoRect.midX - headDiameter / 2,
-                y: photoRect.minY + photoRect.height * 0.42,
-                width: headDiameter,
-                height: headDiameter
-            ))
-            let shouldersWidth = photoRect.width * 0.68
-            let shouldersHeight = photoRect.height * 0.44
-            context.fillEllipse(in: CGRect(
-                x: photoRect.midX - shouldersWidth / 2,
-                y: photoRect.minY - shouldersHeight * 0.22,
-                width: shouldersWidth,
-                height: shouldersHeight
-            ))
-        }
-        context.restoreGState()
-
-        // 3. 在下方下巴模擬手寫簽名/日期色塊線條
-        context.setFillColor(
-            red: CGFloat(bottomRGB.0) / 255.0,
-            green: CGFloat(bottomRGB.1) / 255.0,
-            blue: CGFloat(bottomRGB.2) / 255.0,
-            alpha: 0.65
-        )
-        let chinLineRect = CGRect(
-            x: sideMargin * 1.4,
-            y: bottomChin * 0.42,
-            width: CGFloat(width) * 0.45,
-            height: 6
-        )
-        context.fill(chinLineRect)
-
-        guard let cgImage = context.makeImage() else { return nil }
-
-        let mutableData = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            mutableData,
-            "public.png" as CFString,
-            1,
-            nil
-        ) else { return nil }
-        CGImageDestinationAddImage(destination, cgImage, nil)
-        CGImageDestinationFinalize(destination)
-        return mutableData as Data
+        return image.pngData()
     }
 }
 
