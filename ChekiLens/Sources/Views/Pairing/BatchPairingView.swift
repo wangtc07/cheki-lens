@@ -478,16 +478,12 @@ struct BatchPairingView: View {
 
     private var multiMemberAndFormatHeaderCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // 第一列：歸檔成員標題 + 多層選擇 Multiple Select 下拉選單 + 「全部套用」&「選擇套用」
-            HStack(spacing: 6) {
+            // 第一列：左側「歸檔成員」標題 ＋ 右側「全部套用」&「選擇套用」按鈕（保留充足寬度不截斷）
+            HStack(spacing: 8) {
                 Label("歸檔成員", systemImage: "person.2.crop.square.stack")
                     .font(.subheadline.weight(.medium))
-                    .layoutPriority(1)
 
-                // 多層選擇 Multiple Select（第一層：團體 ➔ 第二層：成員多選，最後可新增成員）
-                hierarchicalMultiSelectMemberMenu
-
-                Spacer(minLength: 2)
+                Spacer()
 
                 // 1. 全部套用按鈕
                 Button {
@@ -496,8 +492,8 @@ struct BatchPairingView: View {
                     Text("全部套用")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.primary)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5.5)
                         .background(Color(.tertiarySystemFill), in: Capsule())
                 }
                 .buttonStyle(.plain)
@@ -509,8 +505,8 @@ struct BatchPairingView: View {
                     Text(isSelectingPhotosToApply ? "取消選擇" : "選擇套用")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(isSelectingPhotosToApply ? .white : .blue)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5.5)
                         .background(
                             isSelectingPhotosToApply
                                 ? AnyShapeStyle(Color.blue)
@@ -521,58 +517,17 @@ struct BatchPairingView: View {
                 .buttonStyle(.plain)
             }
 
-            // 第二列：顯示目前在 Multiple Select 中已勾選的成員標籤（可快速點擊移除或繼續從多層選單增減）
-            if !selectedTargetMembers.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(selectedTargetMembers) { member in
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(Self.groupColor(for: member))
-                                    .frame(width: 6.5, height: 6.5)
-
-                                Text(member.stageName)
-                                    .font(.caption2.weight(.semibold))
-
-                                if let groupName = member.group?.name {
-                                    Text(groupName)
-                                        .font(.system(size: 9.5))
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Button {
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    withAnimation(.snappy(duration: 0.2)) {
-                                        selectedTargetMembers.removeAll { $0.id == member.id }
-                                    }
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color(.tertiarySystemFill), in: Capsule())
-                        }
-
-                        if selectedTargetMembers.count > 1 {
-                            Button {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                withAnimation(.snappy(duration: 0.2)) {
-                                    selectedTargetMembers.removeAll()
-                                }
-                            } label: {
-                                Text("清空")
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
-                        }
+            // 第二列：成員選擇移至下方
+            // - 沒有選擇時：顯示「選擇成員 ⌄」下拉選單膠囊
+            // - 有選擇時：每個已選成員顯示為下拉選單膠囊框（直接點選可用多層下拉選單重選成員，右邊保持 X 按鈕取消），後面接著未選擇的下拉選單（可多選追加）
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(selectedTargetMembers.enumerated()), id: \.element.id) { index, member in
+                        selectedMemberDropdownCapsule(member: member, index: index)
                     }
+
+                    // 後方接著未選擇的多層下拉選單膠囊（未選擇時作為主選單，已選擇時可繼續多選追加成員）
+                    unselectedMemberDropdownCapsule
                 }
             }
 
@@ -596,115 +551,186 @@ struct BatchPairingView: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    /// 頂部多層級成員多選選單 (Multi-Level Multiple Select: 第一層「所屬團體」➔ 第二層「成員 (支援複選)」，最後為「＋ 新增成員」)
-    private var hierarchicalMultiSelectMemberMenu: some View {
+    /// 已選中的成員下拉膠囊框：直接點選膠囊本體可用多層下拉選單重選該成員，右側保持 `X` 按鈕可取消移除
+    private func selectedMemberDropdownCapsule(member: IdolMember, index: Int) -> some View {
+        HStack(spacing: 2) {
+            // 左側主體：點選開啟多層下拉選單（團體 ➔ 成員 ➔ 新增成員）直接重選／替換此位置的成員
+            Menu {
+                memberHierarchyMenuContent(replacingAt: index)
+            } label: {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(Self.groupColor(for: member))
+                        .frame(width: 8, height: 8)
+
+                    Text(member.stageName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    if let groupName = member.group?.name {
+                        Text(groupName)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.leading, 10)
+                .padding(.trailing, 4)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // 右側：保持 X 按鈕取消該成員
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.snappy(duration: 0.2)) {
+                    selectedTargetMembers.removeAll { $0.id == member.id }
+                    defaultFallbackMember = selectedTargetMembers.first
+                }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 2)
+                    .padding(.trailing, 8)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("移除\(member.stageName)")
+        }
+        .background(Color(.tertiarySystemFill), in: Capsule())
+    }
+
+    /// 未選擇的成員多層下拉選單膠囊（沒有選擇任何成員時顯示「未分類 · 選擇成員」，已有選擇時緊接在後方供多選追加）
+    private var unselectedMemberDropdownCapsule: some View {
+        Menu {
+            memberHierarchyMenuContent(replacingAt: nil)
+        } label: {
+            HStack(spacing: 5) {
+                if selectedTargetMembers.isEmpty {
+                    Image(systemName: "person.crop.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("未分類 · 選擇成員")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: true, vertical: false)
+                } else {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.secondary)
+                    Text("選擇成員")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(Color(.tertiarySystemFill), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 多層級成員選單內容（第一層：團體 ➔ 第二層：成員，最後可新增成員）
+    /// - Parameter replacingAt: 若為 `Int` 代表重選並替換該索引的膠囊成員；若為 `nil` 代表在後方追加新成員
+    @ViewBuilder
+    private func memberHierarchyMenuContent(replacingAt index: Int?) -> some View {
         let ungroupedMembers = idolMembers.filter { $0.group == nil }
+        let currentMemberAtSlot: IdolMember? = {
+            if let idx = index, selectedTargetMembers.indices.contains(idx) {
+                return selectedTargetMembers[idx]
+            }
+            return nil
+        }()
 
-        return Menu {
-            Section("多層選擇成員（可複選多位成員）") {
-                // 第一層：依各偶像團體展開子選單 (Group -> Members)
-                ForEach(idolGroups) { group in
-                    let groupMembers = idolMembers.filter { $0.group?.id == group.id }
-                    if !groupMembers.isEmpty {
-                        let selectedInGroupCount = groupMembers.filter { m in
-                            selectedTargetMembers.contains(where: { $0.id == m.id })
-                        }.count
-                        let groupTitle = selectedInGroupCount > 0
-                            ? "\(group.name)（已選 \(selectedInGroupCount) 人）"
-                            : group.name
-
-                        Menu {
-                            ForEach(groupMembers) { member in
-                                let isSelected = selectedTargetMembers.contains(where: { $0.id == member.id })
-                                Button {
-                                    toggleTargetMemberSelection(member)
-                                } label: {
-                                    Label(
-                                        member.stageName,
-                                        systemImage: isSelected ? "checkmark.circle.fill" : "circle"
-                                    )
-                                }
-                                .menuActionDismissBehavior(.disabled)
+        Section(index != nil ? "重新選擇成員" : "選擇成員（可多選）") {
+            ForEach(idolGroups) { group in
+                let groupMembers = idolMembers.filter { $0.group?.id == group.id }
+                if !groupMembers.isEmpty {
+                    Menu(group.name) {
+                        ForEach(groupMembers) { member in
+                            let isCurrent = (currentMemberAtSlot?.id == member.id)
+                            let isAlreadyInList = selectedTargetMembers.contains(where: { $0.id == member.id })
+                            Button {
+                                selectTargetMember(member, replacingAt: index)
+                            } label: {
+                                Label(
+                                    member.stageName,
+                                    systemImage: isCurrent
+                                        ? "checkmark.circle.fill"
+                                        : (isAlreadyInList ? "checkmark" : "person")
+                                )
                             }
+                        }
+                    }
+                }
+            }
+
+            if !ungroupedMembers.isEmpty {
+                Menu("未分團成員") {
+                    ForEach(ungroupedMembers) { member in
+                        let isCurrent = (currentMemberAtSlot?.id == member.id)
+                        let isAlreadyInList = selectedTargetMembers.contains(where: { $0.id == member.id })
+                        Button {
+                            selectTargetMember(member, replacingAt: index)
                         } label: {
                             Label(
-                                groupTitle,
-                                systemImage: selectedInGroupCount > 0 ? "person.2.circle.fill" : "person.2"
+                                member.stageName,
+                                systemImage: isCurrent
+                                    ? "checkmark.circle.fill"
+                                    : (isAlreadyInList ? "checkmark" : "person")
                             )
                         }
                     }
                 }
+            }
+        }
 
-                // 未分團成員子選單（若有）
-                if !ungroupedMembers.isEmpty {
-                    let selectedUngroupedCount = ungroupedMembers.filter { m in
-                        selectedTargetMembers.contains(where: { $0.id == m.id })
-                    }.count
-                    let ungroupedTitle = selectedUngroupedCount > 0
-                        ? "未分團成員（已選 \(selectedUngroupedCount) 人）"
-                        : "未分團成員"
-
-                    Menu {
-                        ForEach(ungroupedMembers) { member in
-                            let isSelected = selectedTargetMembers.contains(where: { $0.id == member.id })
-                            Button {
-                                toggleTargetMemberSelection(member)
-                            } label: {
-                                Label(
-                                    member.stageName,
-                                    systemImage: isSelected ? "checkmark.circle.fill" : "circle"
-                                )
-                            }
-                            .menuActionDismissBehavior(.disabled)
-                        }
-                    } label: {
-                        Label(
-                            ungroupedTitle,
-                            systemImage: selectedUngroupedCount > 0 ? "person.crop.circle.fill" : "person.crop.circle"
-                        )
+        if let idx = index {
+            Divider()
+            Button(role: .destructive) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.snappy(duration: 0.2)) {
+                    if selectedTargetMembers.indices.contains(idx) {
+                        selectedTargetMembers.remove(at: idx)
+                        defaultFallbackMember = selectedTargetMembers.first
                     }
                 }
+            } label: {
+                Label("移除此成員", systemImage: "xmark.circle")
             }
-
+        } else if !selectedTargetMembers.isEmpty {
             Divider()
-
-            // 設為未分類（清空選擇）
-            Button {
+            Button(role: .destructive) {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                selectedTargetMembers.removeAll()
-            } label: {
-                Label(
-                    "未分類（清空已選成員）",
-                    systemImage: selectedTargetMembers.isEmpty ? "checkmark.circle.fill" : "tray"
-                )
-            }
-
-            Divider()
-
-            // 最後一項：新增成員
-            Button {
-                showingQuickCreateMemberSheet = true
-            } label: {
-                Label("新增成員…", systemImage: "person.badge.plus")
-            }
-        } label: {
-            HStack(spacing: 4) {
-                if let firstMember = selectedTargetMembers.first {
-                    Circle()
-                        .fill(Self.groupColor(for: firstMember))
-                        .frame(width: 7, height: 7)
+                withAnimation(.snappy(duration: 0.2)) {
+                    selectedTargetMembers.removeAll()
+                    defaultFallbackMember = nil
                 }
-                Text(selectedTargetMembersDisplayString)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
+            } label: {
+                Label("清空所有已選成員（設為未分類）", systemImage: "tray")
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+
+        Divider()
+
+        // 最後一項：新增成員
+        Button {
+            showingQuickCreateMemberSheet = true
+        } label: {
+            Label("新增成員…", systemImage: "person.badge.plus")
         }
     }
 
@@ -1483,14 +1509,23 @@ struct BatchPairingView: View {
 
     // MARK: - 7. 多層多選成員指派與配對邏輯 (Hierarchical Multi-Select & Photo Batch Apply)
 
-    private func toggleTargetMemberSelection(_ member: IdolMember) {
+    private func selectTargetMember(_ member: IdolMember, replacingAt index: Int?) {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        if let idx = selectedTargetMembers.firstIndex(where: { $0.id == member.id }) {
-            selectedTargetMembers.remove(at: idx)
-        } else {
-            selectedTargetMembers.append(member)
+        withAnimation(.snappy(duration: 0.2)) {
+            if let idx = index, selectedTargetMembers.indices.contains(idx) {
+                // 直接點選已選成員膠囊重選成員：替換該位置的成員，並移除可能重複的項目
+                selectedTargetMembers[idx] = member
+                for i in selectedTargetMembers.indices.reversed() where i != idx && selectedTargetMembers[i].id == member.id {
+                    selectedTargetMembers.remove(at: i)
+                }
+            } else {
+                // 點選後方的「未選擇下拉選單」：追加選擇新成員（可多選用）
+                if !selectedTargetMembers.contains(where: { $0.id == member.id }) {
+                    selectedTargetMembers.append(member)
+                }
+            }
+            defaultFallbackMember = selectedTargetMembers.first
         }
-        defaultFallbackMember = selectedTargetMembers.first
     }
 
     private func setMembers(_ members: [IdolMember], forSlotID slotID: UUID) {
