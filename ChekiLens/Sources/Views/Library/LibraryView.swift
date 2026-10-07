@@ -1662,7 +1662,7 @@ struct LibrarySearchView: View {
 
 // MARK: - QuickCreateIdolSheet (快速新增團體 / 成員)
 
-private struct QuickCreateIdolSheet: View {
+struct QuickCreateIdolSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \IdolGroup.sortOrder, order: .forward) private var groups: [IdolGroup]

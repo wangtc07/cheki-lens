@@ -43,12 +43,14 @@ struct StagingChekiPhoto: Identifiable, Equatable {
     }
 }
 
-// MARK: - ChekiPairingSlot (配對工作台中的一筆輸出單元：可為正反雙面或單面)
+// MARK: - ChekiPairingSlot (配對工作台中的一筆輸出單元：支援個別指派成員、正反雙面撲克牌展開或單面)
 
 struct ChekiPairingSlot: Identifiable, Equatable {
     let id: UUID
     var frontPhoto: StagingChekiPhoto
     var backPhoto: StagingChekiPhoto?
+    /// 每張（或每組）拍立得可獨立指派歸檔成員（支援同一批上傳多位不同成員）
+    var assignedMember: IdolMember?
 
     var isPaired: Bool {
         backPhoto != nil
@@ -65,15 +67,21 @@ struct ChekiPairingSlot: Identifiable, Equatable {
         guard let back = backPhoto else { return false }
         return frontPhoto.detectedSide == .likelyBack && back.detectedSide == .likelyFront
     }
+
+    static func == (lhs: ChekiPairingSlot, rhs: ChekiPairingSlot) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.frontPhoto == rhs.frontPhoto &&
+        lhs.backPhoto == rhs.backPhoto &&
+        lhs.assignedMember?.id == rhs.assignedMember?.id
+    }
 }
 
-// MARK: - BatchPairingView (Task 4.4: 批次配對工作台 — 嚴格遵循 Apple iOS 17/18 原生 HIG)
+// MARK: - BatchPairingView (Task 4.4: 批次配對工作台 — 格狀相簿檢視 + 撲克牌正反展開 + 多人歸檔設定)
 
 /// 批次相簿匯入與正反面配對工作台
-/// - 嚴格遵循 Apple iOS 18 原生相簿（如「重複項目合併」與原生 Inset Grouped Sheet）設計規範
-/// - 支援 `PhotosPicker` 無上限多選匯入 (`maxSelectionCount: nil`)
-/// - 頂部三段 Segmented Control：`直接執行` / `自動配對` / `手動配對`
-/// - 內建 8 張擬真測試照片組（含正常正反配對、⚠️ Vision 雙正面防呆警示、⚠️ 正反顛倒與手動配對情境）
+/// - 採用與相簿一覽相同的 **格狀檢視 (`LazyVGrid`)**
+/// - 正反雙面配對項目採用 **撲克牌兩張扇形展開樣式 (`Playing-Card Fan`)**，直覺呈現正反疊合關係
+/// - 支援 **多人歸檔設定**：每組拍立得卡片下方皆可獨立指派所屬成員，亦支援頂部「快速指派成員筆刷」與「批次套用」
 struct BatchPairingView: View {
 
     @Environment(\.modelContext) private var modelContext
@@ -89,15 +97,23 @@ struct BatchPairingView: View {
     @State private var allPhotos: [StagingChekiPhoto] = []
     @State private var slots: [ChekiPairingSlot] = []
 
+    /// 記錄每張相片已指派的成員（切換配對模式或拆開/重組時保留各自的成員設定）
+    @State private var photoMemberAssignment: [UUID: IdolMember] = [:]
+
+    /// 快速指派成員筆刷（若開啟，點選任一成員標籤後點擊卡片即可快速指派該成員；nil 代表一般配對點擊）
+    @State private var activeBrushMember: IdolMember? = nil
+    @State private var isMemberBrushMode: Bool = false
+
     // 手動配對模式下，使用者點選的第一張「待配對正面」Slot ID
     @State private var selectedFirstSlotID: UUID? = nil
 
     // 工作台內追加選取照片（不設張數上限 maxSelectionCount: nil）
     @State private var additionalPickerItems: [PhotosPickerItem] = []
 
-    // 目標成員與規格設定
-    @State private var selectedMember: IdolMember? = nil
+    // 預設成員（供新匯入相片預設帶入）與相紙規格設定
+    @State private var defaultFallbackMember: IdolMember? = nil
     @State private var selectedFilmFormat: FilmFormat = .auto
+    @State private var showingQuickCreateMemberSheet: Bool = false
 
     // 載入與處理狀態
     @State private var isLoadingPhotos: Bool = false
@@ -115,7 +131,7 @@ struct BatchPairingView: View {
     ) {
         self.initialPickerItems = initialPickerItems
         self.defaultMember = defaultMember
-        _selectedMember = State(initialValue: defaultMember)
+        _defaultFallbackMember = State(initialValue: defaultMember)
     }
 
     private var pairedCount: Int {
@@ -136,6 +152,32 @@ struct BatchPairingView: View {
 
     private var totalWarningCount: Int {
         doubleFrontWarningCount + reversedWarningCount
+    }
+
+    /// 目前所有卡片涵蓋的不同成員摘要（例如：「遠藤さくら、河田陽菜 等 3 人」）
+    private var assignedMembersSummary: String {
+        var uniqueNames: [String] = []
+        var hasUncategorized = false
+        for slot in slots {
+            if let name = slot.assignedMember?.stageName {
+                if !uniqueNames.contains(name) {
+                    uniqueNames.append(name)
+                }
+            } else {
+                hasUncategorized = true
+            }
+        }
+        if uniqueNames.isEmpty {
+            return "未分類"
+        } else if uniqueNames.count == 1 && !hasUncategorized {
+            return uniqueNames[0]
+        } else if uniqueNames.count == 1 && hasUncategorized {
+            return "\(uniqueNames[0]) ＋ 未分類"
+        } else if uniqueNames.count == 2 && !hasUncategorized {
+            return "\(uniqueNames[0])、\(uniqueNames[1])"
+        } else {
+            return "\(uniqueNames[0])、\(uniqueNames[1]) 等 \(uniqueNames.count) 人"
+        }
     }
 
     var body: some View {
@@ -159,7 +201,7 @@ struct BatchPairingView: View {
                 } else if allPhotos.isEmpty {
                     emptyWorkbenchView
                 } else {
-                    slotListView
+                    slotGridWorkbenchView
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -203,7 +245,7 @@ struct BatchPairingView: View {
                             Button {
                                 loadSimulatedBatchSample()
                             } label: {
-                                Label("載入 8 張內建測試組（含雙正面警示）", systemImage: "sparkles.rectangle.stack")
+                                Label("載入 8 張內建測試組（多人＋雙正面警示）", systemImage: "sparkles.rectangle.stack")
                             }
 
                             if totalWarningCount > 0 {
@@ -222,6 +264,7 @@ struct BatchPairingView: View {
                                     withAnimation(.snappy(duration: 0.25)) {
                                         allPhotos.removeAll()
                                         slots.removeAll()
+                                        photoMemberAssignment.removeAll()
                                         selectedFirstSlotID = nil
                                         isUsingSimulatedSample = false
                                     }
@@ -246,6 +289,9 @@ struct BatchPairingView: View {
                     batchProgressOverlay
                 }
             }
+            .sheet(isPresented: $showingQuickCreateMemberSheet) {
+                QuickCreateIdolSheet()
+            }
             .alert(
                 "iOS 系統相簿測試相片",
                 isPresented: Binding(
@@ -262,14 +308,13 @@ struct BatchPairingView: View {
             .task {
                 guard !hasInitialized else { return }
                 hasInitialized = true
-                if selectedMember == nil {
-                    selectedMember = defaultMember ?? idolMembers.first
+                if defaultFallbackMember == nil {
+                    defaultFallbackMember = defaultMember ?? idolMembers.first
                 }
                 if !initialPickerItems.isEmpty {
                     isUsingSimulatedSample = false
                     await appendPickerItems(initialPickerItems)
                 } else {
-                    // 若未帶入系統相簿照片，預設載入 8 張豐富測試資料（涵蓋正反配對、雙正面防呆警示、順序顛倒）
                     loadSimulatedBatchSample()
                 }
             }
@@ -281,6 +326,7 @@ struct BatchPairingView: View {
                     if isUsingSimulatedSample {
                         allPhotos.removeAll()
                         slots.removeAll()
+                        photoMemberAssignment.removeAll()
                         isUsingSimulatedSample = false
                     }
                     await appendPickerItems(itemsToLoad)
@@ -294,452 +340,739 @@ struct BatchPairingView: View {
         }
     }
 
-    // MARK: - 1. 原生 Inset Grouped 列表
+    // MARK: - 1. 格狀配對工作台主視圖 (Album-Style Grid + Playing-Card Fan)
 
-    private var slotListView: some View {
-        List {
-            // 首次開啟時的原境漸進式提示 (Contextual Coach Mark)
-            if !hasSeenCoachMark {
-                Section {
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: "sparkles")
-                            .font(.title3)
-                            .foregroundStyle(.tint)
-                            .padding(.top, 2)
+    private var slotGridWorkbenchView: some View {
+        GeometryReader { geo in
+            let isLandscape = geo.size.width > geo.size.height
+            let columnCount = isLandscape ? 3 : 2
+            let columns = Array(repeating: GridItem(.flexible(), spacing: 14, alignment: .top), count: columnCount)
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("智慧正反面配對與雙正面防呆")
-                                .font(.subheadline.weight(.semibold))
-                            Text("「自動配對」會依序將兩張照片綁定為正反面，並以 Apple Vision 檢驗特徵。若偵測到連續兩張皆為正面，會標示橙色警示，您可隨時點選「解除」或向左滑動拆開。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    // 1. 多人歸檔成員與相紙規格設定卡
+                    multiMemberAndFormatHeaderCard
 
-                        Spacer(minLength: 4)
+                    // 2. Vision 防呆警示橫幅（若有雙正面或正反顛倒）
+                    if totalWarningCount > 0 {
+                        warningBannerCard
+                    }
 
-                        Button {
-                            withAnimation {
-                                hasSeenCoachMark = true
+                    // 3. 手動配對或快速指派成員指引列
+                    if isMemberBrushMode {
+                        memberBrushInstructionBanner
+                    } else if pairingMode == .manualPair || selectedFirstSlotID != nil {
+                        manualPairingInstructionBanner
+                    }
+
+                    // 4. 格狀標題列
+                    HStack {
+                        Text("已選取 \(allPhotos.count) 張照片 · 將輸出 \(slots.count) 張拍立得")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        if isAnalyzingSides {
+                            HStack(spacing: 4) {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                Text("Vision 分析中")
                             }
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        } else {
+                            Text(pairingMode == .singleOnly ? "單張獨立模式" : "正反撲克牌展開")
+                                .font(.caption2.weight(.medium))
                                 .foregroundStyle(.tertiary)
                         }
-                        .buttonStyle(.plain)
                     }
-                    .padding(.vertical, 2)
-                }
-            }
+                    .padding(.horizontal, 4)
 
-            // 歸檔成員與相紙規格設定 (Native iOS Form Picker Style)
-            Section {
-                HStack {
-                    Label("歸檔成員", systemImage: "person.crop.circle")
-                    Spacer()
-                    Menu {
-                        Button {
-                            selectedMember = nil
-                        } label: {
-                            Label("未分類", systemImage: selectedMember == nil ? "checkmark" : "tray")
+                    // 5. 格狀拍立得卡片一覽 (LazyVGrid)
+                    LazyVGrid(columns: columns, spacing: 16) {
+                        ForEach(slots) { slot in
+                            slotGridCell(for: slot)
                         }
-                        Divider()
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 28)
+            }
+        }
+    }
+
+    // MARK: - 2. 多人歸檔成員與規格設定卡 (Multi-Member Assignment & Format Header)
+
+    private var multiMemberAndFormatHeaderCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // 第一列：歸檔成員摘要 + 批次套用選單
+            HStack {
+                Label("歸檔成員", systemImage: "person.2.crop.square.stack")
+                    .font(.subheadline.weight(.medium))
+
+                Spacer()
+
+                Text(assignedMembersSummary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Menu {
+                    Section("將全部拍立得統一設為") {
+                        Button {
+                            assignMemberToAllSlots(nil)
+                        } label: {
+                            Label("全部設為「未分類」", systemImage: "tray")
+                        }
+
                         ForEach(idolMembers) { member in
                             Button {
-                                selectedMember = member
+                                assignMemberToAllSlots(member)
                             } label: {
                                 let title = member.group != nil
                                     ? "\(member.stageName)（\(member.group!.name)）"
                                     : member.stageName
-                                Label(title, systemImage: selectedMember?.id == member.id ? "checkmark" : "person")
+                                Label("全部設為 \(title)", systemImage: "person.crop.circle.badge.checkmark")
                             }
                         }
+                    }
+
+                    Divider()
+
+                    Button {
+                        showingQuickCreateMemberSheet = true
+                    } label: {
+                        Label("新增團體 / 成員…", systemImage: "person.badge.plus")
+                    }
+                } label: {
+                    Text("全部套用")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Color(.tertiarySystemFill), in: Capsule())
+                }
+            }
+
+            // 第二列：多人快速指派成員晶片列（支援點選成員晶片後，直接點擊下方卡片快速指派不同成員）
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    // 快速指派筆刷開關提示
+                    ForEach(idolMembers) { member in
+                        let isBrushSelected = isMemberBrushMode && activeBrushMember?.id == member.id
+                        let countForMember = slots.filter { $0.assignedMember?.id == member.id }.count
+
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            withAnimation(.snappy(duration: 0.2)) {
+                                if isBrushSelected {
+                                    isMemberBrushMode = false
+                                    activeBrushMember = nil
+                                } else {
+                                    isMemberBrushMode = true
+                                    activeBrushMember = member
+                                    selectedFirstSlotID = nil
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(Self.groupColor(for: member))
+                                    .frame(width: 7, height: 7)
+
+                                Text(member.stageName)
+                                    .font(.caption.weight(.semibold))
+
+                                if countForMember > 0 {
+                                    Text("\(countForMember)")
+                                        .font(.system(size: 10, weight: .bold).monospacedDigit())
+                                        .foregroundStyle(isBrushSelected ? Color.accentColor : .white)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(
+                                            isBrushSelected ? Color.white : Color.secondary.opacity(0.45),
+                                            in: Capsule()
+                                        )
+                                }
+                            }
+                            .foregroundStyle(isBrushSelected ? .white : .primary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                isBrushSelected ? Color.accentColor : Color(.tertiarySystemFill),
+                                in: Capsule()
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // 新增成員按鈕
+                    Button {
+                        showingQuickCreateMemberSheet = true
                     } label: {
                         HStack(spacing: 4) {
-                            if let member = selectedMember {
-                                Text(member.group != nil ? "\(member.group!.name) · \(member.stageName)" : member.stageName)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Text("未分類")
-                                    .foregroundStyle(.secondary)
-                            }
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.tertiary)
+                            Image(systemName: "plus")
+                                .font(.caption2.weight(.bold))
+                            Text("新增成員")
+                                .font(.caption.weight(.medium))
                         }
-                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.tertiarySystemFill), in: Capsule())
                     }
+                    .buttonStyle(.plain)
                 }
+            }
 
-                Picker(selection: $selectedFilmFormat) {
+            Divider()
+
+            // 第三列：相紙規格選擇
+            HStack {
+                Label("相紙規格", systemImage: "aspectratio")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Picker("相紙規格", selection: $selectedFilmFormat) {
                     ForEach(FilmFormat.allCases, id: \.self) { format in
                         Text(format.displayName).tag(format)
                     }
-                } label: {
-                    Label("相紙規格", systemImage: "aspectratio")
                 }
-            } header: {
-                Text("匯入設定")
-            }
-
-            // Vision 防呆警示摘要列（僅在有雙正面或正反顛倒時出現）
-            if totalWarningCount > 0 {
-                Section {
-                    HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.title3)
-                            .foregroundStyle(.orange)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Vision 偵測到 \(totalWarningCount) 組配對異常")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-
-                            if doubleFrontWarningCount > 0 && reversedWarningCount > 0 {
-                                Text("含 \(doubleFrontWarningCount) 組疑似雙正面、\(reversedWarningCount) 組正反順序顛倒")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else if doubleFrontWarningCount > 0 {
-                                Text("有 \(doubleFrontWarningCount) 組連續兩張皆被識別為正面照片，可能導致錯配")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Text("有 \(reversedWarningCount) 組第一張為背面、第二張為正面")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Spacer()
-
-                        Button("自動修正") {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            withAnimation(.snappy(duration: 0.25)) {
-                                resolveAllWarningsAutomatically()
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.orange)
-                        .controlSize(.small)
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-
-            // 手動配對模式專屬操作指引列
-            if pairingMode == .manualPair {
-                Section {
-                    manualPairingInstructionRow
-                }
-            }
-
-            // 待處理拍立得配對清單
-            Section {
-                ForEach(slots) { slot in
-                    slotRowView(for: slot)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            if slot.isPaired {
-                                Button {
-                                    withAnimation(.snappy(duration: 0.22)) {
-                                        unpairSlot(id: slot.id)
-                                    }
-                                } label: {
-                                    Label("解除配對", systemImage: "rectangle.on.rectangle.slash")
-                                }
-                                .tint(.orange)
-
-                                Button {
-                                    withAnimation(.snappy(duration: 0.22)) {
-                                        swapSlotSides(id: slot.id)
-                                    }
-                                } label: {
-                                    Label("對調正反", systemImage: "arrow.left.arrow.right")
-                                }
-                                .tint(.indigo)
-                            } else {
-                                Button(role: .destructive) {
-                                    withAnimation(.snappy(duration: 0.22)) {
-                                        removeSlot(id: slot.id)
-                                    }
-                                } label: {
-                                    Label("移除", systemImage: "trash")
-                                }
-                            }
-                        }
-                        .contextMenu {
-                            if slot.isPaired {
-                                Button {
-                                    withAnimation(.snappy(duration: 0.22)) {
-                                        swapSlotSides(id: slot.id)
-                                    }
-                                } label: {
-                                    Label("對調正反面順序", systemImage: "arrow.left.arrow.right")
-                                }
-
-                                Button {
-                                    withAnimation(.snappy(duration: 0.22)) {
-                                        unpairSlot(id: slot.id)
-                                    }
-                                } label: {
-                                    Label("解除配對（拆分為 2 張單面）", systemImage: "rectangle.on.rectangle.slash")
-                                }
-                            } else {
-                                Button {
-                                    handleManualTap(on: slot)
-                                } label: {
-                                    Label(
-                                        selectedFirstSlotID == slot.id ? "取消選為正面" : "選為正面並與下一張配對",
-                                        systemImage: "link.badge.plus"
-                                    )
-                                }
-                            }
-
-                            Divider()
-
-                            Button(role: .destructive) {
-                                withAnimation(.snappy(duration: 0.22)) {
-                                    removeSlot(id: slot.id)
-                                }
-                            } label: {
-                                Label("從本次匯入移除", systemImage: "trash")
-                            }
-                        }
-                }
-            } header: {
-                HStack {
-                    Text("已選取 \(allPhotos.count) 張照片 · 將輸出 \(slots.count) 張拍立得")
-                    Spacer()
-                    if isAnalyzingSides {
-                        HStack(spacing: 4) {
-                            ProgressView()
-                                .controlSize(.mini)
-                            Text("Vision 分析中")
-                        }
-                        .font(.caption2)
-                    }
-                }
-            } footer: {
-                Text("向左滑動已配對項目可快速「解除配對」或「對調正反」；在手動配對模式下，依序點選兩張單面照片即可綁定為正反雙面。")
+                .labelsHidden()
+                .pickerStyle(.menu)
             }
         }
-        .listStyle(.insetGrouped)
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    // MARK: - 2. 手動配對指引列
+    // MARK: - 3. 格狀卡片單元：撲克牌兩張展開樣式 (Playing-Card Fan) & 單張直立樣式
 
-    private var manualPairingInstructionRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: selectedFirstSlotID == nil ? "hand.tap" : "2.circle.fill")
-                .font(.headline)
-                .foregroundStyle(.tint)
+    @ViewBuilder
+    private func slotGridCell(for slot: ChekiPairingSlot) -> some View {
+        let isSelectedFirst = (selectedFirstSlotID == slot.id)
+        let hasWarning = slot.isDoubleFrontWarning || slot.isReversedOrderWarning
 
-            if let firstID = selectedFirstSlotID,
-               let firstSlot = slots.first(where: { $0.id == firstID }) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("已選取「#\(firstSlot.frontPhoto.sequenceNumber) \(firstSlot.frontPhoto.title)」作為正面")
-                        .font(.subheadline.weight(.semibold))
-                    Text("請點選下方任一張單面照片作為【背面】完成配對")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        VStack(spacing: 8) {
+            // 上方視覺舞台：若為正反雙面則呈現「撲克牌兩張扇形展開」，若為單面則呈現單張拍立得
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.secondarySystemGroupedBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(
+                                isSelectedFirst
+                                    ? Color.blue
+                                    : (hasWarning ? Color.orange.opacity(0.85) : Color.primary.opacity(0.06)),
+                                lineWidth: isSelectedFirst || hasWarning ? 2.0 : 1.0
+                            )
+                    )
+
+                if slot.isPaired, let backPhoto = slot.backPhoto {
+                    playingCardFanView(slot: slot, frontPhoto: slot.frontPhoto, backPhoto: backPhoto)
+                } else {
+                    singleCardStageView(slot: slot, photo: slot.frontPhoto, isSelectedFirst: isSelectedFirst)
                 }
+            }
+            .frame(height: 192)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .onTapGesture {
+                handleCellTap(on: slot)
+            }
+            .contextMenu {
+                slotContextMenu(for: slot)
+            }
+
+            // 下方：每張（或每組）拍立得獨立的「歸檔成員選擇膠囊」(支援一次上傳不同人的拍立得)
+            perSlotMemberSelectorPill(for: slot)
+        }
+    }
+
+    /// 撲克牌兩張展開樣式 (Playing-Card Fan)：左前為「正面」、右後扇形展開為「背面」
+    private func playingCardFanView(
+        slot: ChekiPairingSlot,
+        frontPhoto: StagingChekiPhoto,
+        backPhoto: StagingChekiPhoto
+    ) -> some View {
+        ZStack {
+            // 1. 右後扇形展開：背面卡片 (Back Card — 向右旋轉展開如撲克牌)
+            ZStack(alignment: .topTrailing) {
+                Image(uiImage: backPhoto.uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 90, height: 136)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                slot.isDoubleFrontWarning ? Color.orange : Color.white.opacity(0.65),
+                                lineWidth: slot.isDoubleFrontWarning ? 2.0 : 1.0
+                            )
+                    )
+                    .shadow(color: .black.opacity(0.18), radius: 6, x: 2, y: 3)
+
+                Text(slot.isDoubleFrontWarning ? "正面?" : "背面")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        slot.isDoubleFrontWarning ? Color.orange : Color.black.opacity(0.68),
+                        in: Capsule()
+                    )
+                    .padding(5)
+            }
+            .rotationEffect(.degrees(11), anchor: .bottom)
+            .offset(x: 20, y: 2)
+
+            // 2. 左前扇形展開：正面卡片 (Front Card — 向左微傾疊於前側)
+            ZStack(alignment: .topLeading) {
+                Image(uiImage: frontPhoto.uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 92, height: 138)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.85), lineWidth: 1.2)
+                    )
+                    .shadow(color: .black.opacity(0.32), radius: 9, x: 4, y: 4)
+
+                Text("正面")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.88), in: Capsule())
+                    .padding(5)
+            }
+            .rotationEffect(.degrees(-8), anchor: .bottom)
+            .offset(x: -16, y: 0)
+
+            // 3. 頂部左右控制角標：左側序號 (#1+#2)，右側一鍵「拆開」按鈕
+            VStack {
+                HStack {
+                    Text("#\(frontPhoto.sequenceNumber)+#\(backPhoto.sequenceNumber)")
+                        .font(.system(size: 10, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
+
+                    Spacer()
+
+                    Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        withAnimation(.snappy(duration: 0.24)) {
+                            unpairSlot(id: slot.id)
+                        }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Image(systemName: "rectangle.on.rectangle.slash")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("拆開")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(slot.isDoubleFrontWarning ? .white : .primary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3.5)
+                        .background(
+                            slot.isDoubleFrontWarning
+                                ? AnyShapeStyle(Color.orange)
+                                : AnyShapeStyle(.ultraThinMaterial),
+                            in: Capsule()
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("解除正反面配對")
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 8)
 
                 Spacer()
 
+                // 4. 底部中央：撲克牌交疊處的「⇄ 對調正反」或異常提示膠囊
+                HStack {
+                    if slot.isDoubleFrontWarning {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            withAnimation(.snappy(duration: 0.24)) {
+                                unpairSlot(id: slot.id)
+                            }
+                        } label: {
+                            Label("疑似雙正面 · 點此拆開", systemImage: "exclamationmark.triangle.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.orange, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    } else if slot.isReversedOrderWarning {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            withAnimation(.snappy(duration: 0.24)) {
+                                swapSlotSides(id: slot.id)
+                            }
+                        } label: {
+                            Label("順序顛倒 · 點此對調", systemImage: "arrow.left.arrow.right")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.orange, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            withAnimation(.snappy(duration: 0.24)) {
+                                swapSlotSides(id: slot.id)
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.left.arrow.right")
+                                    .font(.system(size: 9.5, weight: .bold))
+                                Text("對調正反")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("對調正反面順序")
+                    }
+                }
+                .padding(.bottom, 7)
+            }
+        }
+    }
+
+    /// 單張直立拍立得樣式 (Single Card Stage)
+    private func singleCardStageView(
+        slot: ChekiPairingSlot,
+        photo: StagingChekiPhoto,
+        isSelectedFirst: Bool
+    ) -> some View {
+        ZStack {
+            Image(uiImage: photo.uiImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 96, height: 144)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(
+                            isSelectedFirst ? Color.blue : Color.white.opacity(0.75),
+                            lineWidth: isSelectedFirst ? 2.2 : 1.0
+                        )
+                )
+                .shadow(color: .black.opacity(0.22), radius: 7, x: 0, y: 3)
+
+            VStack {
+                HStack {
+                    Text("#\(photo.sequenceNumber)")
+                        .font(.system(size: 10, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.ultraThinMaterial, in: Capsule())
+
+                    Spacer()
+
+                    Text(photo.detectedSide.rawValue)
+                        .font(.system(size: 9.5, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(
+                            photo.detectedSide == .likelyBack ? Color.purple.opacity(0.85) : Color.black.opacity(0.58),
+                            in: Capsule()
+                        )
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 8)
+
+                Spacer()
+
+                if pairingMode != .singleOnly {
+                    Button {
+                        handleManualTap(on: slot)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: isSelectedFirst ? "checkmark.circle.fill" : "link.badge.plus")
+                                .font(.system(size: 10, weight: .bold))
+                            Text(isSelectedFirst ? "已選為正面 · 點另一張配對" : "點選配對背面")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(isSelectedFirst ? .white : .primary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            isSelectedFirst
+                                ? AnyShapeStyle(Color.blue)
+                                : AnyShapeStyle(.ultraThinMaterial),
+                            in: Capsule()
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 7)
+                }
+            }
+        }
+    }
+
+    /// 每組拍立得卡片正下方的「個別成員選擇膠囊」(支援同一批設定多位不同成員)
+    private func perSlotMemberSelectorPill(for slot: ChekiPairingSlot) -> some View {
+        Menu {
+            Section("指派此張拍立得的歸檔成員") {
+                Button {
+                    setMember(nil, forSlotID: slot.id)
+                } label: {
+                    Label("未分類", systemImage: slot.assignedMember == nil ? "checkmark" : "tray")
+                }
+
+                ForEach(idolMembers) { member in
+                    Button {
+                        setMember(member, forSlotID: slot.id)
+                    } label: {
+                        let title = member.group != nil
+                            ? "\(member.stageName)（\(member.group!.name)）"
+                            : member.stageName
+                        Label(title, systemImage: slot.assignedMember?.id == member.id ? "checkmark" : "person")
+                    }
+                }
+            }
+
+            Divider()
+
+            Button {
+                showingQuickCreateMemberSheet = true
+            } label: {
+                Label("新增團體 / 成員…", systemImage: "person.badge.plus")
+            }
+        } label: {
+            HStack(spacing: 6) {
+                if let member = slot.assignedMember {
+                    Circle()
+                        .fill(Self.groupColor(for: member))
+                        .frame(width: 8, height: 8)
+
+                    Text(member.stageName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    if let groupName = member.group?.name {
+                        Text(groupName)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Image(systemName: "person.crop.circle.badge.questionmark")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("未分類 · 選擇成員")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 2)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private static func groupColor(for member: IdolMember?) -> Color {
+        guard let rawHex = member?.group?.colorHex else { return .pink }
+        let hex = rawHex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let r, g, b: UInt64
+        switch hex.count {
+        case 6:
+            (r, g, b) = ((int >> 16) & 0xFF, (int >> 8) & 0xFF, int & 0xFF)
+        default:
+            return .pink
+        }
+        return Color(
+            .sRGB,
+            red: Double(r) / 255.0,
+            green: Double(g) / 255.0,
+            blue: Double(b) / 255.0,
+            opacity: 1.0
+        )
+    }
+
+    @ViewBuilder
+    private func slotContextMenu(for slot: ChekiPairingSlot) -> some View {
+        Menu {
+            Button {
+                setMember(nil, forSlotID: slot.id)
+            } label: {
+                Label("未分類", systemImage: slot.assignedMember == nil ? "checkmark" : "tray")
+            }
+            ForEach(idolMembers) { member in
+                Button {
+                    setMember(member, forSlotID: slot.id)
+                } label: {
+                    Label(member.stageName, systemImage: slot.assignedMember?.id == member.id ? "checkmark" : "person")
+                }
+            }
+        } label: {
+            Label("指派歸檔成員", systemImage: "person.crop.circle")
+        }
+
+        if slot.isPaired {
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    swapSlotSides(id: slot.id)
+                }
+            } label: {
+                Label("對調正反面順序", systemImage: "arrow.left.arrow.right")
+            }
+
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    unpairSlot(id: slot.id)
+                }
+            } label: {
+                Label("解除配對（拆為 2 張單面）", systemImage: "rectangle.on.rectangle.slash")
+            }
+        } else {
+            Button {
+                handleManualTap(on: slot)
+            } label: {
+                Label(
+                    selectedFirstSlotID == slot.id ? "取消選為正面" : "選為正面並與另一張配對",
+                    systemImage: "link.badge.plus"
+                )
+            }
+        }
+
+        Divider()
+
+        Button(role: .destructive) {
+            withAnimation(.snappy(duration: 0.22)) {
+                removeSlot(id: slot.id)
+            }
+        } label: {
+            Label("從本次匯入移除", systemImage: "trash")
+        }
+    }
+
+    // MARK: - 4. 警示橫幅與模式指引列
+
+    private var warningBannerCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.title3)
+                .foregroundStyle(.orange)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Vision 偵測到 \(totalWarningCount) 組配對異常")
+                    .font(.subheadline.weight(.semibold))
+
+                if doubleFrontWarningCount > 0 && reversedWarningCount > 0 {
+                    Text("含 \(doubleFrontWarningCount) 組疑似雙正面、\(reversedWarningCount) 組正反顛倒")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if doubleFrontWarningCount > 0 {
+                    Text("有 \(doubleFrontWarningCount) 組連續兩張皆為正面，建議拆開")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("有 \(reversedWarningCount) 組第一張為背面、第二張為正面")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Button("自動修正") {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                withAnimation(.snappy(duration: 0.25)) {
+                    resolveAllWarningsAutomatically()
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .controlSize(.small)
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var memberBrushInstructionBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "paintbrush.pointed.fill")
+                .font(.subheadline)
+                .foregroundStyle(Color.accentColor)
+
+            if let brushMember = activeBrushMember {
+                Text("快速指派模式：直接點選下方任一拍立得卡片，即可將其歸檔至「**\(brushMember.stageName)**」")
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+            }
+
+            Spacer()
+
+            Button("完成指派") {
+                withAnimation(.snappy(duration: 0.2)) {
+                    isMemberBrushMode = false
+                    activeBrushMember = nil
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.mini)
+        }
+        .padding(10)
+        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var manualPairingInstructionBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: selectedFirstSlotID == nil ? "hand.tap.fill" : "2.circle.fill")
+                .font(.subheadline)
+                .foregroundStyle(.blue)
+
+            if let firstID = selectedFirstSlotID,
+               let firstSlot = slots.first(where: { $0.id == firstID }) {
+                Text("已選取 **#\(firstSlot.frontPhoto.sequenceNumber)** 為正面，請點選另一張單面卡片合成撲克牌正反組")
+                    .font(.caption)
+                Spacer()
                 Button("取消") {
                     withAnimation(.snappy(duration: 0.2)) {
                         selectedFirstSlotID = nil
                     }
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.mini)
             } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("手動點選配對")
-                        .font(.subheadline.weight(.semibold))
-                    Text("依序點選兩張單面照片：第 1 下設為【正面】，第 2 下設為【背面】")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text("點選任兩張單面卡片即可合成「正反撲克牌展開組」；點選已配對卡片右上角「拆開」可解除綁定")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
             }
         }
-        .padding(.vertical, 2)
+        .padding(10)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    // MARK: - 3. 單列配對項目 (Native Apple Photos Duplicate/Merge Row Style)
-
-    @ViewBuilder
-    private func slotRowView(for slot: ChekiPairingSlot) -> some View {
-        let isSelectedFirst = (selectedFirstSlotID == slot.id)
-
-        HStack(spacing: 12) {
-            // 左側：真實比例圓角縮圖（單張或正反並列）
-            HStack(spacing: 6) {
-                photoThumbnailView(
-                    photo: slot.frontPhoto,
-                    badge: "正面",
-                    isSelected: isSelectedFirst,
-                    isWarning: false
-                )
-
-                if let backPhoto = slot.backPhoto {
-                    Button {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        withAnimation(.snappy(duration: 0.22)) {
-                            swapSlotSides(id: slot.id)
-                        }
-                    } label: {
-                        Image(systemName: "arrow.left.arrow.right")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(slot.isDoubleFrontWarning || slot.isReversedOrderWarning ? .orange : .secondary)
-                            .frame(width: 22, height: 22)
-                            .background(Color(.tertiarySystemFill), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("對調正反面順序")
-
-                    photoThumbnailView(
-                        photo: backPhoto,
-                        badge: slot.isDoubleFrontWarning ? "正面?" : "背面",
-                        isSelected: false,
-                        isWarning: slot.isDoubleFrontWarning
-                    )
-                }
-            }
-
-            // 中間：標題與 Vision 狀態描述
-            VStack(alignment: .leading, spacing: 4) {
-                if slot.isPaired, let backPhoto = slot.backPhoto {
-                    if slot.isDoubleFrontWarning {
-                        Label("疑似兩張皆為正面", systemImage: "exclamationmark.triangle.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.orange)
-
-                        Text("#\(slot.frontPhoto.sequenceNumber) 與 #\(backPhoto.sequenceNumber) 均偵測到正面特徵，建議解除配對")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else if slot.isReversedOrderWarning {
-                        Label("正反順序可能顛倒", systemImage: "arrow.left.arrow.right.circle.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.orange)
-
-                        Text("#\(slot.frontPhoto.sequenceNumber) 偵測到背面字樣，點選「對調」可修正")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        HStack(spacing: 5) {
-                            Image(systemName: "rectangle.portrait.on.rectangle.portrait.fill")
-                                .font(.caption)
-                                .foregroundStyle(.tint)
-                            Text("正反雙面拍立得")
-                                .font(.subheadline.weight(.semibold))
-                        }
-
-                        Text("#\(slot.frontPhoto.sequenceNumber) \(slot.frontPhoto.title) ＋ #\(backPhoto.sequenceNumber) \(backPhoto.title)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                } else {
-                    HStack(spacing: 6) {
-                        Text("#\(slot.frontPhoto.sequenceNumber) \(slot.frontPhoto.title)")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(isSelectedFirst ? .blue : .primary)
-                            .lineLimit(1)
-
-                        Text(slot.frontPhoto.detectedSide.rawValue)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(slot.frontPhoto.detectedSide == .likelyBack ? .purple : .secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color(.tertiarySystemFill), in: Capsule())
-                    }
-
-                    Text(isSelectedFirst ? "已選為正面，請點選另一張單面照片作為背面" : slot.frontPhoto.detectionNote)
-                        .font(.caption)
-                        .foregroundStyle(isSelectedFirst ? .blue : .secondary)
-                        .lineLimit(2)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            // 右側：原生 iOS 按鈕（解除 / 對調 / 配對）
-            if slot.isPaired {
-                if slot.isReversedOrderWarning {
-                    Button("對調") {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        withAnimation(.snappy(duration: 0.22)) {
-                            swapSlotSides(id: slot.id)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.orange)
-                    .controlSize(.small)
-                } else {
-                    Button("解除") {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        withAnimation(.snappy(duration: 0.22)) {
-                            unpairSlot(id: slot.id)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(slot.isDoubleFrontWarning ? .orange : .secondary)
-                    .controlSize(.small)
-                }
-            } else {
-                Button(isSelectedFirst ? "已選" : "配對") {
-                    handleManualTap(on: slot)
-                }
-                .buttonStyle(.bordered)
-                .tint(isSelectedFirst ? .blue : .accentColor)
-                .controlSize(.small)
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if !slot.isPaired {
-                handleManualTap(on: slot)
-            }
-        }
-    }
-
-    private func photoThumbnailView(
-        photo: StagingChekiPhoto,
-        badge: String,
-        isSelected: Bool,
-        isWarning: Bool
-    ) -> some View {
-        ZStack(alignment: .bottom) {
-            Image(uiImage: photo.uiImage)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 50, height: 68)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(
-                            isWarning ? Color.orange : (isSelected ? Color.blue : Color.primary.opacity(0.12)),
-                            lineWidth: isWarning || isSelected ? 2.0 : 0.5
-                        )
-                )
-
-            Text(badge)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1.5)
-                .background(
-                    isWarning ? Color.orange.opacity(0.9) : Color.black.opacity(0.55),
-                    in: Capsule()
-                )
-                .padding(.bottom, 4)
-        }
-    }
-
-    // MARK: - 4. 空白與載入狀態視圖
+    // MARK: - 5. 空白與載入狀態視圖
 
     private var loadingPlaceholderView: some View {
         VStack(spacing: 14) {
@@ -758,7 +1091,7 @@ struct BatchPairingView: View {
         ContentUnavailableView {
             Label("尚未選取拍立得照片", systemImage: "photo.on.rectangle.angled")
         } description: {
-            Text("從系統相簿多選匯入拍立得照片（不限張數），或載入 8 張測試照片體驗正反自動配對與雙正面防呆警示。")
+            Text("從系統相簿多選匯入拍立得照片（不限張數），支援一次為不同成員的拍立得個別歸檔與正反配對。")
         } actions: {
             VStack(spacing: 12) {
                 PhotosPicker(
@@ -781,7 +1114,7 @@ struct BatchPairingView: View {
         }
     }
 
-    // MARK: - 5. 底部原生行動列 & 進度遮罩
+    // MARK: - 6. 底部原生行動列 & 進度遮罩
 
     private var bottomActionToolbar: some View {
         VStack(spacing: 8) {
@@ -799,6 +1132,11 @@ struct BatchPairingView: View {
                     Label("\(totalWarningCount) 項待確認", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
+                } else {
+                    Text(assignedMembersSummary)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
 
@@ -833,7 +1171,7 @@ struct BatchPairingView: View {
                 .progressViewStyle(.linear)
                 .frame(width: 210)
 
-                Text("正在執行透視校正與手寫日期辨識…")
+                Text("正在執行透視校正與多人歸檔…")
                     .font(.subheadline.weight(.semibold))
 
                 Text("已完成 \(processedCount) / \(totalToProcess) 張拍立得")
@@ -845,7 +1183,55 @@ struct BatchPairingView: View {
         }
     }
 
-    // MARK: - 6. 配對邏輯與防呆修正 (Pairing & Unpairing Operations)
+    // MARK: - 7. 多人成員指派與配對邏輯 (Multi-Member & Pairing Operations)
+
+    private func setMember(_ member: IdolMember?, forSlotID slotID: UUID) {
+        guard let idx = slots.firstIndex(where: { $0.id == slotID }) else { return }
+        slots[idx].assignedMember = member
+        photoMemberAssignment[slots[idx].frontPhoto.id] = member
+        if let backID = slots[idx].backPhoto?.id {
+            photoMemberAssignment[backID] = member
+        }
+    }
+
+    private func assignMemberToAllSlots(_ member: IdolMember?) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        defaultFallbackMember = member
+        for idx in slots.indices {
+            slots[idx].assignedMember = member
+            photoMemberAssignment[slots[idx].frontPhoto.id] = member
+            if let backID = slots[idx].backPhoto?.id {
+                photoMemberAssignment[backID] = member
+            }
+        }
+    }
+
+    private func resolvedMember(for photo: StagingChekiPhoto, slotIndex: Int) -> IdolMember? {
+        if let existing = photoMemberAssignment[photo.id] {
+            return existing
+        }
+        if let defaultMember = defaultFallbackMember {
+            return defaultMember
+        }
+        guard !idolMembers.isEmpty else { return nil }
+        return idolMembers[slotIndex % idolMembers.count]
+    }
+
+    private func handleCellTap(on slot: ChekiPairingSlot) {
+        // 若開啟了頂部「快速指派成員筆刷」，點擊卡片直接將該卡片指派給筆刷選中的成員
+        if isMemberBrushMode, let brushMember = activeBrushMember {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.snappy(duration: 0.2)) {
+                setMember(brushMember, forSlotID: slot.id)
+            }
+            return
+        }
+
+        // 若為單面卡片且非「直接執行」模式，點擊可進行手動正反配對
+        if !slot.isPaired && pairingMode != .singleOnly {
+            handleManualTap(on: slot)
+        }
+    }
 
     private func applyPairingMode(_ mode: BatchPairingMode) {
         selectedFirstSlotID = nil
@@ -857,30 +1243,57 @@ struct BatchPairingView: View {
 
         switch mode {
         case .singleOnly:
-            slots = orderedPhotos.map { photo in
-                ChekiPairingSlot(id: UUID(), frontPhoto: photo, backPhoto: nil)
+            slots = orderedPhotos.enumerated().map { (idx, photo) in
+                ChekiPairingSlot(
+                    id: UUID(),
+                    frontPhoto: photo,
+                    backPhoto: nil,
+                    assignedMember: resolvedMember(for: photo, slotIndex: idx)
+                )
             }
 
         case .autoPair:
             var newSlots: [ChekiPairingSlot] = []
             var idx = 0
+            var pairIdx = 0
             while idx < orderedPhotos.count {
                 let first = orderedPhotos[idx]
+                let member = resolvedMember(for: first, slotIndex: pairIdx)
                 if idx + 1 < orderedPhotos.count {
                     let second = orderedPhotos[idx + 1]
-                    newSlots.append(ChekiPairingSlot(id: UUID(), frontPhoto: first, backPhoto: second))
+                    newSlots.append(
+                        ChekiPairingSlot(
+                            id: UUID(),
+                            frontPhoto: first,
+                            backPhoto: second,
+                            assignedMember: member
+                        )
+                    )
                     idx += 2
                 } else {
-                    newSlots.append(ChekiPairingSlot(id: UUID(), frontPhoto: first, backPhoto: nil))
+                    newSlots.append(
+                        ChekiPairingSlot(
+                            id: UUID(),
+                            frontPhoto: first,
+                            backPhoto: nil,
+                            assignedMember: member
+                        )
+                    )
                     idx += 1
                 }
+                pairIdx += 1
             }
             slots = newSlots
 
         case .manualPair:
             if slots.isEmpty {
-                slots = orderedPhotos.map { photo in
-                    ChekiPairingSlot(id: UUID(), frontPhoto: photo, backPhoto: nil)
+                slots = orderedPhotos.enumerated().map { (idx, photo) in
+                    ChekiPairingSlot(
+                        id: UUID(),
+                        frontPhoto: photo,
+                        backPhoto: nil,
+                        assignedMember: resolvedMember(for: photo, slotIndex: idx)
+                    )
                 }
             }
         }
@@ -891,10 +1304,32 @@ struct BatchPairingView: View {
         var resolved: [ChekiPairingSlot] = []
         for slot in slots {
             if slot.isDoubleFrontWarning, let backPhoto = slot.backPhoto {
-                resolved.append(ChekiPairingSlot(id: UUID(), frontPhoto: slot.frontPhoto, backPhoto: nil))
-                resolved.append(ChekiPairingSlot(id: UUID(), frontPhoto: backPhoto, backPhoto: nil))
+                let secondMember = photoMemberAssignment[backPhoto.id] ?? slot.assignedMember
+                resolved.append(
+                    ChekiPairingSlot(
+                        id: UUID(),
+                        frontPhoto: slot.frontPhoto,
+                        backPhoto: nil,
+                        assignedMember: slot.assignedMember
+                    )
+                )
+                resolved.append(
+                    ChekiPairingSlot(
+                        id: UUID(),
+                        frontPhoto: backPhoto,
+                        backPhoto: nil,
+                        assignedMember: secondMember
+                    )
+                )
             } else if slot.isReversedOrderWarning, let backPhoto = slot.backPhoto {
-                resolved.append(ChekiPairingSlot(id: slot.id, frontPhoto: backPhoto, backPhoto: slot.frontPhoto))
+                resolved.append(
+                    ChekiPairingSlot(
+                        id: slot.id,
+                        frontPhoto: backPhoto,
+                        backPhoto: slot.frontPhoto,
+                        assignedMember: slot.assignedMember
+                    )
+                )
             } else {
                 resolved.append(slot)
             }
@@ -908,8 +1343,11 @@ struct BatchPairingView: View {
               let backPhoto = slots[index].backPhoto else { return }
 
         let frontPhoto = slots[index].frontPhoto
-        let slotA = ChekiPairingSlot(id: UUID(), frontPhoto: frontPhoto, backPhoto: nil)
-        let slotB = ChekiPairingSlot(id: UUID(), frontPhoto: backPhoto, backPhoto: nil)
+        let currentMember = slots[index].assignedMember
+        let backMember = photoMemberAssignment[backPhoto.id] ?? currentMember
+
+        let slotA = ChekiPairingSlot(id: UUID(), frontPhoto: frontPhoto, backPhoto: nil, assignedMember: currentMember)
+        let slotB = ChekiPairingSlot(id: UUID(), frontPhoto: backPhoto, backPhoto: nil, assignedMember: backMember)
 
         slots.replaceSubrange(index...index, with: [slotA, slotB])
     }
@@ -959,7 +1397,13 @@ struct BatchPairingView: View {
 
             let frontPhoto = slots[firstIndex].frontPhoto
             let backPhoto = slots[secondIndex].frontPhoto
-            let combinedSlot = ChekiPairingSlot(id: UUID(), frontPhoto: frontPhoto, backPhoto: backPhoto)
+            let member = slots[firstIndex].assignedMember ?? slots[secondIndex].assignedMember
+            let combinedSlot = ChekiPairingSlot(
+                id: UUID(),
+                frontPhoto: frontPhoto,
+                backPhoto: backPhoto,
+                assignedMember: member
+            )
 
             withAnimation(.snappy(duration: 0.25)) {
                 let minIdx = min(firstIndex, secondIndex)
@@ -990,7 +1434,7 @@ struct BatchPairingView: View {
         return collected.sorted { $0.sequenceNumber < $1.sequenceNumber }
     }
 
-    // MARK: - 7. 載入 PhotosPicker 相片與 Apple Vision 正反面特徵分析
+    // MARK: - 8. 載入 PhotosPicker 相片與 Apple Vision 正反面特徵分析
 
     @MainActor
     private func appendPickerItems(_ pickerItems: [PhotosPickerItem]) async {
@@ -1016,6 +1460,9 @@ struct BatchPairingView: View {
                 detectedSide: .analyzing,
                 detectionNote: "Vision 分析中…"
             )
+            if let fallback = defaultFallbackMember {
+                photoMemberAssignment[staging.id] = fallback
+            }
             newlyLoaded.append(staging)
             nextSequence += 1
         }
@@ -1091,25 +1538,27 @@ struct BatchPairingView: View {
         return (.likelyFront, "Vision 偵測為拍立得正面影像窗")
     }
 
-    // MARK: - 8. 豐富擬真測試資料集（8 張涵蓋正反配對、⚠️ 雙正面防呆警示、⚠️ 正反顛倒與單面測試案例）
+    // MARK: - 9. 豐富擬真測試資料集（8 張涵蓋多位不同成員、正反撲克牌配對、⚠️ 雙正面防呆警示、⚠️ 正反顛倒）
 
     private func loadSimulatedBatchSample() {
-        let sampleSpecs: [(seq: Int, title: String, side: DetectedPhotoSide, note: String, colors: [UIColor], isBackLook: Bool, dateText: String)] = [
-            // Pair 1: 正常正反配對 (#1 正面 + #2 背面)
-            (1, "夏巡舞台服特寫", .likelyFront, "Vision 偵測到正面人物主體", [.systemIndigo, .systemPink], false, "2026.09.24"),
-            (2, "夏巡簽名背面",   .likelyBack,  "Vision 偵測到 instax 背面標記", [.darkGray, .black], true, "2026.09.24"),
-            // Pair 2: ⚠️ 雙正面防呆警示案例 (#3 正面 + #4 正面)
-            (3, "浴衣造型正面",   .likelyFront, "Vision 偵測到正面人物主體", [.systemTeal, .systemBlue], false, "2026.09.28"),
-            (4, "生誕祭私服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemOrange, .systemPink], false, "2026.09.29"),
-            // Pair 3: ⚠️ 正反順序顛倒警示案例 (#5 背面 + #6 正面)
-            (5, "握手會背面留言", .likelyBack,  "Vision 偵測到 instax 背面標記", [.systemGray, .darkGray], true, "2026.10.02"),
-            (6, "握手會比愛心正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPurple, .systemIndigo], false, "2026.10.02"),
-            // Pair 4: 正常正反配對 (#7 正面 + #8 背面)
-            (7, "五週年紀念服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPink, .systemRed], false, "2026.10.05"),
-            (8, "五週年感謝留言背面", .likelyBack, "Vision 偵測到 instax 背面標記", [.darkGray, .systemIndigo], true, "2026.10.05")
+        let sampleSpecs: [(seq: Int, title: String, side: DetectedPhotoSide, note: String, colors: [UIColor], isBackLook: Bool, dateText: String, memberIdx: Int)] = [
+            // Pair 1 (成員 0): 正常正反配對 (#1 正面 + #2 背面)
+            (1, "夏巡舞台服特寫", .likelyFront, "Vision 偵測到正面人物主體", [.systemIndigo, .systemPink], false, "2026.09.24", 0),
+            (2, "夏巡簽名背面",   .likelyBack,  "Vision 偵測到 instax 背面標記", [.darkGray, .black], true, "2026.09.24", 0),
+            // Pair 2 (成員 1 & 2): ⚠️ 雙正面防呆警示案例 (#3 正面 + #4 正面，拆開後各自歸屬不同成員)
+            (3, "浴衣造型正面",   .likelyFront, "Vision 偵測到正面人物主體", [.systemTeal, .systemBlue], false, "2026.09.28", 1),
+            (4, "生誕祭私服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemOrange, .systemPink], false, "2026.09.29", 2),
+            // Pair 3 (成員 2): ⚠️ 正反順序顛倒警示案例 (#5 背面 + #6 正面)
+            (5, "握手會背面留言", .likelyBack,  "Vision 偵測到 instax 背面標記", [.systemGray, .darkGray], true, "2026.10.02", 2),
+            (6, "握手會比愛心正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPurple, .systemIndigo], false, "2026.10.02", 2),
+            // Pair 4 (成員 3): 正常正反配對 (#7 正面 + #8 背面)
+            (7, "五週年紀念服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPink, .systemRed], false, "2026.10.05", 3),
+            (8, "五週年感謝留言背面", .likelyBack, "Vision 偵測到 instax 背面標記", [.darkGray, .systemIndigo], true, "2026.10.05", 3)
         ]
 
         var generated: [StagingChekiPhoto] = []
+        var assignments: [UUID: IdolMember] = [:]
+
         for spec in sampleSpecs {
             let img = Self.renderSampleChekiImage(
                 sequence: spec.seq,
@@ -1119,9 +1568,13 @@ struct BatchPairingView: View {
                 dateText: spec.dateText
             )
             let data = img.jpegData(compressionQuality: 0.9) ?? Data()
+            let photoID = UUID()
+            if !idolMembers.isEmpty {
+                assignments[photoID] = idolMembers[spec.memberIdx % idolMembers.count]
+            }
             generated.append(
                 StagingChekiPhoto(
-                    id: UUID(),
+                    id: photoID,
                     sequenceNumber: spec.seq,
                     title: spec.title,
                     imageData: data,
@@ -1134,6 +1587,7 @@ struct BatchPairingView: View {
 
         withAnimation(.snappy(duration: 0.25)) {
             isUsingSimulatedSample = true
+            photoMemberAssignment = assignments
             allPhotos = generated
             pairingMode = .autoPair
             applyPairingMode(.autoPair)
@@ -1151,8 +1605,7 @@ struct BatchPairingView: View {
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
             let cg = ctx.cgContext
-            // 拍立得相紙外框
-            cg.setFillColor(UIColor(white: isBackside ? 0.93 : 0.98, alpha: 1.0).cgColor)
+            cg.setFillColor(UIColor(white: isBackside ? 0.16 : 0.98, alpha: 1.0).cgColor)
             cg.fill(CGRect(origin: .zero, size: size))
 
             let innerRect = CGRect(x: 40, y: 52, width: 460, height: 616)
@@ -1161,7 +1614,7 @@ struct BatchPairingView: View {
             cg.clip()
 
             let cgColors = colors.map {
-                isBackside ? $0.withAlphaComponent(0.24).cgColor : $0.cgColor
+                isBackside ? $0.withAlphaComponent(0.35).cgColor : $0.cgColor
             } as CFArray
 
             if let gradient = CGGradient(
@@ -1178,46 +1631,43 @@ struct BatchPairingView: View {
             }
 
             if !isBackside {
-                // 模擬正面人物剪影與柔光光斑
                 cg.setFillColor(UIColor.white.withAlphaComponent(0.28).cgColor)
                 cg.fillEllipse(in: CGRect(x: 195, y: 170, width: 150, height: 150))
                 cg.fillEllipse(in: CGRect(x: 120, y: 340, width: 300, height: 280))
             } else {
-                // 模擬背面手寫留言筆跡與 instax 標識
                 let backAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 26, weight: .semibold),
-                    .foregroundColor: UIColor.darkGray
+                    .font: UIFont.systemFont(ofSize: 28, weight: .bold),
+                    .foregroundColor: UIColor.white
                 ]
                 NSAttributedString(string: "いつもありがとう！♡\nまた来週のライブでね", attributes: backAttrs)
-                    .draw(in: CGRect(x: 80, y: 240, width: 380, height: 140))
+                    .draw(in: CGRect(x: 72, y: 220, width: 396, height: 150))
 
                 let instaxAttrs: [NSAttributedString.Key: Any] = [
                     .font: UIFont.monospacedSystemFont(ofSize: 22, weight: .bold),
-                    .foregroundColor: UIColor.gray
+                    .foregroundColor: UIColor(white: 0.78, alpha: 1.0)
                 ]
                 NSAttributedString(string: "FUJIFILM instax", attributes: instaxAttrs)
                     .draw(at: CGPoint(x: 165, y: 590))
             }
             cg.restoreGState()
 
-            // 下巴區域手寫日期（供 Vision OCR 辨識）
             let dateAttrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.monospacedSystemFont(ofSize: 28, weight: .bold),
-                .foregroundColor: UIColor(white: 0.22, alpha: 1.0)
+                .foregroundColor: isBackside ? UIColor(white: 0.85, alpha: 1.0) : UIColor(white: 0.22, alpha: 1.0)
             ]
             NSAttributedString(string: dateText, attributes: dateAttrs)
                 .draw(at: CGPoint(x: 56, y: 720))
 
             let seqAttrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 20, weight: .medium),
-                .foregroundColor: UIColor.secondaryLabel
+                .foregroundColor: isBackside ? UIColor(white: 0.70, alpha: 1.0) : UIColor.secondaryLabel
             ]
             NSAttributedString(string: "#\(sequence) \(title)", attributes: seqAttrs)
                 .draw(at: CGPoint(x: 56, y: 765))
         }
     }
 
-    // MARK: - 9. 執行批次 Vision 透視拉直、OCR 日期辨識與 SwiftData 儲存
+    // MARK: - 10. 執行批次 Vision 透視拉直、OCR 日期辨識與多人分別歸檔儲存
 
     @MainActor
     private func executeBatchProcessing() async {
@@ -1233,6 +1683,7 @@ struct BatchPairingView: View {
         for (index, slot) in slots.enumerated() {
             // 同一組拍立得的正反面賦予完全相同的秒數 (Task 3.3)
             let itemTimestamp = baseTimestamp.addingTimeInterval(TimeInterval(-index))
+            let targetMember = slot.assignedMember
 
             let newItem = ChekiItem(
                 frontImageData: slot.frontPhoto.imageData,
@@ -1241,7 +1692,7 @@ struct BatchPairingView: View {
                 filmFormat: selectedFilmFormat,
                 detectedAspectRatio: selectedFilmFormat == .auto ? FilmFormat.mini.aspectRatio : selectedFilmFormat.aspectRatio,
                 processingState: .detecting,
-                idolMember: selectedMember
+                idolMember: targetMember
             )
             modelContext.insert(newItem)
 
@@ -1266,7 +1717,6 @@ struct BatchPairingView: View {
                         newItem.ocrDate = ocrRes.date
                     }
                 } else {
-                    // 若為已裁切模擬圖，直接對下巴做 OCR 日期辨識
                     if let ocrRes = await visionManager.recognizeDate(from: frontCG) {
                         newItem.ocrDate = ocrRes.date
                     }
@@ -1304,11 +1754,11 @@ struct BatchPairingView: View {
             newItem.memo = memo
             newItem.processingState = .completed
 
-            // 3. 若開啟系統相簿同步，將正反面以同一秒 creationDate 寫入對應相簿 (Task 3.3 & 3.4)
+            // 3. 若開啟系統相簿同步，依每張拍立得各自指派的 targetMember 分別寫入對應成員相簿 (Task 3.3 & 3.4)
             if autoSyncToPhotos {
                 let syncDate = newItem.displayDate
-                let albumName = selectedMember?.stageName ?? "ChekiLens"
-                let folderName = selectedMember?.group?.name
+                let albumName = targetMember?.stageName ?? "ChekiLens"
+                let folderName = targetMember?.group?.name
                 if let album = try? await PhotoLibraryManager.shared.getOrCreateAlbum(
                     albumName: albumName,
                     inFolder: folderName
@@ -1341,7 +1791,7 @@ struct BatchPairingView: View {
 
 // MARK: - Preview
 
-#Preview("04. 批次配對工作台 (Apple HIG Native)") {
+#Preview("04. 批次配對工作台 (格狀撲克牌展開 + 多人歸檔)") {
     BatchPairingView()
         .modelContainer(try! ModelContainerProvider.preview(withSampleData: true))
 }
