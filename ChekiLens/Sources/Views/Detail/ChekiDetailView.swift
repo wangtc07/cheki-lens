@@ -74,29 +74,40 @@ struct ChekiDetailView: View {
 
     var body: some View {
         ZStack {
-            // 全黑沉浸式背景（符合 Apple Photos 單張檢視暗色模式）
+            // 1. 全黑沉浸式背景（符合 Apple Photos 單張檢視暗色模式）
             Color.black
                 .ignoresSafeArea()
 
-            // 主拍立得卡片檢視區（支援 3D Y 軸翻轉、雙指縮放、上滑呼出 Info、左右滑動切換）
-            mainCardViewport
+            // 2. 主拍立得卡片檢視區（直接套用 .ignoresSafeArea() 於 GeometryReader，確保全顯示時 100% 填滿全畫面）
+            GeometryReader { fullScreenGeo in
+                let isLandscape = fullScreenGeo.size.width > fullScreenGeo.size.height
+                mainCardViewport(
+                    fullScreenSize: fullScreenGeo.size,
+                    isLandscape: isLandscape
+                )
+            }
+            .ignoresSafeArea()
 
-            // 頂部與底部懸浮控制介面（點擊畫面可隱藏進入全螢幕沉浸模式）
+            // 3. 頂部與底部懸浮控制介面（點擊畫面可隱藏進入全螢幕沉浸模式）
             if !isChromeHidden {
-                VStack(spacing: 0) {
-                    topOverlayNavigationBar
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                GeometryReader { overlayGeo in
+                    let isLandscape = overlayGeo.size.width > overlayGeo.size.height
+                    VStack(spacing: 0) {
+                        topOverlayNavigationBar(isLandscape: isLandscape)
+                            .transition(.move(edge: .top).combined(with: .opacity))
 
-                    Spacer()
+                        Spacer(minLength: 0)
 
-                    if !hasSeenDetailCoachMark {
-                        detailCoachMarkBanner
-                            .padding(.bottom, 8)
-                            .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                        if !hasSeenDetailCoachMark && !isLandscape {
+                            detailCoachMarkBanner
+                                .padding(.bottom, 6)
+                                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                        }
+
+                        bottomControlsStack(isLandscape: isLandscape, containerWidth: overlayGeo.size.width)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-
-                    bottomControlsStack
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .frame(width: overlayGeo.size.width, height: overlayGeo.size.height)
                 }
             }
 
@@ -109,7 +120,7 @@ struct ChekiDetailView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .background(.ultraThinMaterial, in: Capsule())
-                        .padding(.bottom, 145)
+                        .padding(.bottom, 90)
                 }
                 .transition(.opacity)
             }
@@ -171,16 +182,19 @@ struct ChekiDetailView: View {
 
     // MARK: - 1. 頂部懸浮導覽列與「日期時間藥丸」 (Apple iOS 18 Photos Header)
 
-    private var topOverlayNavigationBar: some View {
-        HStack(alignment: .center, spacing: 12) {
+    private func topOverlayNavigationBar(isLandscape: Bool) -> some View {
+        let buttonSize: CGFloat = isLandscape ? 30 : 36
+        let iconSize: CGFloat = isLandscape ? 13 : 15.5
+
+        return HStack(alignment: .center, spacing: 10) {
             // 左側：圓形毛玻璃返回按鈕
             Button {
                 dismiss()
             } label: {
                 Image(systemName: "chevron.backward")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: iconSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
+                    .frame(width: buttonSize, height: buttonSize)
                     .background(.ultraThinMaterial, in: Circle())
             }
             .accessibilityLabel("返回相簿")
@@ -191,9 +205,9 @@ struct ChekiDetailView: View {
             Button {
                 showingInfoSheet = true
             } label: {
-                VStack(spacing: 1) {
+                VStack(spacing: isLandscape ? 0 : 1) {
                     Text(Self.datePillPrimaryString(from: currentItem.displayDate))
-                        .font(.system(size: 13.5, weight: .bold))
+                        .font(.system(size: isLandscape ? 11.5 : 13, weight: .bold))
                         .foregroundStyle(.white)
 
                     HStack(spacing: 4) {
@@ -201,20 +215,20 @@ struct ChekiDetailView: View {
                         if let memberName = currentItem.idolMember?.stageName {
                             Text("·")
                             Image(systemName: "person.fill")
-                                .font(.system(size: 9))
+                                .font(.system(size: 8))
                             Text(memberName)
                                 .lineLimit(1)
                         } else if currentItem.ocrDate != nil {
                             Text("· OCR")
                         }
                     }
-                    .font(.system(size: 10.5, weight: .medium))
+                    .font(.system(size: isLandscape ? 9 : 10.5, weight: .medium))
                     .foregroundStyle(.white.opacity(0.75))
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 5)
+                .padding(.horizontal, isLandscape ? 12 : 18)
+                .padding(.vertical, isLandscape ? 2.5 : 5)
                 .background(.ultraThinMaterial, in: Capsule())
-                .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
+                .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 3)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("檢視拍攝日期與時間資訊")
@@ -315,208 +329,224 @@ struct ChekiDetailView: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: iconSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
+                    .frame(width: buttonSize, height: buttonSize)
                     .background(.ultraThinMaterial, in: Circle())
             }
             .accessibilityLabel("更多操作選單")
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
+        .padding(.top, isLandscape ? 4 : 8)
+        .padding(.bottom, isLandscape ? 2 : 8)
         .environment(\.colorScheme, .dark)
     }
 
     // MARK: - 2. 中央拍立得檢視與 3D Y 軸翻轉動畫 (3D Y-Axis Flip Viewport)
 
-    private var mainCardViewport: some View {
-        GeometryReader { geo in
-            ZStack {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isChromeHidden.toggle()
-                        }
-                    }
+    private func mainCardViewport(fullScreenSize: CGSize, isLandscape: Bool) -> some View {
+        // 計算卡片實際可用尺寸：
+        // - 全螢幕隱藏工具列 (isChromeHidden == true) 時：0 邊距，100% 填滿全螢幕高度與寬度
+        // - 顯示工具列時：橫向緊湊預留上下工具列空間，確保拍立得依然保持最大化尺寸
+        let topInset: CGFloat = isChromeHidden ? 0 : (isLandscape ? 42 : 98)
+        let bottomInset: CGFloat = isChromeHidden ? 0 : (isLandscape ? 58 : 138)
+        let horizontalInset: CGFloat = isChromeHidden ? 0 : (isLandscape ? 20 : 18)
 
-                VStack(spacing: 14) {
-                    // 3D 翻轉容器
-                    ZStack(alignment: .topTrailing) {
-                        Group {
-                            if !isShowingBack {
-                                frontCardFace(maxSize: geo.size)
-                            } else {
-                                backCardFace(maxSize: geo.size)
-                                    // 背面翻轉 180 度後需鏡像回正，確保手寫文字與圖片方向正確不顛倒
-                                    .rotation3DEffect(
-                                        .degrees(180),
-                                        axis: (x: 0, y: 1, z: 0)
-                                    )
-                            }
-                        }
-                        .rotation3DEffect(
-                            .degrees(isShowingBack ? 180 : 0),
-                            axis: (x: 0, y: 1, z: 0),
-                            perspective: 0.42
-                        )
+        let availableSize = CGSize(
+            width: max(120, fullScreenSize.width - horizontalInset * 2),
+            height: max(120, fullScreenSize.height - topInset - bottomInset)
+        )
 
-                        // 右上角浮動正反面 3D 翻轉徽章 (仿照 iOS 18 照片右上角 Live / 空間相片膠囊)
-                        if !isChromeHidden {
-                            Button {
-                                trigger3DFlip()
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "rectangle.portrait.rotate")
-                                        .font(.system(size: 11, weight: .semibold))
-                                    Text(isShowingBack ? "背面 · 手寫" : (currentItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面"))
-                                        .font(.system(size: 11, weight: .semibold))
-                                }
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(.black.opacity(0.62), in: Capsule())
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .padding(12)
-                        }
+        return ZStack {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isChromeHidden.toggle()
                     }
-                    .scaleEffect(zoomScale * activePinchScale)
-                    .shadow(color: .black.opacity(0.75), radius: 28, x: 0, y: 14)
-                    .onTapGesture(count: 2) {
-                        if zoomScale > 1.05 {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                zoomScale = 1.0
-                            }
-                        } else {
-                            trigger3DFlip()
-                        }
-                    }
-                    .onTapGesture(count: 1) {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isChromeHidden.toggle()
-                        }
-                    }
-                    .gesture(cardMagnifyGesture)
-                    .gesture(cardDragAndSwipeGesture)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, isChromeHidden ? 16 : 64)
-                .padding(.bottom, isChromeHidden ? 16 : 148)
+
+            Group {
+                if !isShowingBack {
+                    frontCardFace(availableSize: availableSize)
+                } else {
+                    backCardFace(availableSize: availableSize)
+                        // 背面翻轉 180 度後需鏡像回正，確保手寫文字與圖片方向正確不顛倒
+                        .rotation3DEffect(
+                            .degrees(180),
+                            axis: (x: 0, y: 1, z: 0)
+                        )
+                }
             }
+            .overlay(alignment: .topTrailing) {
+                // 右上角浮動正反面 3D 翻轉徽章（緊貼拍立得卡片右上角，不漂浮於黑底空白處）
+                if !isChromeHidden {
+                    Button {
+                        trigger3DFlip()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "rectangle.portrait.rotate")
+                                .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
+                            Text(isShowingBack ? "背面 · 手寫" : (currentItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面"))
+                                .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, isLandscape ? 7 : 9)
+                        .padding(.vertical, isLandscape ? 3 : 4.5)
+                        .background(.black.opacity(0.62), in: Capsule())
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(isLandscape ? 6 : 8)
+                }
+            }
+            .rotation3DEffect(
+                .degrees(isShowingBack ? 180 : 0),
+                axis: (x: 0, y: 1, z: 0),
+                perspective: 0.42
+            )
+            .scaleEffect(zoomScale * activePinchScale)
+            .shadow(color: .black.opacity(0.75), radius: 24, x: 0, y: 12)
+            .onTapGesture(count: 2) {
+                if zoomScale > 1.05 {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        zoomScale = 1.0
+                    }
+                } else {
+                    trigger3DFlip()
+                }
+            }
+            .onTapGesture(count: 1) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isChromeHidden.toggle()
+                }
+            }
+            .gesture(cardMagnifyGesture)
+            .gesture(cardDragAndSwipeGesture)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, topInset)
+            .padding(.bottom, bottomInset)
+            .animation(.easeInOut(duration: 0.2), value: isChromeHidden)
         }
     }
 
+    private func fittedCardSize(for imageSize: CGSize, in availableSize: CGSize) -> CGSize {
+        guard imageSize.width > 0, imageSize.height > 0 else {
+            return CGSize(width: min(availableSize.width, 300), height: min(availableSize.height, 460))
+        }
+        let scale = min(availableSize.width / imageSize.width, availableSize.height / imageSize.height)
+        return CGSize(
+            width: max(80, imageSize.width * scale),
+            height: max(80, imageSize.height * scale)
+        )
+    }
+
     @ViewBuilder
-    private func frontCardFace(maxSize: CGSize) -> some View {
+    private func frontCardFace(availableSize: CGSize) -> some View {
         let insetScale = CGFloat(1.0 - currentItem.borderInsetRatio * 1.4)
         if let data = currentItem.frontImageData,
            let uiImage = UIImage(data: data) {
+            let cardSize = fittedCardSize(for: uiImage.size, in: availableSize)
             Image(uiImage: uiImage)
                 .resizable()
-                .scaledToFit()
+                .scaledToFill()
                 .scaleEffect(insetScale)
-                .frame(
-                    maxWidth: min(maxSize.width - 36, 360),
-                    maxHeight: min(maxSize.height - 220, 560)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(width: cardSize.width, height: cardSize.height)
+                .clipShape(RoundedRectangle(cornerRadius: isChromeHidden ? 6 : 10, style: .continuous))
         } else {
             placeholderCardFace(
                 title: "尚無正面影像",
                 subtitle: "此拍立得尚未儲存正面照片",
-                maxSize: maxSize
+                availableSize: availableSize
             )
         }
     }
 
     @ViewBuilder
-    private func backCardFace(maxSize: CGSize) -> some View {
+    private func backCardFace(availableSize: CGSize) -> some View {
         if let backData = currentItem.backImageData,
            let uiImage = UIImage(data: backData) {
+            let cardSize = fittedCardSize(for: uiImage.size, in: availableSize)
             Image(uiImage: uiImage)
                 .resizable()
-                .scaledToFit()
-                .frame(
-                    maxWidth: min(maxSize.width - 36, 360),
-                    maxHeight: min(maxSize.height - 220, 560)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .scaledToFill()
+                .frame(width: cardSize.width, height: cardSize.height)
+                .clipShape(RoundedRectangle(cornerRadius: isChromeHidden ? 6 : 10, style: .continuous))
         } else {
             // 若此張拍立得尚無背面，提供原生引導卡直接補上背面或產生測試手寫背面
-            VStack(spacing: 16) {
+            VStack(spacing: 14) {
                 Image(systemName: "rectangle.portrait.on.rectangle.portrait.angled")
-                    .font(.system(size: 42, weight: .light))
+                    .font(.system(size: 36, weight: .light))
                     .foregroundStyle(.white.opacity(0.75))
 
-                VStack(spacing: 6) {
+                VStack(spacing: 5) {
                     Text("尚未綁定背面手寫照片")
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
 
-                    Text("可從系統相簿選取此張拍立得的背面照片，或一鍵產生測試手寫簽名背面體驗 3D 翻轉。")
-                        .font(.caption)
+                    Text("可從系統相簿選取背面照片，或一鍵產生測試手寫簽名背面。")
+                        .font(.caption2)
                         .foregroundStyle(.white.opacity(0.68))
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, 16)
                 }
 
-                VStack(spacing: 10) {
+                VStack(spacing: 8) {
                     Button {
                         isShowingBacksidePicker = true
                     } label: {
                         Label("從相簿選取背面照片", systemImage: "photo.badge.plus")
-                            .font(.subheadline.weight(.semibold))
+                            .font(.caption.weight(.semibold))
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
 
                     Button {
                         generateSampleBacksideForCurrentItem()
                     } label: {
                         Label("產生測試手寫簽名背面", systemImage: "scribble.variable")
-                            .font(.subheadline.weight(.medium))
+                            .font(.caption.weight(.medium))
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .tint(.white)
                 }
-                .padding(.horizontal, 28)
+                .padding(.horizontal, 20)
             }
             .frame(
-                width: min(maxSize.width - 48, 310),
-                height: min(maxSize.height - 250, 470)
+                width: min(availableSize.width, min(availableSize.height * 0.65, 290)),
+                height: min(availableSize.height, 440)
             )
-            .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(.white.opacity(0.15), lineWidth: 1)
             )
         }
     }
 
-    private func placeholderCardFace(title: String, subtitle: String, maxSize: CGSize) -> some View {
+    private func placeholderCardFace(title: String, subtitle: String, availableSize: CGSize) -> some View {
         VStack(spacing: 12) {
             Image(systemName: "photo")
-                .font(.system(size: 44, weight: .light))
+                .font(.system(size: 38, weight: .light))
                 .foregroundStyle(.white.opacity(0.6))
             Text(title)
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white)
             Text(subtitle)
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.white.opacity(0.6))
         }
         .frame(
-            width: min(maxSize.width - 48, 300),
-            height: min(maxSize.height - 250, 460)
+            width: min(availableSize.width, min(availableSize.height * 0.65, 280)),
+            height: min(availableSize.height, 420)
         )
-        .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - 3. 初次檢視亮點提示 (Spotlight Coach Mark)
@@ -550,22 +580,22 @@ struct ChekiDetailView: View {
 
     // MARK: - 4. 底部縮圖膠卷 (Filmstrip Scrubber) + 5 大標準工具列按鈕
 
-    private var bottomControlsStack: some View {
-        VStack(spacing: 10) {
+    private func bottomControlsStack(isLandscape: Bool, containerWidth: CGFloat) -> some View {
+        VStack(spacing: isLandscape ? 2 : 8) {
             // 底部縮圖膠卷 (Filmstrip Scrubber)
-            filmstripScrubberBar
+            filmstripScrubberBar(isLandscape: isLandscape, containerWidth: containerWidth)
 
             // Apple Photos 標準 5 大工具列按鈕（分享、愛心、ℹ️、調整、垃圾桶）
-            standardFiveIconToolbar
+            standardFiveIconToolbar(isLandscape: isLandscape)
         }
-        .padding(.top, 10)
-        .padding(.bottom, 8)
+        .padding(.top, isLandscape ? 2 : 8)
+        .padding(.bottom, isLandscape ? 0 : 6)
         .background(
             LinearGradient(
                 colors: [
                     .black.opacity(0.0),
-                    .black.opacity(0.75),
-                    .black.opacity(0.94)
+                    .black.opacity(0.68),
+                    .black.opacity(0.90)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -575,10 +605,15 @@ struct ChekiDetailView: View {
         .environment(\.colorScheme, .dark)
     }
 
-    private var filmstripScrubberBar: some View {
-        ScrollViewReader { proxy in
+    private func filmstripScrubberBar(isLandscape: Bool, containerWidth: CGFloat) -> some View {
+        let currentWidth: CGFloat = isLandscape ? 16 : 26
+        let currentHeight: CGFloat = isLandscape ? 22 : 36
+        let normalWidth: CGFloat = isLandscape ? 12 : 19
+        let normalHeight: CGFloat = isLandscape ? 16.5 : 26
+
+        return ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .center, spacing: 5) {
+                HStack(alignment: .center, spacing: isLandscape ? 3 : 4.5) {
                     ForEach(filmstripItems) { stripItem in
                         let isCurrent = (stripItem.id == currentItem.id)
                         Button {
@@ -597,44 +632,39 @@ struct ChekiDetailView: View {
                                         .resizable()
                                         .scaledToFill()
                                         .frame(
-                                            width: isCurrent ? 34 : 25,
-                                            height: isCurrent ? 46 : 36
+                                            width: isCurrent ? currentWidth : normalWidth,
+                                            height: isCurrent ? currentHeight : normalHeight
                                         )
-                                        .clipShape(RoundedRectangle(cornerRadius: isCurrent ? 4 : 3, style: .continuous))
+                                        .clipShape(RoundedRectangle(cornerRadius: isCurrent ? 2.5 : 2, style: .continuous))
                                 } else {
-                                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    RoundedRectangle(cornerRadius: 2, style: .continuous)
                                         .fill(Color(white: 0.25))
                                         .frame(
-                                            width: isCurrent ? 34 : 25,
-                                            height: isCurrent ? 46 : 36
+                                            width: isCurrent ? currentWidth : normalWidth,
+                                            height: isCurrent ? currentHeight : normalHeight
                                         )
                                 }
 
                                 if stripItem.hasBothSides && isCurrent {
                                     Circle()
                                         .fill(Color.blue)
-                                        .frame(width: 6, height: 6)
-                                        .padding(2)
+                                        .frame(width: isLandscape ? 4 : 5, height: isLandscape ? 4 : 5)
+                                        .padding(1)
                                 }
                             }
                             .overlay(
-                                RoundedRectangle(cornerRadius: isCurrent ? 4 : 3, style: .continuous)
-                                    .strokeBorder(.white, lineWidth: isCurrent ? 2.0 : 0.0)
+                                RoundedRectangle(cornerRadius: isCurrent ? 2.5 : 2, style: .continuous)
+                                    .strokeBorder(.white, lineWidth: isCurrent ? (isLandscape ? 1.2 : 1.6) : 0.0)
                             )
-                            .opacity(isCurrent ? 1.0 : 0.58)
-                            .shadow(
-                                color: isCurrent ? .white.opacity(0.28) : .clear,
-                                radius: 6,
-                                x: 0,
-                                y: 0
-                            )
+                            .opacity(isCurrent ? 1.0 : 0.56)
                         }
                         .buttonStyle(.plain)
                         .id(stripItem.id)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 16)
+                .padding(.vertical, isLandscape ? 1 : 3)
+                .frame(minWidth: containerWidth)
             }
             .onAppear {
                 proxy.scrollTo(currentItem.id, anchor: .center)
@@ -648,15 +678,18 @@ struct ChekiDetailView: View {
         }
     }
 
-    private var standardFiveIconToolbar: some View {
-        HStack(spacing: 0) {
+    private func standardFiveIconToolbar(isLandscape: Bool) -> some View {
+        let iconFontSize: CGFloat = isLandscape ? 13.5 : 18
+        let buttonHeight: CGFloat = isLandscape ? 22 : 36
+
+        return HStack(spacing: 0) {
             // 1. 分享 (Share)
             Button {
                 shareCurrentItem()
             } label: {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 20, weight: .medium))
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .font(.system(size: iconFontSize, weight: .medium))
+                    .frame(maxWidth: .infinity, minHeight: buttonHeight)
             }
             .accessibilityLabel("分享拍立得")
 
@@ -665,10 +698,10 @@ struct ChekiDetailView: View {
                 toggleFavorite()
             } label: {
                 Image(systemName: isFavorite ? "heart.fill" : "heart")
-                    .font(.system(size: 20, weight: .medium))
+                    .font(.system(size: iconFontSize, weight: .medium))
                     .foregroundStyle(isFavorite ? .pink : .white)
                     .symbolEffect(.bounce, value: isFavorite)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: buttonHeight)
             }
             .accessibilityLabel(isFavorite ? "取消最愛" : "加入最愛")
 
@@ -679,16 +712,16 @@ struct ChekiDetailView: View {
             } label: {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: showingInfoSheet ? "info.circle.fill" : "info.circle")
-                        .font(.system(size: 20, weight: .medium))
+                        .font(.system(size: iconFontSize, weight: .medium))
 
                     if let note = currentItem.memo?.noteText, !note.isEmpty {
                         Circle()
                             .fill(Color.cyan)
-                            .frame(width: 7, height: 7)
-                            .offset(x: 3, y: -2)
+                            .frame(width: isLandscape ? 4.5 : 6, height: isLandscape ? 4.5 : 6)
+                            .offset(x: 2.5, y: -1.5)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: buttonHeight)
             }
             .accessibilityLabel("檢視資訊與特典會備忘")
 
@@ -697,9 +730,9 @@ struct ChekiDetailView: View {
                 showingAdjustmentSheet = true
             } label: {
                 Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 20, weight: .medium))
+                    .font(.system(size: iconFontSize, weight: .medium))
                     .foregroundStyle(abs(currentItem.borderInsetRatio) > 0.001 ? .yellow : .white)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: buttonHeight)
             }
             .accessibilityLabel("調整拍立得邊界與比例")
 
@@ -708,13 +741,14 @@ struct ChekiDetailView: View {
                 showDeleteConfirm = true
             } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 20, weight: .medium))
+                    .font(.system(size: iconFontSize, weight: .medium))
                     .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: buttonHeight)
             }
             .accessibilityLabel("刪除拍立得")
         }
         .foregroundStyle(.white)
+        .frame(maxWidth: isLandscape ? 260 : 420)
         .padding(.horizontal, 12)
     }
 
