@@ -106,6 +106,8 @@ struct BatchPairingView: View {
     @State private var processedCount: Int = 0
     @State private var totalToProcess: Int = 0
     @State private var hasInitialized: Bool = false
+    @State private var isUsingSimulatedSample: Bool = false
+    @State private var systemPhotoSeedAlertMessage: String? = nil
 
     init(
         initialPickerItems: [PhotosPickerItem] = [],
@@ -186,9 +188,22 @@ struct BatchPairingView: View {
 
                         Menu {
                             Button {
+                                Task {
+                                    do {
+                                        let count = try await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: true)
+                                        systemPhotoSeedAlertMessage = "已成功將 \(count) 張測試拍立得（含正常正反面、雙正面防呆案例、正反顛倒案例）寫入 iOS 系統相簿 (Photos.app)。\n\n現在可點選上方「＋」直接從系統相簿勾選這 8 張相片進行匯入測試！"
+                                    } catch {
+                                        systemPhotoSeedAlertMessage = error.localizedDescription
+                                    }
+                                }
+                            } label: {
+                                Label("寫入 8 張測試相片至系統相簿 (Photos.app)", systemImage: "photo.badge.plus")
+                            }
+
+                            Button {
                                 loadSimulatedBatchSample()
                             } label: {
-                                Label("載入 8 張測試照片組（含雙正面警示）", systemImage: "sparkles.rectangle.stack")
+                                Label("載入 8 張內建測試組（含雙正面警示）", systemImage: "sparkles.rectangle.stack")
                             }
 
                             if totalWarningCount > 0 {
@@ -208,6 +223,7 @@ struct BatchPairingView: View {
                                         allPhotos.removeAll()
                                         slots.removeAll()
                                         selectedFirstSlotID = nil
+                                        isUsingSimulatedSample = false
                                     }
                                 } label: {
                                     Label("清空工作台", systemImage: "trash")
@@ -230,6 +246,19 @@ struct BatchPairingView: View {
                     batchProgressOverlay
                 }
             }
+            .alert(
+                "iOS 系統相簿測試相片",
+                isPresented: Binding(
+                    get: { systemPhotoSeedAlertMessage != nil },
+                    set: { if !$0 { systemPhotoSeedAlertMessage = nil } }
+                )
+            ) {
+                Button("好", role: .cancel) {
+                    systemPhotoSeedAlertMessage = nil
+                }
+            } message: {
+                Text(systemPhotoSeedAlertMessage ?? "")
+            }
             .task {
                 guard !hasInitialized else { return }
                 hasInitialized = true
@@ -237,6 +266,7 @@ struct BatchPairingView: View {
                     selectedMember = defaultMember ?? idolMembers.first
                 }
                 if !initialPickerItems.isEmpty {
+                    isUsingSimulatedSample = false
                     await appendPickerItems(initialPickerItems)
                 } else {
                     // 若未帶入系統相簿照片，預設載入 8 張豐富測試資料（涵蓋正反配對、雙正面防呆警示、順序顛倒）
@@ -247,7 +277,14 @@ struct BatchPairingView: View {
                 guard !newItems.isEmpty else { return }
                 let itemsToLoad = newItems
                 additionalPickerItems = []
-                Task { await appendPickerItems(itemsToLoad) }
+                Task {
+                    if isUsingSimulatedSample {
+                        allPhotos.removeAll()
+                        slots.removeAll()
+                        isUsingSimulatedSample = false
+                    }
+                    await appendPickerItems(itemsToLoad)
+                }
             }
             .onChange(of: pairingMode) { _, newMode in
                 withAnimation(.snappy(duration: 0.25)) {
@@ -1096,6 +1133,7 @@ struct BatchPairingView: View {
         }
 
         withAnimation(.snappy(duration: 0.25)) {
+            isUsingSimulatedSample = true
             allPhotos = generated
             pairingMode = .autoPair
             applyPairingMode(.autoPair)

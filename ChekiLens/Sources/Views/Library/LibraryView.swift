@@ -40,6 +40,7 @@ struct LibraryView: View {
     @State private var showingSettingsSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
     @State private var showingBatchPairingSheet: Bool = false
+    @State private var systemPhotoSeedAlertMessage: String? = nil
 
     // 排序與篩選
     @State private var sortAscending: Bool = false
@@ -167,6 +168,24 @@ struct LibraryView: View {
             .navigationDestination(for: ChekiItem.self) { item in
                 ChekiDetailView(item: item)
             }
+            .alert(
+                "iOS 系統相簿測試相片",
+                isPresented: Binding(
+                    get: { systemPhotoSeedAlertMessage != nil },
+                    set: { if !$0 { systemPhotoSeedAlertMessage = nil } }
+                )
+            ) {
+                Button("好", role: .cancel) {
+                    systemPhotoSeedAlertMessage = nil
+                }
+            } message: {
+                Text(systemPhotoSeedAlertMessage ?? "")
+            }
+            .task {
+                #if DEBUG
+                _ = try? await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: false)
+                #endif
+            }
         }
     }
 
@@ -277,6 +296,19 @@ struct LibraryView: View {
                                 showingBatchPairingSheet = true
                             } label: {
                                 Label("批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
+                            }
+
+                            Button {
+                                Task {
+                                    do {
+                                        let count = try await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: true)
+                                        systemPhotoSeedAlertMessage = "已成功將 \(count) 張測試拍立得（含正常正反面、雙正面防呆案例、正反顛倒案例）寫入 iOS 系統相簿 (Photos.app)。\n\n現在請點選右上角「＋」從系統相簿選取相片，即可實測 Task 4.4 批次配對！"
+                                    } catch {
+                                        systemPhotoSeedAlertMessage = error.localizedDescription
+                                    }
+                                }
+                            } label: {
+                                Label("寫入 8 張測試相片至系統相簿 (Photos.app)", systemImage: "photo.badge.plus")
                             }
 
                             Button {
