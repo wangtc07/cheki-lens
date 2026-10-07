@@ -209,28 +209,34 @@ struct LibraryView: View {
 
             HStack(spacing: 8) {
                 if isSelectionMode {
-                    Button(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選") {
+                    Button {
                         if selectedItemIDs.count == displayedItems.count {
                             selectedItemIDs.removeAll()
                         } else {
                             selectedItemIDs = Set(displayedItems.map(\.persistentModelID))
                         }
+                    } label: {
+                        Text(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.blue)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
+                            .background(.ultraThinMaterial, in: Capsule())
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 12)
-                    .frame(height: 36)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .buttonStyle(.plain)
                 } else {
                     Button {
                         showingCameraScanner = true
                     } label: {
                         Image(systemName: "camera.fill")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.blue)
                             .frame(width: 36, height: 36)
                             .background(.ultraThinMaterial, in: Circle())
                     }
+                    .buttonStyle(.plain)
+                    .fixedSize()
                     .accessibilityLabel("開啟相機拍攝拍立得")
 
                     PhotosPicker(
@@ -241,10 +247,12 @@ struct LibraryView: View {
                     ) {
                         Image(systemName: "plus")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.blue)
                             .frame(width: 36, height: 36)
                             .background(.ultraThinMaterial, in: Circle())
                     }
+                    .buttonStyle(.plain)
+                    .fixedSize()
                     .accessibilityLabel("匯入拍立得照片（進入配對工作台）")
                     .onChange(of: selectedPhotos) { _, newItems in
                         guard !newItems.isEmpty else { return }
@@ -328,16 +336,17 @@ struct LibraryView: View {
                             Button {
                                 showingSettingsSheet = true
                             } label: {
-                                Label("設定", systemImage: "gearshape")
+                                Label("設定（自動邊界微調）", systemImage: "gearshape")
                             }
                         }
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.blue)
                             .frame(width: 36, height: 36)
                             .background(.ultraThinMaterial, in: Circle())
                     }
+                    .fixedSize()
                     .accessibilityLabel("篩選與更多設定")
                 }
 
@@ -352,11 +361,16 @@ struct LibraryView: View {
                     } label: {
                         Text(isSelectionMode ? "完成" : "選取")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.blue)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 14)
                             .frame(height: 36)
                             .background(.ultraThinMaterial, in: Capsule())
                     }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .layoutPriority(1)
+                    .accessibilityLabel(isSelectionMode ? "完成選取" : "選取拍立得")
                 }
             }
         }
@@ -1206,7 +1220,7 @@ struct AlbumHeroDetailView: View {
                         Button {
                             showingSettingsSheet = true
                         } label: {
-                            Label("設定", systemImage: "gearshape")
+                            Label("設定（自動邊界微調）", systemImage: "gearshape")
                         }
                     } label: {
                         Image(systemName: "ellipsis")
@@ -1215,6 +1229,7 @@ struct AlbumHeroDetailView: View {
                             .frame(width: 34, height: 34)
                             .background(.ultraThinMaterial, in: Circle())
                     }
+                    .fixedSize()
 
                     if !displayedItems.isEmpty {
                         Button {
@@ -1228,10 +1243,14 @@ struct AlbumHeroDetailView: View {
                             Text(isSelectionMode ? "完成" : "選取")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white)
+                                .fixedSize(horizontal: true, vertical: false)
                                 .padding(.horizontal, 14)
                                 .frame(height: 34)
                                 .background(.ultraThinMaterial, in: Capsule())
                         }
+                        .buttonStyle(.plain)
+                        .fixedSize()
+                        .layoutPriority(1)
                     }
                 }
             }
@@ -1758,18 +1777,33 @@ private enum VisionPhotoProcessor {
     static func process(_ item: ChekiItem, image: UIImage) async {
         guard let cgImage = image.cgImage else { return }
         let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let insetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
 
         do {
             let manager = VisionManager()
             let detection = try await manager.detectQuad(in: cgImage, imageSize: imageSize)
+            let adjustedCorners = await manager.applyBorderInset(
+                corners: detection.corners,
+                imageSize: imageSize,
+                ratio: insetRatio
+            )
+            let adjustedDetection = DetectionResult(
+                corners: adjustedCorners,
+                method: detection.method,
+                confidence: detection.confidence,
+                imageSize: imageSize
+            )
             let cropResult = try await manager.perspectiveCorrect(
                 image: cgImage,
-                corners: detection.corners,
-                detection: detection,
+                corners: adjustedCorners,
+                detection: adjustedDetection,
                 format: .auto
             )
             await MainActor.run {
+                item.originalFrontImageData = image.jpegData(compressionQuality: 0.92)
                 item.frontImageData = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92)
+                item.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imageSize)
+                item.borderInsetRatio = insetRatio
                 item.processingState = .completed
             }
         } catch {

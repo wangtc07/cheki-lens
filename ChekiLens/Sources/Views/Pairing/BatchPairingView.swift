@@ -147,6 +147,7 @@ struct BatchPairingView: View {
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
     @AppStorage("hasSeenBatchPairingCoachMark") private var hasSeenCoachMark: Bool = false
     @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = false
+    @AppStorage("defaultBorderInsetPercentage") private var defaultBorderInsetPercentage: Double = 0.0
 
     let initialPickerItems: [PhotosPickerItem]
     let defaultMember: IdolMember?
@@ -1967,6 +1968,7 @@ struct BatchPairingView: View {
 
         let visionManager = VisionManager()
         let chekiFormat = Self.toChekiFilmFormat(selectedFilmFormat)
+        let defaultInsetRatio = defaultBorderInsetPercentage / 100.0
 
         for photoID in targetIDs {
             guard let photo = findPhoto(by: photoID),
@@ -1978,28 +1980,34 @@ struct BatchPairingView: View {
             let (side, note) = await Self.classifyPhotoSide(cgImage: cgImage)
             updatePhotoSide(id: photoID, side: side, note: note)
 
-            // Step 2: 背景偵測拍立得邊界 + 透視拉直預裁切 + 日期 OCR
+            // Step 2: 背景偵測拍立得邊界 + 套用設定邊界微調 + 透視拉直預裁切 + 日期 OCR
             let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
             var croppedData: Data? = nil
             var croppedUI: UIImage? = nil
             var cornersJSON: String? = nil
             var ocrDate: Date? = nil
 
-            if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: imgSize),
-               let cropRes = try? await visionManager.perspectiveCorrect(
-                   image: cgImage,
-                   corners: detection.corners,
-                   detection: detection,
-                   format: chekiFormat
-               ) {
-                let uiImg = UIImage(cgImage: cropRes.cgImage)
-                croppedUI = uiImg
-                croppedData = uiImg.jpegData(compressionQuality: 0.92)
-                cornersJSON = ChekiItem.encodeNormalizedCorners(detection.corners, imageSize: imgSize)
+            if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: imgSize) {
+                let adjustedCorners = await visionManager.applyBorderInset(
+                    corners: detection.corners,
+                    imageSize: imgSize,
+                    ratio: defaultInsetRatio
+                )
+                if let cropRes = try? await visionManager.perspectiveCorrect(
+                    image: cgImage,
+                    corners: adjustedCorners,
+                    detection: detection,
+                    format: chekiFormat
+                ) {
+                    let uiImg = UIImage(cgImage: cropRes.cgImage)
+                    croppedUI = uiImg
+                    croppedData = uiImg.jpegData(compressionQuality: 0.92)
+                    cornersJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imgSize)
 
-                if side != .likelyBack,
-                   let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
-                    ocrDate = ocrRes.date
+                    if side != .likelyBack,
+                       let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
+                        ocrDate = ocrRes.date
+                    }
                 }
             } else if side != .likelyBack {
                 if let ocrRes = await visionManager.recognizeDate(from: cgImage) {
@@ -2314,6 +2322,7 @@ struct BatchPairingView: View {
 
         let visionManager = VisionManager()
         let chekiFormat = Self.toChekiFilmFormat(selectedFilmFormat)
+        let defaultInsetRatio = defaultBorderInsetPercentage / 100.0
         let baseTimestamp = Date()
 
         for (index, slot) in slots.enumerated() {
@@ -2329,6 +2338,7 @@ struct BatchPairingView: View {
                 capturedAt: itemTimestamp,
                 filmFormat: selectedFilmFormat,
                 detectedAspectRatio: selectedFilmFormat == .auto ? FilmFormat.mini.aspectRatio : selectedFilmFormat.aspectRatio,
+                borderInsetRatio: defaultInsetRatio,
                 processingState: .detecting,
                 idolMember: targetMember
             )
@@ -2344,24 +2354,30 @@ struct BatchPairingView: View {
                 newItem.perspectivePointsJSON = slot.frontPhoto.normalizedCornersJSON
                 newItem.ocrDate = slot.frontPhoto.detectedOCRDate
             } else if let frontCG = slot.frontPhoto.uiImage.cgImage {
-                // 若使用者在背景偵測尚未跑完前就按下歸檔，則即時補跑該張照片
+                // 若使用者在背景偵測尚未跑完前就按下歸檔，則即時補跑該張照片（含設定邊界微調）
                 let imgSize = CGSize(width: frontCG.width, height: frontCG.height)
-                if let detection = try? await visionManager.detectQuad(in: frontCG, imageSize: imgSize),
-                   let cropRes = try? await visionManager.perspectiveCorrect(
-                       image: frontCG,
-                       corners: detection.corners,
-                       detection: detection,
-                       format: chekiFormat
-                   ) {
-                    let croppedUI = UIImage(cgImage: cropRes.cgImage)
-                    finalFrontUIImage = croppedUI
-                    if let jpeg = croppedUI.jpegData(compressionQuality: 0.92) {
-                        newItem.frontImageData = jpeg
-                    }
-                    newItem.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(detection.corners, imageSize: imgSize)
-                    newItem.detectionMethod = .visionNative
-                    if let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
-                        newItem.ocrDate = ocrRes.date
+                if let detection = try? await visionManager.detectQuad(in: frontCG, imageSize: imgSize) {
+                    let adjustedCorners = await visionManager.applyBorderInset(
+                        corners: detection.corners,
+                        imageSize: imgSize,
+                        ratio: defaultInsetRatio
+                    )
+                    if let cropRes = try? await visionManager.perspectiveCorrect(
+                        image: frontCG,
+                        corners: adjustedCorners,
+                        detection: detection,
+                        format: chekiFormat
+                    ) {
+                        let croppedUI = UIImage(cgImage: cropRes.cgImage)
+                        finalFrontUIImage = croppedUI
+                        if let jpeg = croppedUI.jpegData(compressionQuality: 0.92) {
+                            newItem.frontImageData = jpeg
+                        }
+                        newItem.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imgSize)
+                        newItem.detectionMethod = .visionNative
+                        if let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
+                            newItem.ocrDate = ocrRes.date
+                        }
                     }
                 } else {
                     if let ocrRes = await visionManager.recognizeDate(from: frontCG) {
@@ -2380,19 +2396,25 @@ struct BatchPairingView: View {
                     newItem.backPerspectivePointsJSON = backPhoto.normalizedCornersJSON
                 } else if let backCG = backPhoto.uiImage.cgImage {
                     let backSize = CGSize(width: backCG.width, height: backCG.height)
-                    if let backDetection = try? await visionManager.detectQuad(in: backCG, imageSize: backSize),
-                       let backCrop = try? await visionManager.perspectiveCorrect(
-                           image: backCG,
-                           corners: backDetection.corners,
-                           detection: backDetection,
-                           format: chekiFormat
-                       ) {
-                        let croppedBackUI = UIImage(cgImage: backCrop.cgImage)
-                        finalBackUIImage = croppedBackUI
-                        if let jpeg = croppedBackUI.jpegData(compressionQuality: 0.92) {
-                            newItem.backImageData = jpeg
+                    if let backDetection = try? await visionManager.detectQuad(in: backCG, imageSize: backSize) {
+                        let adjustedBackCorners = await visionManager.applyBorderInset(
+                            corners: backDetection.corners,
+                            imageSize: backSize,
+                            ratio: defaultInsetRatio
+                        )
+                        if let backCrop = try? await visionManager.perspectiveCorrect(
+                            image: backCG,
+                            corners: adjustedBackCorners,
+                            detection: backDetection,
+                            format: chekiFormat
+                        ) {
+                            let croppedBackUI = UIImage(cgImage: backCrop.cgImage)
+                            finalBackUIImage = croppedBackUI
+                            if let jpeg = croppedBackUI.jpegData(compressionQuality: 0.92) {
+                                newItem.backImageData = jpeg
+                            }
+                            newItem.backPerspectivePointsJSON = ChekiItem.encodeNormalizedCorners(adjustedBackCorners, imageSize: backSize)
                         }
-                        newItem.backPerspectivePointsJSON = ChekiItem.encodeNormalizedCorners(backDetection.corners, imageSize: backSize)
                     }
                 }
             }

@@ -23,12 +23,13 @@ extension VisionManager {
         image: CGImage,
         corners: [CGPoint],
         detection: DetectionResult,
-        format: ChekiFilmFormat
+        format: ChekiFilmFormat,
+        preserveCornerOrder: Bool = false
     ) throws -> CropResult {
         let imgH = CGFloat(image.height)
 
-        // 四角点を正順（TL, TR, BR, BL）に並び替え
-        let ordered = VisionManager.orderPoints(corners)
+        // 四角点を正順（TL, TR, BR, BL）に並び替え（手動四頂點編輯器則直接保留 [TL, TR, BR, BL] 索引順序）
+        let ordered = preserveCornerOrder ? corners : VisionManager.orderPoints(corners)
         guard ordered.count == 4 else { throw VisionError.perspectiveCorrectionFailed }
 
         let tl = ordered[0], tr = ordered[1], br = ordered[2], bl = ordered[3]

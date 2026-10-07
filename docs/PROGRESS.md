@@ -9,8 +9,8 @@
 
 * **最後更新時間**：2026-10-08
 * **當前所屬階段**：Phase 4 — UI 介面開發（嚴格遵循 Apple HIG 原生 iOS 17/18 SwiftUI 與 Apple 相簿 / 相機設計規範）
-* **當前進行中任務**：已完成 **Task 4.4 / Task 4.5**（`BatchPairingView.swift` 於進入配對工作台時即在背景預先執行拍立得四頂點邊界偵測、透視預裁切與手寫日期 OCR，即時更新卡片裁切預覽並在按下歸檔時秒速寫入；`ChekiDetailView.swift` 新增 `ChekiQuadCropEditorView` 全螢幕手動四頂點透視裁切與雙指縮放編輯器）
-* **最新穩定 Git Commit**：feat(Pairing): 匯入工作台頁面時即在背景預先偵測拍立得邊界、更新預裁切預覽並加速歸檔
+* **當前進行中任務**：已完成 **Task 4.4 / Task 4.5**（`ChekiDetailView.swift` 四頂點放大鏡新增高對比中心十字準星 `+`、`LibraryView.swift` 修正右上角「選取」按鈕標示、將預設「邊界微調 (Inset / Outset)」整合至 `SettingsView.swift` 並在自動判斷拍立得邊界時自動套用調整）
+* **最新穩定 Git Commit**：feat(Crop & Settings): 放大鏡加上中心十字標記、修復首頁右上選取按鈕標示、將邊界微調整合至設定並於自動偵測邊界時套用
 * **下一動執行指示**：執行 **Task 4.6** 實作上滑資訊與備忘面板（`ChekiInfoView.swift`）
 
 ---

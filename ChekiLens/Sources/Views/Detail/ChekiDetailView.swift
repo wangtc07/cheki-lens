@@ -966,16 +966,23 @@ struct ChekiDetailView: View {
         if let cgImage = normalized.cgImage {
             let size = CGSize(width: cgImage.width, height: cgImage.height)
             let visionManager = VisionManager()
-            if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: size),
-               let cropResult = try? await visionManager.perspectiveCorrect(
-                   image: cgImage,
-                   corners: detection.corners,
-                   detection: detection,
-                   format: .auto
-               ),
-               let croppedJPEG = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92) {
-                finalData = croppedJPEG
-                encodedCorners = ChekiItem.encodeNormalizedCorners(detection.corners, imageSize: size)
+            let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
+            if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: size) {
+                let adjustedCorners = await visionManager.applyBorderInset(
+                    corners: detection.corners,
+                    imageSize: size,
+                    ratio: defaultInsetRatio
+                )
+                if let cropResult = try? await visionManager.perspectiveCorrect(
+                    image: cgImage,
+                    corners: adjustedCorners,
+                    detection: detection,
+                    format: .auto
+                ),
+                let croppedJPEG = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92) {
+                    finalData = croppedJPEG
+                    encodedCorners = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: size)
+                }
             }
         }
 
@@ -1165,11 +1172,12 @@ private struct ChekiQuadCropEditorView: View {
     @State private var panOffset: CGSize = .zero
     @State private var activePanDelta: CGSize = .zero
 
-    // 相紙比例與邊界微調
+    // 相紙比例與設定邊界微調
+    @AppStorage("defaultBorderInsetPercentage") private var defaultBorderInsetPercentage: Double = 0.0
     @State private var selectedFormat: FilmFormat
-    @State private var borderInsetPercentage: Double
     @State private var isProcessingCrop: Bool = false
     @State private var statusBannerText: String? = nil
+    @State private var showingSettingsSheet: Bool = false
 
     private let cornerNames = ["左上", "右上", "右下", "左下"]
 
@@ -1185,7 +1193,6 @@ private struct ChekiQuadCropEditorView: View {
         self.onAppliedToast = onAppliedToast
         _editingBackside = State(initialValue: initialEditingBackside && item.hasBothSides)
         _selectedFormat = State(initialValue: item.filmFormat)
-        _borderInsetPercentage = State(initialValue: item.borderInsetRatio * 100.0)
     }
 
     private var effectiveZoom: CGFloat {
@@ -1200,7 +1207,6 @@ private struct ChekiQuadCropEditorView: View {
                 return true
             }
         }
-        if abs(borderInsetPercentage - item.borderInsetRatio * 100.0) > 0.05 { return true }
         if selectedFormat != item.filmFormat { return true }
         return false
     }
@@ -1238,6 +1244,9 @@ private struct ChekiQuadCropEditorView: View {
         }
         .preferredColorScheme(.dark)
         .statusBarHidden(true)
+        .sheet(isPresented: $showingSettingsSheet) {
+            SettingsView()
+        }
         .onAppear {
             loadSourceImageAndCorners(forBackside: editingBackside)
         }
@@ -1268,7 +1277,6 @@ private struct ChekiQuadCropEditorView: View {
                 withAnimation(.snappy(duration: 0.24)) {
                     resetCornersToInitial()
                     resetZoomAndPan()
-                    borderInsetPercentage = 0.0
                 }
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
             } label: {
@@ -1508,25 +1516,6 @@ private struct ChekiQuadCropEditorView: View {
                 style: StrokeStyle(lineWidth: 0.85)
             )
 
-            // 邊界微調預覽虛線（當 borderInsetPercentage != 0 時顯示向內/向外偏移預覽框）
-            if abs(borderInsetPercentage) > 0.05 {
-                let insetCorners = Self.insetPolygonPoints(
-                    screenCorners,
-                    ratio: CGFloat(borderInsetPercentage / 100.0)
-                )
-                Path { path in
-                    path.move(to: insetCorners[0])
-                    path.addLine(to: insetCorners[1])
-                    path.addLine(to: insetCorners[2])
-                    path.addLine(to: insetCorners[3])
-                    path.closeSubpath()
-                }
-                .stroke(
-                    Color.yellow.opacity(0.85),
-                    style: StrokeStyle(lineWidth: 1.3, dash: [5, 4])
-                )
-            }
-
             // 四頂點實線主外框
             Path { path in
                 path.move(to: screenCorners[0])
@@ -1585,8 +1574,6 @@ private struct ChekiQuadCropEditorView: View {
                     normalizedCorners[index] = clamped
                 }
                 .onEnded { _ in
-                    // 確保四個頂點維持 [TL, TR, BR, BL] 拓撲順序避免自交翻轉
-                    normalizedCorners = VisionManager.orderPoints(normalizedCorners)
                     activeDraggingCornerIndex = nil
                     UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
                 }
@@ -1594,7 +1581,7 @@ private struct ChekiQuadCropEditorView: View {
         .accessibilityLabel("移動\(cornerNames[index])頂點")
     }
 
-    // MARK: - 頂點局部放大鏡 (Magnifying Loupe)
+    // MARK: - 頂點局部放大鏡 (Magnifying Loupe + 中心十字準星)
 
     private func vertexLoupeView(
         uiImage: UIImage,
@@ -1602,52 +1589,87 @@ private struct ChekiQuadCropEditorView: View {
         cornerIndex: Int,
         viewportSize: CGSize
     ) -> some View {
-        let loupeDiameter: CGFloat = 104
+        let loupeDiameter: CGFloat = 108
         let zoomFactor: CGFloat = 2.8
         let displayedW = loupeDiameter * zoomFactor
         let displayedH = displayedW * (uiImage.size.height / max(1, uiImage.size.width))
         let offsetX = (0.5 - normalizedPoint.x) * displayedW
         let offsetY = (0.5 - normalizedPoint.y) * displayedH
+        let center = loupeDiameter / 2.0
+        let armLength: CGFloat = 18.0
 
         return VStack {
             HStack {
                 if cornerIndex == 0 || cornerIndex == 3 {
                     Spacer()
                 }
-                ZStack {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: displayedW, height: displayedH)
-                        .offset(x: offsetX, y: offsetY)
 
-                    // 十字準星
-                    Path { path in
-                        path.move(to: CGPoint(x: loupeDiameter / 2, y: 0))
-                        path.addLine(to: CGPoint(x: loupeDiameter / 2, y: loupeDiameter))
-                        path.move(to: CGPoint(x: 0, y: loupeDiameter / 2))
-                        path.addLine(to: CGPoint(x: loupeDiameter, y: loupeDiameter / 2))
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: displayedW, height: displayedH)
+                    .offset(x: offsetX, y: offsetY)
+                    .frame(width: loupeDiameter, height: loupeDiameter)
+                    .background(Color.black)
+                    .clipShape(Circle())
+                    .overlay {
+                        // 放大鏡中心標記（十字準星 + 黑色高對比描邊，確保在白邊/深色背景皆清晰可見）
+                        ZStack {
+                            // 全幅細輔助十字線
+                            Path { path in
+                                path.move(to: CGPoint(x: center, y: 0))
+                                path.addLine(to: CGPoint(x: center, y: loupeDiameter))
+                                path.move(to: CGPoint(x: 0, y: center))
+                                path.addLine(to: CGPoint(x: loupeDiameter, y: center))
+                            }
+                            .stroke(Color.white.opacity(0.32), lineWidth: 0.75)
+
+                            // 中心十字準星深色外框襯底（在拍立得白邊上提供高對比）
+                            Path { path in
+                                path.move(to: CGPoint(x: center - armLength, y: center))
+                                path.addLine(to: CGPoint(x: center + armLength, y: center))
+                                path.move(to: CGPoint(x: center, y: center - armLength))
+                                path.addLine(to: CGPoint(x: center, y: center + armLength))
+                            }
+                            .stroke(Color.black.opacity(0.78), style: StrokeStyle(lineWidth: 3.4, lineCap: .round))
+
+                            // 中心十字準星亮黃色主線 (+)
+                            Path { path in
+                                path.move(to: CGPoint(x: center - armLength, y: center))
+                                path.addLine(to: CGPoint(x: center + armLength, y: center))
+                                path.move(to: CGPoint(x: center, y: center - armLength))
+                                path.addLine(to: CGPoint(x: center, y: center + armLength))
+                            }
+                            .stroke(Color.yellow, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+
+                            // 中心精準定位小圓環
+                            Circle()
+                                .strokeBorder(Color.black.opacity(0.75), lineWidth: 2.2)
+                                .frame(width: 7, height: 7)
+
+                            Circle()
+                                .strokeBorder(Color.yellow, lineWidth: 1.2)
+                                .frame(width: 7, height: 7)
+                        }
+                        .frame(width: loupeDiameter, height: loupeDiameter)
+                        .clipShape(Circle())
                     }
-                    .stroke(Color.yellow.opacity(0.9), lineWidth: 1.1)
-                }
-                .frame(width: loupeDiameter, height: loupeDiameter)
-                .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .strokeBorder(Color.yellow, lineWidth: 2.5)
-                )
-                .overlay(alignment: .bottom) {
-                    Text(cornerNames[cornerIndex])
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(Color.yellow, in: Capsule())
-                        .offset(y: 8)
-                }
-                .shadow(color: .black.opacity(0.65), radius: 10, y: 4)
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.yellow, lineWidth: 2.5)
+                    )
+                    .overlay(alignment: .bottom) {
+                        Text(cornerNames[cornerIndex])
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.yellow, in: Capsule())
+                            .offset(y: 8)
+                    }
+                    .shadow(color: .black.opacity(0.65), radius: 10, y: 4)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
 
                 if cornerIndex == 1 || cornerIndex == 2 {
                     Spacer()
@@ -1655,47 +1677,14 @@ private struct ChekiQuadCropEditorView: View {
             }
             Spacer()
         }
+        .allowsHitTesting(false)
     }
 
-    // MARK: - 3. 底部 Apple Photos 風格控制面板（邊界刻度尺 + 自動偵測/旋轉 + 相紙比例膠囊）
+    // MARK: - 3. 底部 Apple Photos 風格控制面板（相紙比例膠囊 + 自動吸附/旋轉/展開/設定）
 
     private var bottomAdjustmentToolbar: some View {
-        VStack(spacing: 14) {
-            // (A) 邊界微調偏移刻度滑桿 (-3.0% ~ +3.0%)，模仿 Apple Photos 角度刻度尺
-            VStack(spacing: 6) {
-                HStack {
-                    Text("邊界微調 (Inset / Outset)")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.65))
-                    Spacer()
-                    Text(String(format: "%+.1f%%", borderInsetPercentage))
-                        .font(.caption.monospacedDigit().weight(.bold))
-                        .foregroundStyle(abs(borderInsetPercentage) > 0.05 ? .yellow : .white.opacity(0.75))
-                }
-                .padding(.horizontal, 24)
-
-                ZStack {
-                    // 刻度線視覺裝飾
-                    HStack(spacing: 6) {
-                        ForEach(-15...15, id: \.self) { tick in
-                            Rectangle()
-                                .fill(
-                                    tick == 0
-                                        ? Color.yellow
-                                        : (tick % 5 == 0 ? Color.white.opacity(0.55) : Color.white.opacity(0.24))
-                                )
-                                .frame(width: tick == 0 ? 2.0 : 1.0, height: tick % 5 == 0 ? 12 : 7)
-                        }
-                    }
-                    .allowsHitTesting(false)
-
-                    Slider(value: $borderInsetPercentage, in: -3.0...3.0, step: 0.5)
-                        .tint(.yellow)
-                        .padding(.horizontal, 24)
-                }
-            }
-
-            // (B) 相紙比例鎖定膠囊列 (Auto / Mini / Square / Wide)
+        VStack(spacing: 12) {
+            // (A) 相紙比例鎖定膠囊列 (Auto / Mini / Square / Wide)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(FilmFormat.allCases, id: \.self) { format in
@@ -1726,8 +1715,8 @@ private struct ChekiQuadCropEditorView: View {
                 .padding(.horizontal, 20)
             }
 
-            // (C) 底部工具動作列（Vision 自動吸附 / 旋轉 90° / 滿版頂點 / 補拍背面）
-            HStack(spacing: 22) {
+            // (B) 底部工具動作列（Vision 自動吸附 / 旋轉 90° / 展開四點 / 邊界設定 / 補拍背面）
+            HStack(spacing: 16) {
                 Button {
                     Task {
                         await runAutoDetectCorners()
@@ -1735,7 +1724,7 @@ private struct ChekiQuadCropEditorView: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "viewfinder.rectangular")
-                            .font(.system(size: 19, weight: .semibold))
+                            .font(.system(size: 18, weight: .semibold))
                         Text("自動吸附")
                             .font(.system(size: 10, weight: .semibold))
                     }
@@ -1748,7 +1737,7 @@ private struct ChekiQuadCropEditorView: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "rotate.left")
-                            .font(.system(size: 19, weight: .semibold))
+                            .font(.system(size: 18, weight: .semibold))
                         Text("旋轉 90°")
                             .font(.system(size: 10, weight: .semibold))
                     }
@@ -1764,13 +1753,12 @@ private struct ChekiQuadCropEditorView: View {
                             CGPoint(x: 0.96, y: 0.96),
                             CGPoint(x: 0.04, y: 0.96)
                         ]
-                        borderInsetPercentage = 0.0
                     }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 17, weight: .semibold))
                         Text("展開四點")
                             .font(.system(size: 10, weight: .semibold))
                     }
@@ -1779,11 +1767,24 @@ private struct ChekiQuadCropEditorView: View {
                 }
 
                 Button {
+                    showingSettingsSheet = true
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "slider.horizontal.below.square.and.square.filled")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text(abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "邊界 %+.1f%%", defaultBorderInsetPercentage) : "邊界設定")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(abs(defaultBorderInsetPercentage) > 0.05 ? .yellow : .white)
+                    .frame(maxWidth: .infinity)
+                }
+
+                Button {
                     onRequestBacksidePicker()
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: "photo.badge.plus")
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 17, weight: .semibold))
                         Text(item.hasBothSides ? "換背面圖" : "補背面圖")
                             .font(.system(size: 10, weight: .semibold))
                     }
@@ -1791,7 +1792,7 @@ private struct ChekiQuadCropEditorView: View {
                     .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 14)
             .padding(.bottom, 12)
         }
         .padding(.top, 10)
@@ -1912,12 +1913,18 @@ private struct ChekiQuadCropEditorView: View {
         guard let uiImage = sourceUIImage, let cgImage = uiImage.cgImage else { return }
         let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
         let visionManager = VisionManager()
+        let defaultInsetRatio = defaultBorderInsetPercentage / 100.0
 
         if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: imgSize),
            detection.corners.count == 4 {
             let ordered = VisionManager.orderPoints(detection.corners)
+            let adjusted = await visionManager.applyBorderInset(
+                corners: ordered,
+                imageSize: imgSize,
+                ratio: defaultInsetRatio
+            )
             withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
-                normalizedCorners = ordered.map { pt in
+                normalizedCorners = adjusted.map { pt in
                     CGPoint(
                         x: min(max(pt.x / max(1, imgSize.width), 0.01), 0.99),
                         y: min(max(pt.y / max(1, imgSize.height), 0.01), 0.99)
@@ -1925,10 +1932,27 @@ private struct ChekiQuadCropEditorView: View {
                 }
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            showBanner("已自動吸附拍立得四個頂點")
+            if abs(defaultBorderInsetPercentage) > 0.05 {
+                showBanner(String(format: "已自動吸附頂點（套用邊界微調 %+.1f%%）", defaultBorderInsetPercentage))
+            } else {
+                showBanner("已自動吸附拍立得四個頂點")
+            }
         } else {
+            let basePixels = Self.defaultQuadCorners.map {
+                CGPoint(x: $0.x * imgSize.width, y: $0.y * imgSize.height)
+            }
+            let adjusted = await visionManager.applyBorderInset(
+                corners: basePixels,
+                imageSize: imgSize,
+                ratio: defaultInsetRatio
+            )
             withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
-                normalizedCorners = Self.defaultQuadCorners
+                normalizedCorners = adjusted.map { pt in
+                    CGPoint(
+                        x: min(max(pt.x / max(1, imgSize.width), 0.01), 0.99),
+                        y: min(max(pt.y / max(1, imgSize.height), 0.01), 0.99)
+                    )
+                }
             }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             showBanner("已重設為標準拍立得四頂點範圍")
@@ -1976,18 +2000,13 @@ private struct ChekiQuadCropEditorView: View {
         defer { isProcessingCrop = false }
 
         let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
-        let orderedNorm = VisionManager.orderPoints(normalizedCorners)
-        let pixelCorners = orderedNorm.map { pt in
+        // 保持使用者在畫布上拉動的 [TL, TR, BR, BL] 頂點順序與精確位置
+        let manualNorm = normalizedCorners.count == 4 ? normalizedCorners : Self.defaultQuadCorners
+        let pixelCorners = manualNorm.map { pt in
             CGPoint(x: pt.x * imgSize.width, y: pt.y * imgSize.height)
         }
 
-        let insetRatio = borderInsetPercentage / 100.0
         let visionManager = VisionManager()
-        let adjustedPixelCorners = await visionManager.applyBorderInset(
-            corners: pixelCorners,
-            imageSize: imgSize,
-            ratio: insetRatio
-        )
 
         let chekiFormat: ChekiFilmFormat = {
             switch selectedFormat {
@@ -1999,7 +2018,7 @@ private struct ChekiQuadCropEditorView: View {
         }()
 
         let manualDetection = DetectionResult(
-            corners: adjustedPixelCorners,
+            corners: pixelCorners,
             method: .visionNative,
             confidence: 1.0,
             imageSize: imgSize
@@ -2007,12 +2026,13 @@ private struct ChekiQuadCropEditorView: View {
 
         if let cropResult = try? await visionManager.perspectiveCorrect(
             image: cgImage,
-            corners: adjustedPixelCorners,
+            corners: pixelCorners,
             detection: manualDetection,
-            format: chekiFormat
+            format: chekiFormat,
+            preserveCornerOrder: true
         ),
         let croppedJPEG = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92) {
-            let encodedJSON = ChekiItem.encodeNormalizedCorners(orderedNorm)
+            let encodedJSON = ChekiItem.encodeNormalizedCorners(manualNorm)
             if editingBackside {
                 item.backImageData = croppedJPEG
                 item.backPerspectivePointsJSON = encodedJSON
@@ -2020,7 +2040,7 @@ private struct ChekiQuadCropEditorView: View {
                 item.frontImageData = croppedJPEG
                 item.perspectivePointsJSON = encodedJSON
             }
-            item.borderInsetRatio = insetRatio
+            item.borderInsetRatio = defaultBorderInsetPercentage / 100.0
             item.filmFormat = selectedFormat
             if cropResult.outputSize.width > 0 {
                 item.detectedAspectRatio = Double(cropResult.outputSize.height / cropResult.outputSize.width)

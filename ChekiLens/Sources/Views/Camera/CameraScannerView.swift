@@ -913,12 +913,18 @@ struct CameraScannerView: View {
             return image.jpegData(compressionQuality: 0.92)
         }
         let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
         do {
             let manager = VisionManager()
             let detection = try await manager.detectQuad(in: cgImage, imageSize: imageSize)
+            let adjustedCorners = await manager.applyBorderInset(
+                corners: detection.corners,
+                imageSize: imageSize,
+                ratio: defaultInsetRatio
+            )
             let cropResult = try await manager.perspectiveCorrect(
                 image: cgImage,
-                corners: detection.corners,
+                corners: adjustedCorners,
                 detection: detection,
                 format: .auto
             )
