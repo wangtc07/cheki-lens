@@ -245,11 +245,34 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
                     best.corners = refRes.corners
                 }
                 
+                // 針對滿版塗鴉跨邊 (DSCF0029, DSCF0073, DSCF0012)：
+                // 若 Vision 因彩繪/麥克筆跨邊斷裂僅抓到局部碎片 (< 20% 面積) 或殘留嚴重梯形歪斜 (> 14° 且單點推導無法修復)，
+                // 啟動四周外框 25 射線 RANSAC 直線擬合重構完整相紙外框
+                let canvasArea = Double(imageSize.width * imageSize.height)
+                let bestAreaPct = canvasArea > 0 ? (VisionManager.quadArea(best.corners) / canvasArea) : 0.0
+                let isBogusFragmentOrSkew = bestAreaPct < 0.20 ||
+                    ((refRes.horizontalSkewAngle > 14.0 || refRes.verticalSkewAngle > 14.0) && !refRes.wasRefined)
+                if isBogusFragmentOrSkew,
+                   let outerCorners = VisionManager.detectOuterPerimeterQuad(in: image, imageSize: imageSize) {
+                    best.corners = outerCorners
+                    return best
+                }
+                
                 let r = VisionManager.quadAspectRatio(best.corners)
                 if r >= 1.15 { // 涵蓋 Square (1.19), Wide (1.26), Mini (1.59)
                     return best
                 }
             }
+        }
+        
+        // 若 Layer 1 / 1.5 完全未命中，優先嘗試外框射線 RANSAC 擬合（支援滿版彩繪近拍）
+        if let outerCorners = VisionManager.detectOuterPerimeterQuad(in: image, imageSize: imageSize) {
+            return DetectionResult(
+                corners: outerCorners,
+                method: .visionNative,
+                confidence: 0.92,
+                imageSize: imageSize
+            )
         }
         
         // --- Layer 1.8: Task 2.8.5 YOLO11-Pose Fallback 兜底機制 ---

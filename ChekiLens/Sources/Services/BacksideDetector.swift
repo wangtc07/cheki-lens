@@ -141,6 +141,15 @@ enum BacksideDetector {
             clamp(CGPoint(x: cardLeft, y: cardBot))
         ]
         
+        // 防誤判守門：排除桌角背景中之 instax 底片盒局部文字 (如 DSCF0050, DSCF0059 面積僅 0.3%~0.5%)
+        let canvasArea = Double(w * h)
+        let detectedArea = VisionManager.quadArea(corners)
+        guard canvasArea > 0,
+              detectedArea >= 0.18 * canvasArea,
+              VisionManager.isChekiRatio(corners) else {
+            return nil
+        }
+        
         return BacksideDetectionResult(
             isBackside: true,
             corners: corners,

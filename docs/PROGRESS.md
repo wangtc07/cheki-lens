@@ -8,9 +8,9 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-08
-* **當前所屬階段**：Phase 4 — UI 介面開發（嚴格遵循 Apple HIG 原生 iOS 17/18 SwiftUI 與 Apple 相簿 / 相機設計規範）
-* **當前進行中任務**：已完成 **Task 4.4 / Task 4.5**（`ChekiDetailView.swift` 四頂點放大鏡新增高對比中心十字準星 `+`、`LibraryView.swift` 修正右上角「選取」按鈕標示、將預設「邊界微調 (Inset / Outset)」整合至 `SettingsView.swift` 並在自動判斷拍立得邊界時自動套用調整）
-* **最新穩定 Git Commit**：feat(Crop & Settings): 放大鏡加上中心十字標記、修復首頁右上選取按鈕標示、將邊界微調整合至設定並於自動偵測邊界時套用
+* **當前所屬階段**：Phase 2.9 / Phase 4 — 滿版塗鴉拍立得邊界辨識專項優化（分支 `feat/vision-painted-border-refinement`）與 UI 介面開發
+* **當前進行中任務**：已完成 **滿版塗鴉跨邊拍立得（`DSCF0029.JPG` 等）外框 RANSAC 射線擬合優化與 `TestData/images` 60 張綜合基準測試**（12 張滿版塗鴉正面 + 6 張拍立得反面 + 42 張拍立得正面 = 60/60 100.0% 全數通過，且既有 66 張防跑偏回歸測試 66/66 100.0% 零回退）
+* **最新穩定 Git Commit**：feat(Vision): 優化 DSCF0029 等滿版塗鴉正面邊界偵測並完成 TestData 60 張正反面與塗鴉基準驗證
 * **下一動執行指示**：執行 **Task 4.6** 實作上滑資訊與備忘面板（`ChekiInfoView.swift`）
 
 ---
@@ -184,6 +184,11 @@
   * 建立專屬輸出資料夾 `TestData/benchmark_output_problematic_cases/`，同步導出全量 65 張修復圖供人工驗收
   * 全量 66 張驗證集盲測，確認指標與視覺皆優於 `main` 分支（全量命中 100%，基準 49/49 零漂移，背面 6/6 保持）
   * 建立新舊版本雙向對照導出工具 (`scripts/export_comparison.swift`)，將當前 Commit 與 `ff7d866` 全量成對導出至 `TestData/benchmark_comparison/`（以 `_current.jpg` 與 `_ff7d866.jpg` 後綴區分）方便使用者逐圖比對
+- [x] **Task 2.9.6 (滿版塗鴉跨邊專項優化)**: 實作外框 25 射線 RANSAC 直線擬合與背景盒文字誤判防護 (`VisionManager+Refinement.swift`, `VisionManager.swift`, `BacksideDetector.swift`, `scripts/benchmark_60_painted_and_pairs.swift`)
+  * 切出專項分支 `feat/vision-painted-border-refinement`
+  * 針對 `DSCF0029.JPG`（綠紅 `#` 格紋跨邊彩繪 + 貼紙遮擋內框）、`DSCF0073.JPG`（粗黑麥克筆跨邊）、`DSCF0012.JPG`（粉紅字跨邊）因跨邊筆觸切斷矩形輪廓導致 `VNDetectRectanglesRequest` 僅抓到局部碎片（`14.0%` / `4.1%` 面積）或嚴重梯形歪斜（`26.2°`）之問題，實作 `detectOuterPerimeterQuad`：由畫面四邊向內發射 25 道掃描射線，支援「深色背景階躍」與「陰影溝槽至白邊階躍」雙重邊緣步階檢測，並透過 RANSAC + OLS 直線擬合精準求解相紙四角交點（`DSCF0029.JPG` 由 `14.0%` 碎片還原至 `87.6%` 完整相紙、比例 `1.572`）
+  * 於 `BacksideDetector.swift` 加入面積佔比（`>= 18%`）與拍立得長寬比守門，防止桌角背景之 `instax` 底片盒局部文字（如 `DSCF0050.JPG`、`DSCF0059.JPG`）誤觸發背面分支
+  * 完成 `/Users/tcwang/Documents/ChekiLens/TestData/images` 60 張綜合基準測試（12 張滿版塗鴉正面 + 6 張拍立得反面 + 42 張拍立得正面 = 60/60 100.0% 通過）與既有 66 張防跑偏回歸測試（66/66 100.0% 零回退）
 
 ---
 

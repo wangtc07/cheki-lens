@@ -421,4 +421,228 @@ extension VisionManager {
         
         return snapped
     }
+    
+    // MARK: - Outer Perimeter Ray-Cast Recovery (Painted / Graffiti Border Cheki)
+    
+    /// 針對滿版塗鴉正面（如 DSCF0029 綠紅格紋跨邊彩繪、DSCF0073 粗黑麥克筆跨邊、DSCF0012 粉紅字跨邊）
+    /// 當 Apple Vision 因跨邊筆觸斷裂而僅抓到局部碎片 (< 20% 面積) 或嚴重歪斜梯形 (> 14°) 時，
+    /// 由畫面四邊向內發射 25 道掃描射線，透過 RANSAC + OLS 擬合相紙外框四邊直線並求解交點。
+    static func detectOuterPerimeterQuad(
+        in image: CGImage,
+        imageSize: CGSize
+    ) -> [CGPoint]? {
+        let w = image.width
+        let h = image.height
+        guard w > 200, h > 200,
+              let data = image.dataProvider?.data,
+              let ptr = CFDataGetBytePtr(data) else { return nil }
+        let bpr = image.bytesPerRow
+        let bpp = image.bitsPerPixel / 8
+        
+        func lum(_ x: Int, _ y: Int) -> Double {
+            let cx = max(0, min(w - 1, x))
+            let cy = max(0, min(h - 1, y))
+            let o = cy * bpr + cx * bpp
+            return 0.299 * Double(ptr[o]) + 0.587 * Double(ptr[o + 1]) + 0.114 * Double(ptr[o + 2])
+        }
+        
+        func meanLumX(y: Int, xStart: Int, xEnd: Int) -> Double {
+            let a = min(xStart, xEnd), b = max(xStart, xEnd)
+            guard b >= a else { return 0 }
+            var s = 0.0
+            var cnt = 0
+            for x in stride(from: a, through: b, by: 2) {
+                s += lum(x, y)
+                cnt += 1
+            }
+            return cnt > 0 ? s / Double(cnt) : 0
+        }
+        
+        func meanLumY(x: Int, yStart: Int, yEnd: Int) -> Double {
+            let a = min(yStart, yEnd), b = max(yStart, yEnd)
+            guard b >= a else { return 0 }
+            var s = 0.0
+            var cnt = 0
+            for y in stride(from: a, through: b, by: 2) {
+                s += lum(x, y)
+                cnt += 1
+            }
+            return cnt > 0 ? s / Double(cnt) : 0
+        }
+        
+        let numRays = 25
+        let fracs = (0..<numRays).map { 0.06 + Double($0) * (0.88 / Double(numRays - 1)) }
+        
+        var leftPts: [CGPoint] = []
+        var rightPts: [CGPoint] = []
+        var topPts: [CGPoint] = []
+        var botPts: [CGPoint] = []
+        
+        let maxScanX = Int(Double(w) * 0.22)
+        let maxScanY = Int(Double(h) * 0.22)
+        guard maxScanX > 20, maxScanY > 20 else { return nil }
+        
+        for f in fracs {
+            let y = Int(Double(h) * f)
+            // Left edge: scan from x = 12 to maxScanX
+            for x in 12..<maxScanX {
+                let lOut = lum(x - 4, y)
+                let lIn = lum(x + 4, y)
+                let g = lIn - lOut
+                if g >= 24.0 {
+                    let extMean = meanLumX(y: y, xStart: max(2, x - 20), xEnd: x - 4)
+                    let intMean = meanLumX(y: y, xStart: x + 4, xEnd: min(w - 2, x + 28))
+                    let isDarkBgStep = extMean <= 95.0 && intMean >= 112.0 && (intMean - extMean) >= 35.0
+                    let isShadowGrooveStep = g >= 55.0 && lOut <= 135.0 && intMean >= 175.0 && (intMean - extMean) >= 35.0
+                    if isDarkBgStep || isShadowGrooveStep {
+                        leftPts.append(CGPoint(x: Double(x + 2), y: Double(y)))
+                        break
+                    }
+                }
+            }
+            // Right edge: scan from w - 13 down to w - maxScanX
+            for x in stride(from: w - 13, to: w - maxScanX, by: -1) {
+                let lOut = lum(x + 4, y)
+                let lIn = lum(x - 4, y)
+                let g = lIn - lOut
+                if g >= 24.0 {
+                    let extMean = meanLumX(y: y, xStart: x + 4, xEnd: min(w - 2, x + 20))
+                    let intMean = meanLumX(y: y, xStart: max(2, x - 28), xEnd: x - 4)
+                    let isDarkBgStep = extMean <= 95.0 && intMean >= 112.0 && (intMean - extMean) >= 35.0
+                    let isShadowGrooveStep = g >= 55.0 && lOut <= 135.0 && intMean >= 175.0 && (intMean - extMean) >= 35.0
+                    if isDarkBgStep || isShadowGrooveStep {
+                        rightPts.append(CGPoint(x: Double(x - 2), y: Double(y)))
+                        break
+                    }
+                }
+            }
+            
+            let x = Int(Double(w) * f)
+            // Top edge: scan from y = 12 to maxScanY
+            for yScan in 12..<maxScanY {
+                let lOut = lum(x, yScan - 4)
+                let lIn = lum(x, yScan + 4)
+                let g = lIn - lOut
+                if g >= 24.0 {
+                    let extMean = meanLumY(x: x, yStart: max(2, yScan - 20), yEnd: yScan - 4)
+                    let intMean = meanLumY(x: x, yStart: yScan + 4, yEnd: min(h - 2, yScan + 28))
+                    let isDarkBgStep = extMean <= 95.0 && intMean >= 112.0 && (intMean - extMean) >= 35.0
+                    let isShadowGrooveStep = g >= 55.0 && lOut <= 135.0 && intMean >= 175.0 && (intMean - extMean) >= 35.0
+                    if isDarkBgStep || isShadowGrooveStep {
+                        topPts.append(CGPoint(x: Double(x), y: Double(yScan + 2)))
+                        break
+                    }
+                }
+            }
+            // Bottom edge: scan from h - 13 down to h - maxScanY
+            for yScan in stride(from: h - 13, to: h - maxScanY, by: -1) {
+                let lOut = lum(x, yScan + 4)
+                let lIn = lum(x, yScan - 4)
+                let g = lIn - lOut
+                if g >= 24.0 {
+                    let extMean = meanLumY(x: x, yStart: yScan + 4, yEnd: min(h - 2, yScan + 20))
+                    let intMean = meanLumY(x: x, yStart: max(2, yScan - 28), yEnd: yScan - 4)
+                    let isDarkBgStep = extMean <= 95.0 && intMean >= 112.0 && (intMean - extMean) >= 35.0
+                    let isShadowGrooveStep = g >= 55.0 && lOut <= 135.0 && intMean >= 175.0 && (intMean - extMean) >= 35.0
+                    if isDarkBgStep || isShadowGrooveStep {
+                        botPts.append(CGPoint(x: Double(x), y: Double(yScan - 2)))
+                        break
+                    }
+                }
+            }
+        }
+        
+        struct EdgeLine {
+            let a: Double
+            let b: Double
+            let c: Double
+            let inlierCount: Int
+        }
+        
+        func fitRansacLine(pts: [CGPoint], isHorizontal: Bool, preferOuterSign: Double) -> EdgeLine? {
+            guard pts.count >= 12 else { return nil }
+            var bestInliers: [CGPoint] = []
+            var bestScore = -Double.infinity
+            let tol = 10.0
+            
+            for i in 0..<(pts.count - 1) {
+                for j in (i + 1)..<pts.count {
+                    let p1 = pts[i], p2 = pts[j]
+                    let dx = Double(p2.x - p1.x), dy = Double(p2.y - p1.y)
+                    let span = isHorizontal ? abs(dx) : abs(dy)
+                    guard span >= Double(isHorizontal ? w : h) * 0.12 else { continue }
+                    let slope = isHorizontal ? (dy / dx) : (dx / dy)
+                    guard abs(slope) <= 0.14 else { continue }
+                    
+                    let len = hypot(dx, dy)
+                    let la = -dy / len
+                    let lb = dx / len
+                    let lc = -(la * Double(p1.x) + lb * Double(p1.y))
+                    
+                    let inliers = pts.filter { abs(la * Double($0.x) + lb * Double($0.y) + lc) <= tol }
+                    guard inliers.count >= 12 else { continue }
+                    
+                    let meanCoord = isHorizontal
+                        ? (inliers.reduce(0.0) { $0 + Double($1.y) } / Double(inliers.count))
+                        : (inliers.reduce(0.0) { $0 + Double($1.x) } / Double(inliers.count))
+                    let outerBonus = preferOuterSign * meanCoord * 0.002
+                    let score = Double(inliers.count) * 10.0 + outerBonus
+                    if score > bestScore {
+                        bestScore = score
+                        bestInliers = inliers
+                    }
+                }
+            }
+            
+            guard bestInliers.count >= 12 else { return nil }
+            let n = Double(bestInliers.count)
+            let meanX = bestInliers.reduce(0.0) { $0 + Double($1.x) } / n
+            let meanY = bestInliers.reduce(0.0) { $0 + Double($1.y) } / n
+            var sxx = 0.0, sxy = 0.0, syy = 0.0
+            for pt in bestInliers {
+                let dX = Double(pt.x) - meanX
+                let dY = Double(pt.y) - meanY
+                sxx += dX * dX
+                sxy += dX * dY
+                syy += dY * dY
+            }
+            let angle = 0.5 * atan2(2.0 * sxy, sxx - syy)
+            let la = -sin(angle)
+            let lb = cos(angle)
+            let lc = -(la * meanX + lb * meanY)
+            return EdgeLine(a: la, b: lb, c: lc, inlierCount: bestInliers.count)
+        }
+        
+        guard let topL = fitRansacLine(pts: topPts, isHorizontal: true, preferOuterSign: -1.0),
+              let rightL = fitRansacLine(pts: rightPts, isHorizontal: false, preferOuterSign: 1.0),
+              let botL = fitRansacLine(pts: botPts, isHorizontal: true, preferOuterSign: 1.0),
+              let leftL = fitRansacLine(pts: leftPts, isHorizontal: false, preferOuterSign: -1.0) else {
+            return nil
+        }
+        
+        let lines = [topL, rightL, botL, leftL]
+        var corners: [CGPoint] = []
+        for i in 0..<4 {
+            let l1 = lines[(i + 3) % 4]
+            let l2 = lines[i]
+            let det = l1.a * l2.b - l2.a * l1.b
+            guard abs(det) > 1e-4 else { return nil }
+            let x = (l1.c * l2.b - l2.c * l1.b) / -det
+            let y = (l2.a * l1.c - l1.a * l2.c) / det
+            corners.append(CGPoint(x: max(0.0, min(imageSize.width, x)),
+                                   y: max(0.0, min(imageSize.height, y))))
+        }
+        
+        let ordered = VisionManager.orderPoints(corners)
+        let canvasArea = Double(imageSize.width * imageSize.height)
+        let area = VisionManager.quadArea(ordered)
+        let r = VisionManager.quadAspectRatio(ordered)
+        guard canvasArea > 0,
+              area >= 0.72 * canvasArea,
+              r >= 1.18 && r <= 1.66 else {
+            return nil
+        }
+        
+        return ordered
+    }
 }
