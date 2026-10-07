@@ -22,24 +22,46 @@ enum DetectedPhotoSide: String, Sendable {
     case likelyBack  = "背面"
 }
 
-// MARK: - StagingChekiPhoto (工作台單張相片暫存項目)
+// MARK: - StagingChekiPhoto (工作台單張相片暫存項目 — 支援背景預先偵測拍立得邊界、透視裁切預覽與 OCR)
 
 struct StagingChekiPhoto: Identifiable, Equatable {
     let id: UUID
     /// 原始匯入順序編號（從 1 開始）
     var sequenceNumber: Int
     var title: String
+    /// 原始未裁切圖片資料（供事後進入四頂點手動編輯器時保留完整外圍區域）
     var imageData: Data
     var uiImage: UIImage
     var detectedSide: DetectedPhotoSide
     var detectionNote: String
+
+    /// 背景預先偵測邊界並透視拉直後的圖片資料與預覽圖
+    var croppedImageData: Data? = nil
+    var croppedUIImage: UIImage? = nil
+    /// 背景預先偵測出的正規化四頂點座標 JSON (`[TL, TR, BR, BL]`)
+    var normalizedCornersJSON: String? = nil
+    /// 背景預先辨識出的手寫日期 OCR 結果
+    var detectedOCRDate: Date? = nil
+    /// 是否正在背景執行邊界偵測
+    var isDetectingBoundary: Bool = false
+    /// 是否已完成背景邊界偵測
+    var hasCompletedBoundaryDetection: Bool = false
+
+    /// 工作台卡片優先顯示已裁切預覽圖；若尚在背景偵測中或未偵測到邊框則顯示原圖
+    var displayUIImage: UIImage {
+        croppedUIImage ?? uiImage
+    }
 
     static func == (lhs: StagingChekiPhoto, rhs: StagingChekiPhoto) -> Bool {
         lhs.id == rhs.id &&
         lhs.sequenceNumber == rhs.sequenceNumber &&
         lhs.title == rhs.title &&
         lhs.detectedSide == rhs.detectedSide &&
-        lhs.detectionNote == rhs.detectionNote
+        lhs.detectionNote == rhs.detectionNote &&
+        lhs.isDetectingBoundary == rhs.isDetectingBoundary &&
+        lhs.hasCompletedBoundaryDetection == rhs.hasCompletedBoundaryDetection &&
+        lhs.normalizedCornersJSON == rhs.normalizedCornersJSON &&
+        lhs.croppedImageData?.count == rhs.croppedImageData?.count
     }
 }
 
@@ -191,6 +213,16 @@ struct BatchPairingView: View {
 
     private var totalWarningCount: Int {
         doubleFrontWarningCount + reversedWarningCount
+    }
+
+    /// 已在背景完成拍立得邊界偵測與預裁切的照片數量
+    private var boundaryDetectedPhotoCount: Int {
+        allPhotos.filter(\.hasCompletedBoundaryDetection).count
+    }
+
+    /// 是否所有匯入照片皆已在背景完成拍立得邊界偵測與透視預裁切
+    private var allBoundariesDetected: Bool {
+        !allPhotos.isEmpty && boundaryDetectedPhotoCount == allPhotos.count
     }
 
     /// 上方多層多選成員選擇器目前選中的成員摘要字串
@@ -404,6 +436,11 @@ struct BatchPairingView: View {
                     applyPairingMode(newMode)
                 }
             }
+            .onChange(of: selectedFilmFormat) { _, newFormat in
+                Task {
+                    await reapplyFilmFormatInBackground(newFormat)
+                }
+            }
         }
     }
 
@@ -444,18 +481,23 @@ struct BatchPairingView: View {
                             Text("已勾選 \(selectedSlotIDsForApply.count) / \(slots.count) 張")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(.blue)
-                        } else if isAnalyzingSides {
+                        } else if isAnalyzingSides || !allBoundariesDetected {
                             HStack(spacing: 4) {
                                 ProgressView()
                                     .controlSize(.mini)
-                                Text("Vision 分析中")
+                                Text("背景偵測邊界 (\(boundaryDetectedPhotoCount)/\(allPhotos.count))")
                             }
-                            .font(.caption2)
+                            .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
                         } else {
-                            Text(pairingMode == .singleOnly ? "單張獨立模式" : "正反撲克牌展開")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.tertiary)
+                            HStack(spacing: 3) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.green)
+                                Text("已完成邊界預裁切")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .padding(.horizontal, 4)
@@ -814,9 +856,9 @@ struct BatchPairingView: View {
         backPhoto: StagingChekiPhoto
     ) -> some View {
         ZStack {
-            // 1. 右後扇形展開：背面卡片 (Back Card — 向右旋轉展開如撲克牌)
+            // 1. 右後扇形展開：背面卡片 (Back Card — 向右旋轉展開如撲克牌，優先顯示背景已裁切預覽圖)
             ZStack(alignment: .topTrailing) {
-                Image(uiImage: backPhoto.uiImage)
+                Image(uiImage: backPhoto.displayUIImage)
                     .resizable()
                     .scaledToFill()
                     .frame(width: 90, height: 136)
@@ -844,9 +886,9 @@ struct BatchPairingView: View {
             .rotationEffect(.degrees(11), anchor: .bottom)
             .offset(x: 20, y: 2)
 
-            // 2. 左前扇形展開：正面卡片 (Front Card — 向左微傾疊於前側)
+            // 2. 左前扇形展開：正面卡片 (Front Card — 向左微傾疊於前側，優先顯示背景已裁切預覽圖)
             ZStack(alignment: .topLeading) {
-                Image(uiImage: frontPhoto.uiImage)
+                Image(uiImage: frontPhoto.displayUIImage)
                     .resizable()
                     .scaledToFill()
                     .frame(width: 92, height: 138)
@@ -857,13 +899,21 @@ struct BatchPairingView: View {
                     )
                     .shadow(color: .black.opacity(0.32), radius: 9, x: 4, y: 4)
 
-                Text("正面")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Color.blue.opacity(0.88), in: Capsule())
-                    .padding(5)
+                HStack(spacing: 3) {
+                    Text("正面")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                    if frontPhoto.isDetectingBoundary || backPhoto.isDetectingBoundary {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(.white)
+                            .scaleEffect(0.7)
+                    }
+                }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.blue.opacity(0.88), in: Capsule())
+                .padding(5)
             }
             .rotationEffect(.degrees(-8), anchor: .bottom)
             .offset(x: -16, y: 0)
@@ -974,14 +1024,14 @@ struct BatchPairingView: View {
         }
     }
 
-    /// 單張直立拍立得樣式 (Single Card Stage)
+    /// 單張直立拍立得樣式 (Single Card Stage — 優先顯示背景已裁切預覽圖)
     private func singleCardStageView(
         slot: ChekiPairingSlot,
         photo: StagingChekiPhoto,
         isSelectedFirst: Bool
     ) -> some View {
         ZStack {
-            Image(uiImage: photo.uiImage)
+            Image(uiImage: photo.displayUIImage)
                 .resizable()
                 .scaledToFill()
                 .frame(width: 96, height: 144)
@@ -1007,15 +1057,23 @@ struct BatchPairingView: View {
                     Spacer()
 
                     if !isSelectingPhotosToApply {
-                        Text(photo.detectedSide.rawValue)
-                            .font(.system(size: 9.5, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2.5)
-                            .background(
-                                photo.detectedSide == .likelyBack ? Color.purple.opacity(0.85) : Color.black.opacity(0.58),
-                                in: Capsule()
-                            )
+                        HStack(spacing: 3) {
+                            if photo.isDetectingBoundary {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .tint(.white)
+                                    .scaleEffect(0.7)
+                            }
+                            Text(photo.detectedSide.rawValue)
+                                .font(.system(size: 9.5, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(
+                            photo.detectedSide == .likelyBack ? Color.purple.opacity(0.85) : Color.black.opacity(0.58),
+                            in: Capsule()
+                        )
                     }
                 }
                 .padding(.horizontal, 8)
@@ -1470,15 +1528,26 @@ struct BatchPairingView: View {
                 Button {
                     Task { await executeBatchProcessing() }
                 } label: {
-                    Text("開始處理並歸檔（共 \(slots.count) 張拍立得）")
+                    HStack(spacing: 6) {
+                        if !allBoundariesDetected {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(.white)
+                        }
+                        Text(
+                            allBoundariesDetected
+                                ? "確認歸檔（共 \(slots.count) 張拍立得）"
+                                : "背景偵測邊界中 (\(boundaryDetectedPhotoCount)/\(allPhotos.count)) · 點此歸檔"
+                        )
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8.5)
-                        .background(
-                            (slots.isEmpty || isProcessingBatch) ? Color.blue.opacity(0.4) : Color.blue,
-                            in: Capsule()
-                        )
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8.5)
+                    .background(
+                        (slots.isEmpty || isProcessingBatch) ? Color.blue.opacity(0.4) : Color.blue,
+                        in: Capsule()
+                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(slots.isEmpty || isProcessingBatch)
@@ -1842,7 +1911,7 @@ struct BatchPairingView: View {
         return collected.sorted { $0.sequenceNumber < $1.sequenceNumber }
     }
 
-    // MARK: - 8. 載入 PhotosPicker 相片與 Apple Vision 正反面特徵分析
+    // MARK: - 8. 載入 PhotosPicker 相片與背景預先執行 Vision 正反面分類 + 四頂點邊界偵測 + 透視裁切 + OCR
 
     @MainActor
     private func appendPickerItems(_ pickerItems: [PhotosPickerItem]) async {
@@ -1866,7 +1935,9 @@ struct BatchPairingView: View {
                 imageData: normalizedData,
                 uiImage: normalized,
                 detectedSide: .analyzing,
-                detectionNote: "Vision 分析中…"
+                detectionNote: "Vision 背景偵測邊界中…",
+                isDetectingBoundary: true,
+                hasCompletedBoundaryDetection: false
             )
             if !selectedTargetMembers.isEmpty {
                 photoMemberAssignment[staging.id] = selectedTargetMembers
@@ -1884,17 +1955,118 @@ struct BatchPairingView: View {
         await analyzePhotoSides(for: newlyLoaded.map(\.id))
     }
 
+    /// 在進入工作台頁面時即於背景依序完成：
+    /// 1. 正反面特徵分類 (`classifyPhotoSide`)
+    /// 2. 拍立得四頂點邊界偵測 (`detectQuad`) 與透視拉直預裁切 (`perspectiveCorrect`)
+    /// 3. 手寫日期 OCR (`recognizeDate`)
+    /// 完成後即時更新工作台卡片預覽圖，按「確認歸檔」時可直接秒速寫入無須重複等待
     @MainActor
     private func analyzePhotoSides(for targetIDs: [UUID]) async {
         isAnalyzingSides = true
         defer { isAnalyzingSides = false }
 
+        let visionManager = VisionManager()
+        let chekiFormat = Self.toChekiFilmFormat(selectedFilmFormat)
+
         for photoID in targetIDs {
             guard let photo = findPhoto(by: photoID),
                   let cgImage = photo.uiImage.cgImage else { continue }
 
+            setPhotoDetectingBoundary(id: photoID, isDetecting: true)
+
+            // Step 1: 正反面分類
             let (side, note) = await Self.classifyPhotoSide(cgImage: cgImage)
             updatePhotoSide(id: photoID, side: side, note: note)
+
+            // Step 2: 背景偵測拍立得邊界 + 透視拉直預裁切 + 日期 OCR
+            let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
+            var croppedData: Data? = nil
+            var croppedUI: UIImage? = nil
+            var cornersJSON: String? = nil
+            var ocrDate: Date? = nil
+
+            if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: imgSize),
+               let cropRes = try? await visionManager.perspectiveCorrect(
+                   image: cgImage,
+                   corners: detection.corners,
+                   detection: detection,
+                   format: chekiFormat
+               ) {
+                let uiImg = UIImage(cgImage: cropRes.cgImage)
+                croppedUI = uiImg
+                croppedData = uiImg.jpegData(compressionQuality: 0.92)
+                cornersJSON = ChekiItem.encodeNormalizedCorners(detection.corners, imageSize: imgSize)
+
+                if side != .likelyBack,
+                   let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
+                    ocrDate = ocrRes.date
+                }
+            } else if side != .likelyBack {
+                if let ocrRes = await visionManager.recognizeDate(from: cgImage) {
+                    ocrDate = ocrRes.date
+                }
+            }
+
+            withAnimation(.snappy(duration: 0.22)) {
+                updatePhotoBoundaryResult(
+                    id: photoID,
+                    croppedData: croppedData,
+                    croppedImage: croppedUI,
+                    cornersJSON: cornersJSON,
+                    ocrDate: ocrDate
+                )
+            }
+        }
+    }
+
+    /// 當使用者在工作台上方切換「相紙規格」時，背景利用已偵測到的四頂點座標快速重新套用比例鎖定
+    @MainActor
+    private func reapplyFilmFormatInBackground(_ format: FilmFormat) async {
+        let visionManager = VisionManager()
+        let chekiFormat = Self.toChekiFilmFormat(format)
+
+        for photo in allPhotos {
+            guard let cornersJSON = photo.normalizedCornersJSON,
+                  let normCorners = ChekiItem.decodeNormalizedCorners(from: cornersJSON),
+                  let cgImage = photo.uiImage.cgImage else { continue }
+
+            let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
+            let pixelCorners = normCorners.map { pt in
+                CGPoint(x: pt.x * imgSize.width, y: pt.y * imgSize.height)
+            }
+            let detection = DetectionResult(
+                corners: pixelCorners,
+                method: .visionNative,
+                confidence: 1.0,
+                imageSize: imgSize
+            )
+            if let cropRes = try? await visionManager.perspectiveCorrect(
+                image: cgImage,
+                corners: pixelCorners,
+                detection: detection,
+                format: chekiFormat
+            ) {
+                let uiImg = UIImage(cgImage: cropRes.cgImage)
+                let jpeg = uiImg.jpegData(compressionQuality: 0.92)
+                withAnimation(.snappy(duration: 0.2)) {
+                    updatePhotoBoundaryResult(
+                        id: photo.id,
+                        croppedData: jpeg,
+                        croppedImage: uiImg,
+                        cornersJSON: cornersJSON,
+                        ocrDate: photo.detectedOCRDate
+                    )
+                }
+            }
+        }
+    }
+
+    private static func toChekiFilmFormat(_ format: FilmFormat) -> ChekiFilmFormat {
+        switch format {
+        case .mini: return .mini
+        case .square: return .square
+        case .wide: return .wide
+        case .auto: return .auto
         }
     }
 
@@ -1904,6 +2076,20 @@ struct BatchPairingView: View {
             if let back = slot.backPhoto, back.id == id { return back }
         }
         return allPhotos.first { $0.id == id }
+    }
+
+    private func setPhotoDetectingBoundary(id: UUID, isDetecting: Bool) {
+        if let idx = allPhotos.firstIndex(where: { $0.id == id }) {
+            allPhotos[idx].isDetectingBoundary = isDetecting
+        }
+        for i in slots.indices {
+            if slots[i].frontPhoto.id == id {
+                slots[i].frontPhoto.isDetectingBoundary = isDetecting
+            }
+            if slots[i].backPhoto?.id == id {
+                slots[i].backPhoto?.isDetectingBoundary = isDetecting
+            }
+        }
     }
 
     private func updatePhotoSide(id: UUID, side: DetectedPhotoSide, note: String) {
@@ -1919,6 +2105,41 @@ struct BatchPairingView: View {
             if slots[i].backPhoto?.id == id {
                 slots[i].backPhoto?.detectedSide = side
                 slots[i].backPhoto?.detectionNote = note
+            }
+        }
+    }
+
+    private func updatePhotoBoundaryResult(
+        id: UUID,
+        croppedData: Data?,
+        croppedImage: UIImage?,
+        cornersJSON: String?,
+        ocrDate: Date?
+    ) {
+        if let idx = allPhotos.firstIndex(where: { $0.id == id }) {
+            allPhotos[idx].croppedImageData = croppedData
+            allPhotos[idx].croppedUIImage = croppedImage
+            allPhotos[idx].normalizedCornersJSON = cornersJSON
+            allPhotos[idx].detectedOCRDate = ocrDate
+            allPhotos[idx].isDetectingBoundary = false
+            allPhotos[idx].hasCompletedBoundaryDetection = true
+        }
+        for i in slots.indices {
+            if slots[i].frontPhoto.id == id {
+                slots[i].frontPhoto.croppedImageData = croppedData
+                slots[i].frontPhoto.croppedUIImage = croppedImage
+                slots[i].frontPhoto.normalizedCornersJSON = cornersJSON
+                slots[i].frontPhoto.detectedOCRDate = ocrDate
+                slots[i].frontPhoto.isDetectingBoundary = false
+                slots[i].frontPhoto.hasCompletedBoundaryDetection = true
+            }
+            if slots[i].backPhoto?.id == id {
+                slots[i].backPhoto?.croppedImageData = croppedData
+                slots[i].backPhoto?.croppedUIImage = croppedImage
+                slots[i].backPhoto?.normalizedCornersJSON = cornersJSON
+                slots[i].backPhoto?.detectedOCRDate = ocrDate
+                slots[i].backPhoto?.isDetectingBoundary = false
+                slots[i].backPhoto?.hasCompletedBoundaryDetection = true
             }
         }
     }
@@ -1990,7 +2211,11 @@ struct BatchPairingView: View {
                     imageData: data,
                     uiImage: img,
                     detectedSide: spec.side,
-                    detectionNote: spec.note
+                    detectionNote: spec.note,
+                    croppedImageData: data,
+                    croppedUIImage: img,
+                    isDetectingBoundary: false,
+                    hasCompletedBoundaryDetection: true
                 )
             )
         }
@@ -2077,7 +2302,7 @@ struct BatchPairingView: View {
         }
     }
 
-    // MARK: - 10. 執行批次 Vision 透視拉直、OCR 日期辨識與多人分別歸檔儲存
+    // MARK: - 10. 執行批次歸檔儲存（直接重用背景已完成的邊界預裁切與 OCR 結果，若尚有未完成照片則即時補齊）
 
     @MainActor
     private func executeBatchProcessing() async {
@@ -2088,6 +2313,7 @@ struct BatchPairingView: View {
         defer { isProcessingBatch = false }
 
         let visionManager = VisionManager()
+        let chekiFormat = Self.toChekiFilmFormat(selectedFilmFormat)
         let baseTimestamp = Date()
 
         for (index, slot) in slots.enumerated() {
@@ -2096,8 +2322,8 @@ struct BatchPairingView: View {
             let targetMember = slot.assignedMembers.first
 
             let newItem = ChekiItem(
-                frontImageData: slot.frontPhoto.imageData,
-                backImageData: slot.backPhoto?.imageData,
+                frontImageData: slot.frontPhoto.croppedImageData ?? slot.frontPhoto.imageData,
+                backImageData: slot.backPhoto?.croppedImageData ?? slot.backPhoto?.imageData,
                 originalFrontImageData: slot.frontPhoto.imageData,
                 originalBackImageData: slot.backPhoto?.imageData,
                 capturedAt: itemTimestamp,
@@ -2108,16 +2334,24 @@ struct BatchPairingView: View {
             )
             modelContext.insert(newItem)
 
-            // 1. 正面透視校正 + 手寫日期 OCR
-            var finalFrontUIImage = slot.frontPhoto.uiImage
-            if let frontCG = slot.frontPhoto.uiImage.cgImage {
+            // 1. 正面：優先直接使用背景已完成的邊界裁切與 OCR 結果
+            var finalFrontUIImage = slot.frontPhoto.displayUIImage
+            if slot.frontPhoto.hasCompletedBoundaryDetection {
+                if let preCroppedData = slot.frontPhoto.croppedImageData {
+                    newItem.frontImageData = preCroppedData
+                    newItem.detectionMethod = .visionNative
+                }
+                newItem.perspectivePointsJSON = slot.frontPhoto.normalizedCornersJSON
+                newItem.ocrDate = slot.frontPhoto.detectedOCRDate
+            } else if let frontCG = slot.frontPhoto.uiImage.cgImage {
+                // 若使用者在背景偵測尚未跑完前就按下歸檔，則即時補跑該張照片
                 let imgSize = CGSize(width: frontCG.width, height: frontCG.height)
                 if let detection = try? await visionManager.detectQuad(in: frontCG, imageSize: imgSize),
                    let cropRes = try? await visionManager.perspectiveCorrect(
                        image: frontCG,
                        corners: detection.corners,
                        detection: detection,
-                       format: .auto
+                       format: chekiFormat
                    ) {
                     let croppedUI = UIImage(cgImage: cropRes.cgImage)
                     finalFrontUIImage = croppedUI
@@ -2136,24 +2370,30 @@ struct BatchPairingView: View {
                 }
             }
 
-            // 2. 背面透視校正（若有配對背面）
-            var finalBackUIImage: UIImage? = slot.backPhoto?.uiImage
-            if let backPhoto = slot.backPhoto,
-               let backCG = backPhoto.uiImage.cgImage {
-                let backSize = CGSize(width: backCG.width, height: backCG.height)
-                if let backDetection = try? await visionManager.detectQuad(in: backCG, imageSize: backSize),
-                   let backCrop = try? await visionManager.perspectiveCorrect(
-                       image: backCG,
-                       corners: backDetection.corners,
-                       detection: backDetection,
-                       format: .auto
-                   ) {
-                    let croppedBackUI = UIImage(cgImage: backCrop.cgImage)
-                    finalBackUIImage = croppedBackUI
-                    if let jpeg = croppedBackUI.jpegData(compressionQuality: 0.92) {
-                        newItem.backImageData = jpeg
+            // 2. 背面：優先直接使用背景已完成的邊界裁切結果
+            var finalBackUIImage: UIImage? = slot.backPhoto?.displayUIImage
+            if let backPhoto = slot.backPhoto {
+                if backPhoto.hasCompletedBoundaryDetection {
+                    if let preCroppedBackData = backPhoto.croppedImageData {
+                        newItem.backImageData = preCroppedBackData
                     }
-                    newItem.backPerspectivePointsJSON = ChekiItem.encodeNormalizedCorners(backDetection.corners, imageSize: backSize)
+                    newItem.backPerspectivePointsJSON = backPhoto.normalizedCornersJSON
+                } else if let backCG = backPhoto.uiImage.cgImage {
+                    let backSize = CGSize(width: backCG.width, height: backCG.height)
+                    if let backDetection = try? await visionManager.detectQuad(in: backCG, imageSize: backSize),
+                       let backCrop = try? await visionManager.perspectiveCorrect(
+                           image: backCG,
+                           corners: backDetection.corners,
+                           detection: backDetection,
+                           format: chekiFormat
+                       ) {
+                        let croppedBackUI = UIImage(cgImage: backCrop.cgImage)
+                        finalBackUIImage = croppedBackUI
+                        if let jpeg = croppedBackUI.jpegData(compressionQuality: 0.92) {
+                            newItem.backImageData = jpeg
+                        }
+                        newItem.backPerspectivePointsJSON = ChekiItem.encodeNormalizedCorners(backDetection.corners, imageSize: backSize)
+                    }
                 }
             }
 
