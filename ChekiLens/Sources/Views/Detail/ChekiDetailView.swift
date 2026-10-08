@@ -1117,16 +1117,24 @@ struct ChekiDetailView: View {
     }
 
     private func shareCurrentItem() {
+        let isPro = PhotoLibraryManager.isProLifetimeUnlocked
+        let usedDailyFreeQuota = !isPro && StoreKitManager.shared.consumeDailyFreeQuotaIfAvailable()
+        let shouldSkipWatermark = isPro || usedDailyFreeQuota
+
         var shareItems: [Any] = []
         if let frontData = currentItem.frontImageData,
            let frontUI = UIImage(data: frontData) {
-            shareItems.append(ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: frontUI))
+            shareItems.append(shouldSkipWatermark ? frontUI : ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: frontUI))
         }
         if let backData = currentItem.backImageData,
            let backUI = UIImage(data: backData) {
-            shareItems.append(ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: backUI))
+            shareItems.append(shouldSkipWatermark ? backUI : ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: backUI))
         }
         guard !shareItems.isEmpty else { return }
+
+        if usedDailyFreeQuota {
+            showToast("已使用今日免費無浮水印高畫質額度（今日剩餘 0/1）")
+        }
 
         let activityVC = UIActivityViewController(activityItems: shareItems, applicationActivities: nil)
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,

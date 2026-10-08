@@ -193,11 +193,13 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                // 0. 頂部：ChekiLens Pro 終身買斷尊爵橫幅卡片
-                Section {
-                    proLifetimeBannerCard
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                        .listRowBackground(Color.clear)
+                // 0. 頂部：ChekiLens Pro 終身買斷尊爵橫幅卡片（解鎖後不顯示）
+                if !isProLifetimeUnlocked {
+                    Section {
+                        proLifetimeBannerCard
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowBackground(Color.clear)
+                    }
                 }
 
                 // 1. 第 1 組：相簿雙向同步與時間軸策略 (Photos Sync & Timeline)
@@ -479,6 +481,49 @@ struct SettingsView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
+
+                    #if DEBUG
+                    if isProLifetimeUnlocked {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            StoreKitManager.shared.setProUnlocked(false)
+                            isProLifetimeUnlocked = false
+                        } label: {
+                            HStack {
+                                SettingsRowLabel(
+                                    title: "切換回免費版（開發測試）",
+                                    subtitle: "重新顯示頂部 Pro 卡片與測試免費版浮水印",
+                                    systemImage: "hammer.fill",
+                                    iconColor: .purple
+                                )
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else if StoreKitManager.shared.remainingDailyFreeQuota < StoreKitManager.dailyFreeLimit {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            StoreKitManager.shared.resetDailyFreeQuota()
+                        } label: {
+                            HStack {
+                                SettingsRowLabel(
+                                    title: "重置今日免費 1 張額度（開發測試）",
+                                    subtitle: "目前剩餘 \(StoreKitManager.shared.remainingDailyFreeQuota)/\(StoreKitManager.dailyFreeLimit) 張",
+                                    systemImage: "arrow.counterclockwise.circle.fill",
+                                    iconColor: .purple
+                                )
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    #endif
                 } header: {
                     Text("一般與關於")
                 }
@@ -526,27 +571,28 @@ struct SettingsView: View {
         )
     }
 
-    // MARK: - Pro 終身買斷尊爵橫幅卡片 (對齊 docs/ui/screen_07_settings.html)
+    // MARK: - Pro 終身買斷尊爵橫幅卡片 (對齊 docs/ui/screen_07_settings.html，僅於未解鎖時顯示)
 
     private var proLifetimeBannerCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let remainingQuota = StoreKitManager.shared.remainingDailyFreeQuota
+        let dailyLimit = StoreKitManager.dailyFreeLimit
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: "crown.fill")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(Color(red: 0.65, green: 0.71, blue: 0.99))
-                Text(isProLifetimeUnlocked ? "PRO LIFETIME UNLOCKED" : "PRO LIFETIME")
+                Text("PRO LIFETIME")
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .tracking(0.6)
                     .foregroundStyle(Color(red: 0.65, green: 0.71, blue: 0.99))
                 Spacer()
-                if isProLifetimeUnlocked {
-                    Text("已永久解鎖")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.green.opacity(0.85), in: Capsule())
-                }
+                Text("今日免費無浮水印 \(remainingQuota)/\(dailyLimit)")
+                    .font(.caption2.weight(.bold).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.92))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.16), in: Capsule())
             }
 
             Text("ChekiLens Pro 終身買斷")
@@ -558,40 +604,20 @@ struct SettingsView: View {
                 .foregroundStyle(.white.opacity(0.84))
                 .lineSpacing(2)
 
-            if isProLifetimeUnlocked {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
-                    Text("您已擁有 ChekiLens Pro 終身完整功能授權")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-                    Spacer()
-                    Button("管理") {
-                        showingProPurchaseSheet = true
-                    }
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.white.opacity(0.16), in: Capsule())
-                }
-                .padding(.top, 2)
-            } else {
-                Button {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    showingProPurchaseSheet = true
-                } label: {
-                    Text(StoreKitManager.shared.bannerUnlockButtonTitle)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(Color(red: 0.12, green: 0.11, blue: 0.29))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .shadow(color: .black.opacity(0.22), radius: 8, x: 0, y: 4)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 2)
+            Button {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                showingProPurchaseSheet = true
+            } label: {
+                Text(StoreKitManager.shared.bannerUnlockButtonTitle)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Color(red: 0.12, green: 0.11, blue: 0.29))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .shadow(color: .black.opacity(0.22), radius: 8, x: 0, y: 4)
             }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
         }
         .padding(18)
         .background(

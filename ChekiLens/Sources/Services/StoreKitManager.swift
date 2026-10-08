@@ -13,6 +13,11 @@ final class StoreKitManager {
     /// AppStorage / UserDefaults 共用鍵值（與 `SettingsView`、`PhotoLibraryManager`、`ChekiWatermarkOverlayView` 雙向同步）
     static let proUnlockedStorageKey = "isProLifetimeUnlocked"
 
+    /// Task 5.2：每日免費高畫質無浮水印額度上限（每日 1 張）
+    static let dailyFreeLimit: Int = 1
+    static let dailyQuotaDateStorageKey = "dailyFreeQuotaDateString"
+    static let dailyQuotaUsedCountStorageKey = "dailyFreeQuotaUsedCount"
+
     /// 正式 Non-Consumable 終身買斷商品 ID
     static let proLifetimeProductID = "com.chekilens.pro.lifetime"
 
@@ -40,6 +45,9 @@ final class StoreKitManager {
     /// 目前是否已解鎖 ChekiLens Pro 終身買斷版
     private(set) var isProUnlocked: Bool
 
+    /// 今日已使用的免費高畫質無浮水印額度張數（跨日自動歸零）
+    private(set) var dailyFreeQuotaUsedCount: Int = 0
+
     /// 是否正在載入商品資訊
     private(set) var isLoadingProducts: Bool = false
 
@@ -63,6 +71,8 @@ final class StoreKitManager {
 
     private init() {
         self.isProUnlocked = UserDefaults.standard.bool(forKey: Self.proUnlockedStorageKey)
+        self.dailyFreeQuotaUsedCount = 0
+        self.refreshDailyFreeQuotaIfNeeded()
         self.updatesListenerTask = listenForTransactionUpdates()
     }
 
@@ -71,6 +81,16 @@ final class StoreKitManager {
     }
 
     // MARK: - Computed Helpers
+
+    /// 今日剩餘的免費 4K 高畫質無浮水印額度張數（免費版每日 1 張）
+    var remainingDailyFreeQuota: Int {
+        max(0, Self.dailyFreeLimit - dailyFreeQuotaUsedCount)
+    }
+
+    /// 今日是否仍有免費無浮水印高畫質額度可用
+    var hasDailyFreeQuotaAvailable: Bool {
+        isProUnlocked || remainingDailyFreeQuota > 0
+    }
 
     /// 顯示用在地化價格字串（優先使用 StoreKit 2 `Product.displayPrice`，未連線時回退至 `¥600 / NT$120`）
     var displayPrice: String {
@@ -90,12 +110,72 @@ final class StoreKitManager {
 
     // MARK: - Store Initialization & Product Loading
 
-    /// App 啟動或進入設定頁時呼叫：載入商品並檢查最新有效交易權益
+    /// App 啟動或進入設定頁時呼叫：檢查跨日免費額度、載入商品並檢查最新有效交易權益
     func initializeStore() async {
+        refreshDailyFreeQuotaIfNeeded()
         await refreshPurchasedEntitlements()
         if proProduct == nil {
             await loadProducts()
         }
+    }
+
+    // MARK: - Task 5.2: 每日 1 張 4K 高畫質無浮水印免費額度計數器 (UserDefaults 儲存)
+
+    /// 取得當地時區今日日期字串 (`yyyy-MM-dd`)
+    private static func currentLocalDateKey(for date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    /// 檢查是否跨日：若已進入新的一天則自動將 `UserDefaults` 中的每日免費額度使用次數重置為 0
+    func refreshDailyFreeQuotaIfNeeded(now: Date = Date()) {
+        let todayKey = Self.currentLocalDateKey(for: now)
+        let defaults = UserDefaults.standard
+        let storedDateKey = defaults.string(forKey: Self.dailyQuotaDateStorageKey)
+
+        if storedDateKey != todayKey {
+            defaults.set(todayKey, forKey: Self.dailyQuotaDateStorageKey)
+            defaults.set(0, forKey: Self.dailyQuotaUsedCountStorageKey)
+            dailyFreeQuotaUsedCount = 0
+        } else {
+            let used = max(0, defaults.integer(forKey: Self.dailyQuotaUsedCountStorageKey))
+            dailyFreeQuotaUsedCount = min(Self.dailyFreeLimit, used)
+        }
+    }
+
+    /// 嘗試消耗 1 張今日免費 4K 高畫質無浮水印額度：
+    /// - 若為 Pro 版：不扣額度，直接回傳 `true`。
+    /// - 若為免費版且今日尚有剩餘額度 (`remainingDailyFreeQuota > 0`)：扣除 1 張並寫入 `UserDefaults`，回傳 `true`。
+    /// - 若今日免費額度已用罄：回傳 `false`。
+    @discardableResult
+    func consumeDailyFreeQuotaIfAvailable(now: Date = Date()) -> Bool {
+        refreshDailyFreeQuotaIfNeeded(now: now)
+        if isProUnlocked {
+            return true
+        }
+        guard remainingDailyFreeQuota > 0 else {
+            return false
+        }
+        let nextUsed = dailyFreeQuotaUsedCount + 1
+        dailyFreeQuotaUsedCount = nextUsed
+        let defaults = UserDefaults.standard
+        defaults.set(Self.currentLocalDateKey(for: now), forKey: Self.dailyQuotaDateStorageKey)
+        defaults.set(nextUsed, forKey: Self.dailyQuotaUsedCountStorageKey)
+        logger.info("已消耗 1 張今日免費高畫質無浮水印額度（今日已用 \(nextUsed)/\(Self.dailyFreeLimit)）")
+        return true
+    }
+
+    /// 重置今日免費額度（供開發測試驗證）
+    func resetDailyFreeQuota() {
+        let todayKey = Self.currentLocalDateKey()
+        let defaults = UserDefaults.standard
+        defaults.set(todayKey, forKey: Self.dailyQuotaDateStorageKey)
+        defaults.set(0, forKey: Self.dailyQuotaUsedCountStorageKey)
+        dailyFreeQuotaUsedCount = 0
     }
 
     /// 透過 StoreKit 2 查詢 Non-Consumable 終身買斷商品
