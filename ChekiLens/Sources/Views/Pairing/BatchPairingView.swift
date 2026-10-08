@@ -420,12 +420,8 @@ struct BatchPairingView: View {
             .task {
                 guard !hasInitialized else { return }
                 hasInitialized = true
-                if defaultFallbackMember == nil {
-                    defaultFallbackMember = defaultMember ?? idolMembers.first
-                }
-                if selectedTargetMembers.isEmpty, let initialTarget = defaultFallbackMember {
-                    selectedTargetMembers = [initialTarget]
-                }
+                defaultFallbackMember = nil
+                selectedTargetMembers = []
                 if !initialPickerItems.isEmpty {
                     isUsingSimulatedSample = false
                     await appendPickerItems(initialPickerItems)
@@ -1210,10 +1206,10 @@ struct BatchPairingView: View {
                             .lineLimit(1)
                     }
                 } else {
-                    Image(systemName: "person.crop.circle.badge.questionmark")
+                    Image(systemName: "tray")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("未分類 · 選擇成員")
+                    Text("未分類")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -1721,14 +1717,7 @@ struct BatchPairingView: View {
         if let existing = photoMemberAssignment[photo.id] {
             return existing
         }
-        if !selectedTargetMembers.isEmpty {
-            return selectedTargetMembers
-        }
-        if let defaultMember = defaultFallbackMember {
-            return [defaultMember]
-        }
-        guard !idolMembers.isEmpty else { return [] }
-        return [idolMembers[slotIndex % idolMembers.count]]
+        return []
     }
 
     private func handleCellTap(on slot: ChekiPairingSlot) {
@@ -1984,11 +1973,7 @@ struct BatchPairingView: View {
                 isDetectingBoundary: true,
                 hasCompletedBoundaryDetection: false
             )
-            if !selectedTargetMembers.isEmpty {
-                photoMemberAssignment[staging.id] = selectedTargetMembers
-            } else if let fallback = defaultFallbackMember {
-                photoMemberAssignment[staging.id] = [fallback]
-            }
+            photoMemberAssignment[staging.id] = []
             newlyLoaded.append(staging)
             nextSequence += 1
         }
@@ -2270,9 +2255,7 @@ struct BatchPairingView: View {
             )
             let data = img.jpegData(compressionQuality: 0.9) ?? Data()
             let photoID = UUID()
-            if !idolMembers.isEmpty {
-                assignments[photoID] = [idolMembers[spec.memberIdx % idolMembers.count]]
-            }
+            assignments[photoID] = []
             generated.append(
                 StagingChekiPhoto(
                     id: photoID,
@@ -2434,9 +2417,7 @@ struct BatchPairingView: View {
                 targetItem.filmFormat = concreteFormat
                 targetItem.detectedAspectRatio = concreteFormat.aspectRatio
                 targetItem.borderInsetRatio = defaultInsetRatio
-                if let targetMember {
-                    targetItem.idolMember = targetMember
-                }
+                targetItem.idolMember = targetMember
             } else {
                 let newItem = ChekiItem(
                     frontImageData: initialFrontData,
