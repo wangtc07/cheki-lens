@@ -51,13 +51,8 @@ final class PhotoLibraryManager {
             targetFolder = try await getOrCreateFolder(folderName: folderName)
         }
         
-        // 2. 尋找現有相簿
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.predicate = NSPredicate(format: "title = %@", albumName)
-        
-        let collections: PHFetchResult<PHAssetCollection>
+        // 2. 尋找現有相簿（使用安全的列舉比對 localizedTitle，避免部分 iOS 版本因 predicate key 拋出例外）
         if let folder = targetFolder {
-            // 從指定資料夾內尋找相簿
             let query = PHCollectionList.fetchCollections(in: folder, options: nil)
             var foundAlbum: PHAssetCollection? = nil
             query.enumerateObjects { (collection, _, stop) in
@@ -70,10 +65,16 @@ final class PhotoLibraryManager {
                 return found
             }
         } else {
-            // 從根目錄尋找
-            collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: fetchOptions)
-            if let album = collections.firstObject {
-                return album
+            let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil)
+            var foundAlbum: PHAssetCollection? = nil
+            collections.enumerateObjects { (album, _, stop) in
+                if album.localizedTitle == albumName {
+                    foundAlbum = album
+                    stop.pointee = true
+                }
+            }
+            if let found = foundAlbum {
+                return found
             }
         }
         
@@ -100,11 +101,15 @@ final class PhotoLibraryManager {
     
     /// 取得或建立資料夾 (Folder)
     private func getOrCreateFolder(folderName: String) async throws -> PHCollectionList {
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.predicate = NSPredicate(format: "title = %@", folderName)
-        
-        let folders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: fetchOptions)
-        if let folder = folders.firstObject {
+        let folders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: nil)
+        var existingFolder: PHCollectionList? = nil
+        folders.enumerateObjects { (folder, _, stop) in
+            if folder.localizedTitle == folderName {
+                existingFolder = folder
+                stop.pointee = true
+            }
+        }
+        if let folder = existingFolder {
             return folder
         }
         
@@ -126,7 +131,9 @@ final class PhotoLibraryManager {
     
     /// 同步照片至 iOS 系統相簿（依免費版 / Pro 版區分裁切寫入行為）：
     /// - **免費版 (`isProLifetimeUnlocked == false`)**：原生相簿**不裁切**（保留未裁切原圖），但依然可同步歸檔至 `ChekiLens › 團體 › 成員` 相簿階層並寫入 OCR 拍攝時間軸；裁切後的照片僅在 App 內（加上浮水印）查看，分享或輸出時亦加上浮水印。
-    /// - **Pro 終身買斷版 (`isProLifetimeUnlocked == true`)**：直接以 `PHContentEditingOutput` 非破壞性原地修改系統相簿原圖為裁切後拍立得（不新增重複照片，且保留原始底圖供隨時復原）。
+    /// - **Pro 終身買斷版 (`isProLifetimeUnlocked == true`)**：
+    ///   - 若為系統相簿既有照片 (`existingAssetIdentifier != nil`)，以 `PHContentEditingOutput` 非破壞性原地修改為裁切後拍立得（不新增重複照片，且保留原始底圖供隨時復原）。
+    ///   - 若為 App 內相機新拍攝的照片 (`existingAssetIdentifier == nil`)，直接將正位裁切／去反光後的成品存入系統相簿（避免觸發二次修改系統彈窗，同時在 App 內 SwiftData 完整保留 `originalFrontImageData` 供隨時復原）。
     /// - Returns: 該張照片在系統相簿中的 `PHAsset.localIdentifier`
     func updateOrSaveImage(
         _ image: UIImage,
@@ -167,40 +174,39 @@ final class PhotoLibraryManager {
             return existingAsset.localIdentifier
         }
         
-        // 2. 若尚未存在於系統相簿：先以「原始未裁切圖片」建立 PHAsset
+        // 2. 若尚未存在於系統相簿（例如使用 App 內建相機拍攝）：
+        // - Pro 版：直接將正位裁切／Mode B 去反光後的成品存入系統相簿（單次寫入、零彈窗、極速完成；原始未裁切底圖已保存在 SwiftData 供隨時復原）
+        // - 免費版：依規則於原生相簿保留未裁切原圖（若無原圖則存 croppedJPEG）
         guard let croppedJPEG = image.jpegData(compressionQuality: 0.92) else {
             throw NSError(domain: "PhotoLibraryManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "影像編碼失敗"])
         }
-        let baseData = originalImageData ?? croppedJPEG
+        let dataToSave = isPro ? croppedJPEG : (originalImageData ?? croppedJPEG)
         var placeholderId: String?
         
-        try await PHPhotoLibrary.shared().performChanges {
-            let creationRequest = PHAssetCreationRequest.forAsset()
-            creationRequest.addResource(with: .photo, data: baseData, options: nil)
-            creationRequest.creationDate = creationDate
-            
-            if let album = album, let placeholder = creationRequest.placeholderForCreatedAsset {
-                let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
-                albumChangeRequest?.addAssets([placeholder] as NSArray)
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                let creationRequest = PHAssetCreationRequest.forAsset()
+                creationRequest.addResource(with: .photo, data: dataToSave, options: nil)
+                creationRequest.creationDate = creationDate
+                
+                if let album = album, let placeholder = creationRequest.placeholderForCreatedAsset {
+                    let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
+                    albumChangeRequest?.addAssets([placeholder] as NSArray)
+                }
+                placeholderId = creationRequest.placeholderForCreatedAsset?.localIdentifier
             }
-            placeholderId = creationRequest.placeholderForCreatedAsset?.localIdentifier
+        } catch {
+            // 若因相簿權限（如 .limited 選取照片模式）導致加入相簿失敗，自動回退為直接寫入系統「最近項目 (Camera Roll)」
+            try await PHPhotoLibrary.shared().performChanges {
+                let creationRequest = PHAssetCreationRequest.forAsset()
+                creationRequest.addResource(with: .photo, data: dataToSave, options: nil)
+                creationRequest.creationDate = creationDate
+                placeholderId = creationRequest.placeholderForCreatedAsset?.localIdentifier
+            }
         }
         
         guard let createdId = placeholderId else {
             throw NSError(domain: "PhotoLibraryManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "儲存照片失敗"])
-        }
-        
-        // 僅在 Pro 版且提供了原始未裁切底圖時，將裁切結果透過 PHContentEditingOutput 覆蓋於同一張 PHAsset 上（免費版於原生相簿保留未裁切原圖）
-        if isPro,
-           let origData = originalImageData,
-           origData != croppedJPEG,
-           let createdAsset = PHAsset.fetchAssets(withLocalIdentifiers: [createdId], options: nil).firstObject {
-            try? await modifyAssetInPlace(
-                asset: createdAsset,
-                croppedImage: image,
-                creationDate: creationDate,
-                album: nil
-            )
         }
         
         return createdId

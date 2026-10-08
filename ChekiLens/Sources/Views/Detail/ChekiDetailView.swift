@@ -1169,16 +1169,14 @@ struct ChekiDetailView: View {
         }
     }
 
-    /// Task 5.4: 從相簿選取第 2 張不同傾斜角度的照片，與當前照片進行 Mode B 雙角度去反光合成
+    /// Task 5.4 & 6.1: 從相簿選取第 2 張不同傾斜角度的照片，與當前照片進行極速 Mode B 雙角度去反光合成
     @MainActor
     private func synthesizeModeBSecondAnglePhoto(from pickerItem: PhotosPickerItem) async {
         guard PhotoLibraryManager.isProLifetimeUnlocked else {
             showToast("Mode B 雙角度去反光合成為 Pro 專屬功能")
             return
         }
-        guard let secondData = try? await pickerItem.loadTransferable(type: Data.self),
-              let secondRawUI = UIImage(data: secondData)?.normalizedImage,
-              let secondCG = secondRawUI.cgImage else {
+        guard let secondData = try? await pickerItem.loadTransferable(type: Data.self) else {
             showToast("無法讀取第二角度照片")
             return
         }
@@ -1188,38 +1186,49 @@ struct ChekiDetailView: View {
             ? (currentItem.originalBackImageData ?? currentItem.backImageData)
             : (currentItem.originalFrontImageData ?? currentItem.frontImageData)
 
-        guard let primaryData = primarySourceData,
-              let primaryUI = UIImage(data: primaryData)?.normalizedImage,
-              let primaryCG = primaryUI.cgImage else {
+        guard let primaryData = primarySourceData else {
             showToast("無法讀取主角度照片")
             return
         }
 
-        let visionManager = VisionManager()
-        do {
-            let result = try await visionManager.synthesizeModeBDualAngleAntiGlare(
+        let insetRatio = currentItem.borderInsetRatio
+        let preferredFmt = currentItem.filmFormat
+        showToast("正在合成雙角度去反光⋯")
+
+        let fusedJPEG: Data? = await Task.detached(priority: .userInitiated) {
+            guard let primaryCG = UIImage(data: primaryData)?.normalizedImage.cgImage,
+                  let secondCG = UIImage(data: secondData)?.normalizedImage.cgImage else {
+                return nil
+            }
+            let visionManager = VisionManager()
+            guard let result = try? await visionManager.synthesizeModeBDualAngleAntiGlare(
                 primaryImage: primaryCG,
                 secondaryImage: secondCG,
-                borderInsetRatio: currentItem.borderInsetRatio,
-                preferredFormat: currentItem.filmFormat
-            )
-            if let fusedJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.94) {
-                if editingBack {
-                    if currentItem.originalBackImageData == nil {
-                        currentItem.originalBackImageData = currentItem.backImageData
-                    }
-                    currentItem.backImageData = fusedJPEG
-                } else {
-                    if currentItem.originalFrontImageData == nil {
-                        currentItem.originalFrontImageData = currentItem.frontImageData
-                    }
-                    currentItem.frontImageData = fusedJPEG
-                }
-                try? modelContext.save()
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                showToast("✨ 已完成 Mode B 雙角度去反光合成")
+                borderInsetRatio: insetRatio,
+                preferredFormat: preferredFmt
+            ) else {
+                return nil
             }
-        } catch {
+            return UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.92)
+        }.value
+
+        if let fusedJPEG {
+            if editingBack {
+                if currentItem.originalBackImageData == nil {
+                    currentItem.originalBackImageData = currentItem.backImageData
+                }
+                currentItem.backImageData = fusedJPEG
+            } else {
+                if currentItem.originalFrontImageData == nil {
+                    currentItem.originalFrontImageData = currentItem.frontImageData
+                }
+                currentItem.frontImageData = fusedJPEG
+            }
+            try? modelContext.save()
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            showToast("✨ 已完成 Mode B 雙角度去反光合成")
+            await syncCurrentItemToSystemPhotos()
+        } else {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             showToast("雙角度對位失敗，請確認兩張皆包含完整拍立得邊框")
         }

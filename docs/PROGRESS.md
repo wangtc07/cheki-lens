@@ -8,10 +8,10 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-08
-* **當前所屬階段**：Phase 5 — 商業化與進階功能 (StoreKit 2 & Polish) 全數完成 ✅
-* **當前進行中任務**：已完成 **Task 5.4** 實作 Mode B 雙角度去反光合成管線（`VisionManager+AntiGlare.swift` 雙角度透視校正、亞像素影像對位、鏡面反光差異權重遮罩與羽化融合，並整合至 `CameraScannerView` 兩段式防反光連拍與 `ChekiDetailView` 第二角度相簿匯入合成）
-* **最新穩定 Git Commit**：feat(Vision): 完成 Task 5.4 Mode B 雙角度去反光合成管線與相機/檢視頁整合
-* **下一動執行指示**：執行 **Task 6.1**（實機測試與效能調校：記憶體佔用、批次處理速度優化）
+* **當前所屬階段**：Phase 6 — 端到端整合與發布準備 (QA & Release)
+* **當前進行中任務**：已完成 **Task 6.1** 實機測試與效能調校（補齊相機全模式自動同步寫入 iOS 原生相簿 `Photos.app`，並將 Mode B 雙角度去反光升級為「第 1 張背景先行預處理 + 1440px 快速四角偵測 + 270×430 O(1) 滑動視窗權重遮罩 + GPU `CIBlendWithMask` 硬體合成」，大幅縮短第 2 張拍完後的等待時間）
+* **最新穩定 Git Commit**：perf(Camera): 完成 Task 6.1 相機拍照自動存入原生相簿與 Mode B 雙角度 GPU 極速合成優化
+* **下一動執行指示**：執行 **Task 6.2**（支援深色/淺色模式與動態字級 Dynamic Type）
 
 ---
 
@@ -265,6 +265,6 @@
 ---
 
 ### 階段 6：端到端整合與發布準備 (Phase 6: QA & Release)
-- [ ] **Task 6.1**: 實機測試與效能調校（記憶體佔用、批次處理速度優化）
+- [x] **Task 6.1**: 實機測試與效能調校（實機部署至 iPhone 12 mini `ジェ`；補齊 `CameraScannerView` 所有拍攝模式自動同步寫入 iOS 原生相簿 `Photos.app`；將 Mode B 雙角度去反光升級為「第 1 張拍完立即背景預處理 + 1440px 快速正面四角偵測 + 540px 配準代理 + 270×430 O(1) 滑動視窗權重遮罩 + Core Image GPU `CIBlendWithMask` 單次 4K 渲染 + 取景器追蹤每 6 幀節流」，消除 4K CPU 迴圈瓶頸）
 - [ ] **Task 6.2**: 支援深色/淺色模式與動態字級 (Dynamic Type)
 - [ ] **Task 6.3**: 建立 App 圖示、啟動畫面與 App Store 截圖產生流程

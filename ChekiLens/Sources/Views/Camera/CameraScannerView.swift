@@ -77,7 +77,8 @@ final class CameraSessionController: NSObject, ObservableObject {
 
     private var videoDevice: AVCaptureDevice?
     private var photoContinuation: CheckedContinuation<UIImage?, Never>?
-    private var frameCounter: Int = 0
+    nonisolated(unsafe) private var sampleFrameCounter: Int = 0
+    nonisolated(unsafe) var isPausedForProcessing: Bool = false
 
     func start() async {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
@@ -297,9 +298,10 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
         error: Error?
     ) {
         let data = photo.fileDataRepresentation()
+        // 在背景執行緒先行完成 12MP 影像方向正規化，避免阻塞 MainActor
+        let normalizedImage = data.flatMap { UIImage(data: $0)?.normalizedImage }
         Task { @MainActor in
-            let image = data.flatMap { UIImage(data: $0)?.normalizedImage }
-            self.photoContinuation?.resume(returning: image)
+            self.photoContinuation?.resume(returning: normalizedImage)
             self.photoContinuation = nil
         }
     }
@@ -309,6 +311,11 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        // 當正在處理快門影像合成時暫停即時追蹤，避免與 Mode B / Vision 搶佔 Neural Engine
+        guard !isPausedForProcessing else { return }
+        sampleFrameCounter &+= 1
+        guard sampleFrameCounter % 6 == 0 else { return }
+
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         let request = VNDetectRectanglesRequest()
@@ -394,8 +401,10 @@ struct CameraScannerView: View {
     @State private var pendingFrontOCRDate: Date? = nil
     @State private var pendingFrontFormat: FilmFormat = .mini
 
-    // Task 5.4: Mode B 雙角度去反光連續拍攝狀態（先拍微傾角度 1 -> 再拍微傾角度 2 合成消除反光）
+    // Task 5.4 & 6.1: Mode B 雙角度去反光連續拍攝狀態（拍下角度 1 後立即於背景預處理四角偵測與正位）
     @State private var pendingModeBFirstImage: UIImage? = nil
+    @State private var pendingModeBFirstRawJPEG: Data? = nil
+    @State private var pendingModeBPreparedTask: Task<VisionManager.ModeBPreparedFirstAngle?, Never>? = nil
     @State private var statusBannerMessage: String? = nil
 
     // 點擊對焦黃框狀態
@@ -774,6 +783,9 @@ struct CameraScannerView: View {
                     let isSelected = (captureMode == mode)
                     Button {
                         UISelectionFeedbackGenerator().selectionChanged()
+                        pendingModeBPreparedTask?.cancel()
+                        pendingModeBPreparedTask = nil
+                        pendingModeBFirstRawJPEG = nil
                         withAnimation(.snappy(duration: 0.22)) {
                             captureMode = mode
                             pendingFrontImageData = nil
@@ -871,6 +883,9 @@ struct CameraScannerView: View {
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     if pendingModeBFirstImage != nil {
+                        pendingModeBPreparedTask?.cancel()
+                        pendingModeBPreparedTask = nil
+                        pendingModeBFirstRawJPEG = nil
                         withAnimation {
                             pendingModeBFirstImage = nil
                             statusBannerMessage = "已重設 Mode B 第 1 張角度，請重新拍攝"
@@ -930,9 +945,13 @@ struct CameraScannerView: View {
         }
 
         isProcessingCapture = true
-        defer { isProcessingCapture = false }
+        camera.isPausedForProcessing = true
+        defer {
+            isProcessingCapture = false
+            camera.isPausedForProcessing = false
+        }
 
-        // Task 5.4: Pro 專屬 Mode B 雙角度去反光合成流程
+        // Task 5.4 & 6.1: Pro 專屬 Mode B 雙角度去反光合成流程（第 1 張拍下後立即於背景預處理）
         if captureMode == .dualGlare && isProLifetimeUnlocked {
             let glareStep = (pendingModeBFirstImage == nil) ? 1 : 2
             guard let rawImage = await camera.capturePhoto(
@@ -941,14 +960,36 @@ struct CameraScannerView: View {
             ) else { return }
 
             if let firstAngleImage = pendingModeBFirstImage {
-                // 第 2 張角度拍攝完成 -> 執行 Mode B 雙角度特徵對位與高光白斑消除合成
+                // 第 2 張角度拍攝完成 -> 直接銜接背景已完成（或進行中）之第 1 張正位結果，極速執行 GPU 遮罩融合
                 await completeModeBDualAngleCapture(
                     firstImage: firstAngleImage,
                     secondImage: rawImage
                 )
             } else {
-                // 第 1 張角度拍攝完成 -> 暫存並引導微調傾斜角度拍第 2 張
+                // 第 1 張角度拍攝完成 -> 立即啟動背景預處理（趁使用者微調手機角度準備拍第 2 張的空檔先算完第 1 張）
                 pendingModeBFirstImage = rawImage
+                let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
+                let rawCG = rawImage.cgImage
+                pendingModeBFirstRawJPEG = nil
+
+                Task.detached(priority: .utility) {
+                    let jpeg = rawImage.jpegData(compressionQuality: 0.90)
+                    await MainActor.run {
+                        self.pendingModeBFirstRawJPEG = jpeg
+                    }
+                }
+
+                pendingModeBPreparedTask?.cancel()
+                pendingModeBPreparedTask = Task.detached(priority: .userInitiated) {
+                    guard let cgA = rawCG else { return nil }
+                    let manager = VisionManager()
+                    return try? await manager.prepareModeBFirstAngle(
+                        primaryImage: cgA,
+                        borderInsetRatio: defaultInsetRatio,
+                        preferredFormat: .auto
+                    )
+                }
+
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 withAnimation {
                     statusBannerMessage = "角度 1 已鎖定！請稍微改變傾斜角度避開白斑，再按快門 (2/2)"
@@ -963,7 +1004,8 @@ struct CameraScannerView: View {
         let useModeAGlareSuppression = (captureMode == .dualGlare)
         let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(
             rawImage,
-            applyModeASuppression: useModeAGlareSuppression
+            applyModeASuppression: useModeAGlareSuppression,
+            isKnownFrontPhoto: !isCapturingBackside
         )
         let now = Date()
 
@@ -980,7 +1022,7 @@ struct CameraScannerView: View {
                     statusBannerMessage = "正面已鎖定！請將拍立得翻至背面再按一次快門"
                 }
             } else {
-                // 第二步：背面拍攝完成，自動配對存入同一張 ChekiItem
+                // 第二步：背面拍攝完成，自動配對存入同一張 ChekiItem 並同步寫入 iOS 原生相簿
                 let finalOCR = pendingFrontOCRDate ?? recognizedDate
                 let captureDate = finalOCR.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
                 let format = pendingFrontFormat.concreteFormat
@@ -1001,6 +1043,10 @@ struct CameraScannerView: View {
                 modelContext.insert(newItem)
                 try? modelContext.save()
 
+                Task { @MainActor in
+                    await syncCapturedItemToPhotoLibrary(newItem)
+                }
+
                 pendingFrontImageData = nil
                 pendingOriginalFrontImageData = nil
                 pendingFrontPointsJSON = nil
@@ -1008,11 +1054,11 @@ struct CameraScannerView: View {
                 pendingFrontFormat = .mini
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 withAnimation {
-                    statusBannerMessage = "正反雙面拍立得已配對典藏！"
+                    statusBannerMessage = "正反雙面拍立得已配對並同步至系統相簿！"
                 }
             }
         } else {
-            // 單張正面拍攝完成
+            // 單張正面拍攝完成 -> 存入 SwiftData 並同步寫入 iOS 原生相簿
             let captureDate = recognizedDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
             let format = resolvedFormat.concreteFormat
             let newItem = ChekiItem(
@@ -1030,79 +1076,110 @@ struct CameraScannerView: View {
             modelContext.insert(newItem)
             try? modelContext.save()
 
+            Task { @MainActor in
+                await syncCapturedItemToPhotoLibrary(newItem)
+            }
+
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation {
                 statusBannerMessage = useModeAGlareSuppression
-                    ? "已套用 Mode A 單張高光抑制並存入典藏"
-                    : "已自動正位並存入典藏"
+                    ? "已套用 Mode A 單張高光抑制並存入系統相簿"
+                    : "已自動正位並存入系統相簿"
             }
         }
     }
 
-    /// Task 5.4: 執行 Mode B 雙角度去反光合成並存入 SwiftData
+    /// Task 5.4 & 6.1: 執行 Mode B 雙角度去反光極速合成，並存入 SwiftData 與 iOS 原生相簿
     @MainActor
     private func completeModeBDualAngleCapture(
         firstImage: UIImage,
         secondImage: UIImage
     ) async {
-        defer { pendingModeBFirstImage = nil }
+        let preparedTask = pendingModeBPreparedTask
+        let cachedRawJPEGA = pendingModeBFirstRawJPEG
+        defer {
+            pendingModeBFirstImage = nil
+            pendingModeBPreparedTask = nil
+            pendingModeBFirstRawJPEG = nil
+        }
 
-        let normA = firstImage.normalizedImage
-        let normB = secondImage.normalizedImage
-        let rawJPEGA = normA.jpegData(compressionQuality: 0.92)
-
-        guard let cgA = normA.cgImage,
-              let cgB = normB.cgImage else {
+        guard let cgA = firstImage.cgImage,
+              let cgB = secondImage.cgImage else {
             return
         }
 
         let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
-        let manager = VisionManager()
         let now = Date()
 
-        do {
-            let result = try await manager.synthesizeModeBDualAngleAntiGlare(
-                primaryImage: cgA,
-                secondaryImage: cgB,
-                borderInsetRatio: defaultInsetRatio,
-                preferredFormat: .auto
-            )
+        // 取出第 1 張拍完時已在背景算好的四角與正位結果（若使用者秒按第 2 張則等待其完成）
+        let preparedFirstAngle = await preparedTask?.value
 
-            let fusedJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.94)
-            let imageSizeA = CGSize(width: cgA.width, height: cgA.height)
-            let pointsJSON = ChekiItem.encodeNormalizedCorners(result.primaryDetection.corners, imageSize: imageSizeA)
+        // 在背景高優先級執行緒執行第 2 張正位與 GPU 遮罩融合，不阻塞主執行緒
+        let synthesisOutcome: (
+            fusedJPEG: Data?,
+            rawJPEGA: Data?,
+            pointsJSON: String?,
+            ocrDate: Date?,
+            format: FilmFormat
+        )? = await Task.detached(priority: .userInitiated) {
+            let manager = VisionManager()
+            do {
+                let result = try await manager.synthesizeModeBDualAngleAntiGlare(
+                    primaryImage: cgA,
+                    secondaryImage: cgB,
+                    borderInsetRatio: defaultInsetRatio,
+                    preferredFormat: .auto,
+                    preparedFirstAngle: preparedFirstAngle
+                )
+                let fusedJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.92)
+                let rawJPEGA = cachedRawJPEGA ?? firstImage.jpegData(compressionQuality: 0.90)
+                let imageSizeA = CGSize(width: cgA.width, height: cgA.height)
+                let pointsJSON = ChekiItem.encodeNormalizedCorners(result.primaryDetection.corners, imageSize: imageSizeA)
 
-            var ocrDate = await manager.recognizeDate(from: result.fusedCGImage)?.date
-            if ocrDate == nil {
-                ocrDate = await manager.recognizeDate(from: cgA)?.date
+                let ocrDate: Date?
+                if let preDate = result.preRecognizedDate {
+                    ocrDate = preDate
+                } else {
+                    ocrDate = await manager.recognizeDate(from: result.fusedCGImage)?.date
+                }
+                return (fusedJPEG, rawJPEGA, pointsJSON, ocrDate, result.resolvedFormat.concreteFormat)
+            } catch {
+                return nil
             }
-            let captureDate = ocrDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
-            let format = result.resolvedFormat.concreteFormat
+        }.value
 
+        if let outcome = synthesisOutcome, let fusedJPEG = outcome.fusedJPEG {
+            let captureDate = outcome.ocrDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
+            let format = outcome.format
             let newItem = ChekiItem(
                 frontImageData: fusedJPEG,
                 backImageData: nil,
-                originalFrontImageData: rawJPEGA ?? fusedJPEG,
+                originalFrontImageData: outcome.rawJPEGA ?? fusedJPEG,
                 capturedAt: captureDate,
-                ocrDate: ocrDate != nil ? captureDate : nil,
+                ocrDate: outcome.ocrDate != nil ? captureDate : nil,
                 filmFormat: format,
                 detectedAspectRatio: format.aspectRatio,
-                perspectivePointsJSON: pointsJSON,
+                perspectivePointsJSON: outcome.pointsJSON,
                 processingState: .completed,
                 idolMember: defaultMember
             )
             modelContext.insert(newItem)
             try? modelContext.save()
 
+            Task { @MainActor in
+                await syncCapturedItemToPhotoLibrary(newItem)
+            }
+
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation {
-                statusBannerMessage = "✨ Mode B 雙角度去反光合成完成！已消除強光白斑並存入典藏"
+                statusBannerMessage = "✨ Mode B 雙角度去反光合成完成！已同步至系統相簿"
             }
-        } catch {
+        } else {
             // 若其中一張角度未能偵測到完整四邊形，自動回退至第 1 張 + Mode A 單張高光抑制
             let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(
                 firstImage,
-                applyModeASuppression: true
+                applyModeASuppression: true,
+                isKnownFrontPhoto: true
             )
             let captureDate = recognizedDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
             let format = resolvedFormat.concreteFormat
@@ -1121,57 +1198,122 @@ struct CameraScannerView: View {
             modelContext.insert(newItem)
             try? modelContext.save()
 
+            Task { @MainActor in
+                await syncCapturedItemToPhotoLibrary(newItem)
+            }
+
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             withAnimation {
-                statusBannerMessage = "已透過反光抑制正位並存入典藏"
+                statusBannerMessage = "已透過反光抑制正位並存入系統相簿"
             }
         }
     }
 
     private func processCapturedImage(
         _ image: UIImage,
-        applyModeASuppression: Bool = false
+        applyModeASuppression: Bool = false,
+        isKnownFrontPhoto: Bool = true
     ) async -> (Data?, Data?, String?, Date?, FilmFormat) {
-        let normalized = image.normalizedImage
-        let rawJPEG = normalized.jpegData(compressionQuality: 0.92)
-        guard let cgImage = normalized.cgImage else {
-            return (rawJPEG, rawJPEG, nil, nil, .mini)
-        }
-        let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
         let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
-        let manager = VisionManager()
-        do {
-            let detection = try await manager.detectQuad(in: cgImage, imageSize: imageSize)
-            let adjustedCorners = await manager.applyBorderInset(
-                corners: detection.corners,
-                imageSize: imageSize,
-                ratio: defaultInsetRatio
-            )
-            let cropResult = try await manager.perspectiveCorrect(
-                image: cgImage,
-                corners: adjustedCorners,
-                detection: detection,
-                format: .auto
-            )
-            let resolvedFormat = FilmFormat.resolvedConcreteFormat(
-                preferred: .auto,
-                specName: cropResult.filmSpecification?.format.rawValue,
-                outputSize: cropResult.outputSize
-            )
-            let finalCGImage = applyModeASuppression
-                ? await manager.applyModeAGlareSuppression(to: cropResult.cgImage)
-                : cropResult.cgImage
-            var ocrDate = await manager.recognizeDate(from: finalCGImage)?.date
-            if ocrDate == nil {
-                ocrDate = await manager.recognizeDate(from: cgImage)?.date
+        return await Task.detached(priority: .userInitiated) {
+            let normalized = image.normalizedImage
+            let rawJPEG = normalized.jpegData(compressionQuality: 0.90)
+            guard let cgImage = normalized.cgImage else {
+                return (rawJPEG, rawJPEG, nil, nil, .mini)
             }
-            let jpeg = UIImage(cgImage: finalCGImage).jpegData(compressionQuality: 0.92)
-            let pointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imageSize)
-            return (jpeg, rawJPEG, pointsJSON, ocrDate, resolvedFormat)
-        } catch {
-            let ocrDate = await manager.recognizeDate(from: cgImage)?.date
-            return (rawJPEG, rawJPEG, nil, ocrDate, .mini)
+            let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
+            let manager = VisionManager()
+            do {
+                let detection = try await manager.detectQuadFastForCamera(
+                    in: cgImage,
+                    imageSize: imageSize,
+                    isKnownFrontPhoto: isKnownFrontPhoto
+                )
+                let adjustedCorners = await manager.applyBorderInset(
+                    corners: detection.corners,
+                    imageSize: imageSize,
+                    ratio: defaultInsetRatio
+                )
+                let cropResult = try await manager.perspectiveCorrect(
+                    image: cgImage,
+                    corners: adjustedCorners,
+                    detection: detection,
+                    format: .auto
+                )
+                let resolvedFormat = FilmFormat.resolvedConcreteFormat(
+                    preferred: .auto,
+                    specName: cropResult.filmSpecification?.format.rawValue,
+                    outputSize: cropResult.outputSize
+                )
+                let finalCGImage = applyModeASuppression
+                    ? await manager.applyModeAGlareSuppression(to: cropResult.cgImage)
+                    : cropResult.cgImage
+                let ocrDate = await manager.recognizeDate(from: finalCGImage)?.date
+                let jpeg = UIImage(cgImage: finalCGImage).jpegData(compressionQuality: 0.92)
+                let pointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imageSize)
+                return (jpeg, rawJPEG, pointsJSON, ocrDate, resolvedFormat)
+            } catch {
+                let ocrDate = await manager.recognizeDate(from: cgImage)?.date
+                return (rawJPEG, rawJPEG, nil, ocrDate, .mini)
+            }
+        }.value
+    }
+
+    /// 將相機新拍攝的拍立得自動同步寫入 iOS 原生系統相簿 (`Photos.app`)
+    @MainActor
+    private func syncCapturedItemToPhotoLibrary(_ item: ChekiItem) async {
+        let autoSync = UserDefaults.standard.object(forKey: "autoSyncToPhotos") as? Bool ?? true
+        guard autoSync else { return }
+
+        let overwriteExif = UserDefaults.standard.object(forKey: "overwriteExifDateWithOCR") as? Bool ?? true
+        let useGroupMemberAlbums = UserDefaults.standard.object(forKey: "createGroupMemberAlbumsInPhotos") as? Bool ?? true
+        let timelineStrategy = UserDefaults.standard.string(forKey: "backsideTimelineStrategy") ?? BacksideTimelineStrategy.sameSecond.rawValue
+
+        let frontSyncDate = overwriteExif ? item.displayDate : item.capturedAt
+        let backSyncDate = (timelineStrategy == BacksideTimelineStrategy.plusOneSecond.rawValue)
+            ? frontSyncDate.addingTimeInterval(1.0)
+            : frontSyncDate
+
+        let member: IdolMember? = item.idolMember ?? defaultMember
+        let albumName = useGroupMemberAlbums ? (member?.stageName ?? "ChekiLens") : "ChekiLens"
+        let folderName: String? = useGroupMemberAlbums ? member?.group?.name : nil
+
+        // 嘗試取得或建立相簿（即使 album 為 nil，updateOrSaveImage 仍會將照片存入系統相簿「最近項目」）
+        let album = try? await PhotoLibraryManager.shared.getOrCreateAlbum(
+            albumName: albumName,
+            inFolder: folderName
+        )
+
+        if let frontData = item.frontImageData,
+           let frontUIImage = UIImage(data: frontData) {
+            if let frontAssetId = try? await PhotoLibraryManager.shared.updateOrSaveImage(
+                frontUIImage,
+                originalImageData: item.originalFrontImageData,
+                existingAssetIdentifier: item.frontAssetIdentifier,
+                creationDate: frontSyncDate,
+                to: album
+            ) {
+                item.frontAssetIdentifier = frontAssetId
+                item.isSyncedToPhotoLibrary = true
+                item.isDateWrittenToAlbum = overwriteExif && (item.ocrDate != nil)
+            }
         }
+
+        if let backData = item.backImageData,
+           let backUIImage = UIImage(data: backData) {
+            if let backAssetId = try? await PhotoLibraryManager.shared.updateOrSaveImage(
+                backUIImage,
+                originalImageData: item.originalBackImageData,
+                existingAssetIdentifier: item.backAssetIdentifier,
+                creationDate: backSyncDate,
+                to: album
+            ) {
+                item.backAssetIdentifier = backAssetId
+                item.isSyncedToPhotoLibrary = true
+            }
+        }
+
+        try? modelContext.save()
     }
 }
 
