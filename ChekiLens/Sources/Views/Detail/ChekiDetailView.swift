@@ -2224,7 +2224,12 @@ private struct ChekiQuadCropEditorView: View {
         let visionManager = VisionManager()
         let defaultInsetRatio = defaultBorderInsetPercentage / 100.0
 
-        if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: imgSize),
+        if let detection = try? await visionManager.detectQuadFastForCamera(
+            in: cgImage,
+            imageSize: imgSize,
+            isKnownFrontPhoto: !editingBackside,
+            priorNormalizedCorners: nil
+        ),
            detection.corners.count == 4 {
             let ordered = VisionManager.orderPoints(detection.corners)
             let adjusted = await visionManager.applyBorderInset(

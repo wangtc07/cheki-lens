@@ -78,6 +78,7 @@ final class CameraSessionController: NSObject, ObservableObject {
     private var videoDevice: AVCaptureDevice?
     private var photoContinuation: CheckedContinuation<UIImage?, Never>?
     nonisolated(unsafe) private var sampleFrameCounter: Int = 0
+    nonisolated(unsafe) private var missedQuadFrameCount: Int = 0
     nonisolated(unsafe) var isPausedForProcessing: Bool = false
 
     func start() async {
@@ -329,6 +330,7 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
         try? handler.perform([request])
 
         if let rect = request.results?.first {
+            missedQuadFrameCount = 0
             // Vision 原點在左下，轉換為 UIKit/SwiftUI 原點在左上 (y = 1 - y)
             let points = [
                 CGPoint(x: rect.topLeft.x, y: 1.0 - rect.topLeft.y),
@@ -339,6 +341,15 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
             Task { @MainActor in
                 withAnimation(.interpolatingSpring(stiffness: 180, damping: 22)) {
                     self.trackedQuadPoints = points
+                }
+            }
+        } else {
+            missedQuadFrameCount &+= 1
+            if missedQuadFrameCount >= 4 {
+                Task { @MainActor in
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        self.trackedQuadPoints = nil
+                    }
                 }
             }
         }
@@ -946,6 +957,7 @@ struct CameraScannerView: View {
 
         isProcessingCapture = true
         camera.isPausedForProcessing = true
+        let lockedPreviewQuad = camera.trackedQuadPoints
         defer {
             isProcessingCapture = false
             camera.isPausedForProcessing = false
@@ -960,10 +972,11 @@ struct CameraScannerView: View {
             ) else { return }
 
             if let firstAngleImage = pendingModeBFirstImage {
-                // 第 2 張角度拍攝完成 -> 直接銜接背景已完成（或進行中）之第 1 張正位結果，極速執行 GPU 遮罩融合
+                // 第 2 張角度拍攝完成 -> 直接銜接背景已完成（或進行中）之第 1 張正位結果，極速執行零重影去反光合成
                 await completeModeBDualAngleCapture(
                     firstImage: firstAngleImage,
-                    secondImage: rawImage
+                    secondImage: rawImage,
+                    secondaryPriorNormalizedCorners: lockedPreviewQuad
                 )
             } else {
                 // 第 1 張角度拍攝完成 -> 立即啟動背景預處理（趁使用者微調手機角度準備拍第 2 張的空檔先算完第 1 張）
@@ -986,7 +999,8 @@ struct CameraScannerView: View {
                     return try? await manager.prepareModeBFirstAngle(
                         primaryImage: cgA,
                         borderInsetRatio: defaultInsetRatio,
-                        preferredFormat: .auto
+                        preferredFormat: .auto,
+                        priorNormalizedCorners: lockedPreviewQuad
                     )
                 }
 
@@ -1005,7 +1019,8 @@ struct CameraScannerView: View {
         let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(
             rawImage,
             applyModeASuppression: useModeAGlareSuppression,
-            isKnownFrontPhoto: !isCapturingBackside
+            isKnownFrontPhoto: !isCapturingBackside,
+            priorNormalizedCorners: lockedPreviewQuad
         )
         let now = Date()
 
@@ -1093,7 +1108,8 @@ struct CameraScannerView: View {
     @MainActor
     private func completeModeBDualAngleCapture(
         firstImage: UIImage,
-        secondImage: UIImage
+        secondImage: UIImage,
+        secondaryPriorNormalizedCorners: [CGPoint]? = nil
     ) async {
         let preparedTask = pendingModeBPreparedTask
         let cachedRawJPEGA = pendingModeBFirstRawJPEG
@@ -1114,7 +1130,7 @@ struct CameraScannerView: View {
         // 取出第 1 張拍完時已在背景算好的四角與正位結果（若使用者秒按第 2 張則等待其完成）
         let preparedFirstAngle = await preparedTask?.value
 
-        // 在背景高優先級執行緒執行第 2 張正位與 GPU 遮罩融合，不阻塞主執行緒
+        // 在背景高優先級執行緒執行第 2 張正位與零重影去反光融合，不阻塞主執行緒
         let synthesisOutcome: (
             fusedJPEG: Data?,
             rawJPEGA: Data?,
@@ -1129,7 +1145,8 @@ struct CameraScannerView: View {
                     secondaryImage: cgB,
                     borderInsetRatio: defaultInsetRatio,
                     preferredFormat: .auto,
-                    preparedFirstAngle: preparedFirstAngle
+                    preparedFirstAngle: preparedFirstAngle,
+                    secondaryPriorNormalizedCorners: secondaryPriorNormalizedCorners
                 )
                 let fusedJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.92)
                 let rawJPEGA = cachedRawJPEGA ?? firstImage.jpegData(compressionQuality: 0.90)
@@ -1179,7 +1196,8 @@ struct CameraScannerView: View {
             let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(
                 firstImage,
                 applyModeASuppression: true,
-                isKnownFrontPhoto: true
+                isKnownFrontPhoto: true,
+                priorNormalizedCorners: nil
             )
             let captureDate = recognizedDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
             let format = resolvedFormat.concreteFormat
@@ -1212,7 +1230,8 @@ struct CameraScannerView: View {
     private func processCapturedImage(
         _ image: UIImage,
         applyModeASuppression: Bool = false,
-        isKnownFrontPhoto: Bool = true
+        isKnownFrontPhoto: Bool = true,
+        priorNormalizedCorners: [CGPoint]? = nil
     ) async -> (Data?, Data?, String?, Date?, FilmFormat) {
         let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
         return await Task.detached(priority: .userInitiated) {
@@ -1227,7 +1246,8 @@ struct CameraScannerView: View {
                 let detection = try await manager.detectQuadFastForCamera(
                     in: cgImage,
                     imageSize: imageSize,
-                    isKnownFrontPhoto: isKnownFrontPhoto
+                    isKnownFrontPhoto: isKnownFrontPhoto,
+                    priorNormalizedCorners: priorNormalizedCorners
                 )
                 let adjustedCorners = await manager.applyBorderInset(
                     corners: detection.corners,
