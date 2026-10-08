@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import UniformTypeIdentifiers
 import UIKit
 
 // MARK: - Album Hierarchy Mode (相冊頂部分段控制：團體 vs 成員)
@@ -17,6 +18,47 @@ enum AlbumHierarchyMode: String, CaseIterable, Identifiable {
             return L10n.tr("團體", "グループ")
         case .members:
             return L10n.tr("成員", "メンバー")
+        }
+    }
+}
+
+enum AlbumSortMethod: String, CaseIterable, Identifiable {
+    case name = "name"
+    case custom = "custom"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .name:
+            return L10n.tr("名稱", "名前順")
+        case .custom:
+            return L10n.tr("客製", "カスタム")
+        }
+    }
+}
+
+enum AlbumDisplayMode: String, CaseIterable, Identifiable {
+    case grid = "grid"
+    case list = "list"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .grid:
+            return L10n.tr("格狀", "グリッド")
+        case .list:
+            return L10n.tr("清單", "リスト")
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .grid:
+            return "square.grid.2x2"
+        case .list:
+            return "list.bullet"
         }
     }
 }
@@ -764,6 +806,9 @@ struct AlbumsRootView: View {
     @Query(sort: \IdolGroup.sortOrder, order: .forward) private var idolGroups: [IdolGroup]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
 
+    @AppStorage("albumSortMethod") private var sortMethodRaw: String = AlbumSortMethod.custom.rawValue
+    @AppStorage("albumDisplayMode") private var displayModeRaw: String = AlbumDisplayMode.grid.rawValue
+
     @State private var hierarchyMode: AlbumHierarchyMode = .groups
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
@@ -777,7 +822,17 @@ struct AlbumsRootView: View {
     @State private var renamingGroup: IdolGroup? = nil
     @State private var renamingMember: IdolMember? = nil
     @State private var renameText: String = ""
+    @State private var draggingGroupID: UUID? = nil
+    @State private var draggingMemberID: UUID? = nil
     private var chromeState = NavigationChromeState.shared
+
+    private var sortMethod: AlbumSortMethod {
+        AlbumSortMethod(rawValue: sortMethodRaw) ?? .custom
+    }
+
+    private var displayMode: AlbumDisplayMode {
+        AlbumDisplayMode(rawValue: displayModeRaw) ?? .grid
+    }
 
     private let albumColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -792,12 +847,28 @@ struct AlbumsRootView: View {
         validChekiItems.filter { $0.isUncategorized }
     }
 
-    /// 取得所有成員（依團體順序與成員順序排列，確保在「成員」模式下完整展開所有團體的成員）
+    private var sortedGroups: [IdolGroup] {
+        switch sortMethod {
+        case .name:
+            return idolGroups.sorted {
+                $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+        case .custom:
+            return idolGroups.sorted {
+                if $0.sortOrder != $1.sortOrder {
+                    return $0.sortOrder < $1.sortOrder
+                }
+                return $0.createdAt < $1.createdAt
+            }
+        }
+    }
+
+    /// 取得所有成員（依當前排序模式排列，確保在「成員」模式下完整展開所有團體的成員）
     private var allExpandedMembers: [IdolMember] {
         var result: [IdolMember] = []
         var seenIDs = Set<UUID>()
 
-        for group in idolGroups {
+        for group in sortedGroups {
             for member in group.sortedMembers {
                 if seenIDs.insert(member.id).inserted {
                     result.append(member)
@@ -809,7 +880,20 @@ struct AlbumsRootView: View {
                 result.append(member)
             }
         }
-        return result
+
+        switch sortMethod {
+        case .name:
+            return result.sorted {
+                $0.albumTitle.localizedStandardCompare($1.albumTitle) == .orderedAscending
+            }
+        case .custom:
+            return result.sorted {
+                if $0.sortOrder != $1.sortOrder {
+                    return $0.sortOrder < $1.sortOrder
+                }
+                return $0.albumTitle.localizedStandardCompare($1.albumTitle) == .orderedAscending
+            }
+        }
     }
 
     init() {}
@@ -973,9 +1057,9 @@ struct AlbumsRootView: View {
                             Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
                         }
 
-                        if hierarchyMode == .groups && !idolGroups.isEmpty {
+                        if hierarchyMode == .groups && !sortedGroups.isEmpty {
                             Menu {
-                                ForEach(idolGroups) { group in
+                                ForEach(sortedGroups) { group in
                                     Button {
                                         renameText = group.name
                                         renamingGroup = group
@@ -1003,18 +1087,46 @@ struct AlbumsRootView: View {
 
                         Divider()
 
+                        Menu {
+                            ForEach(AlbumSortMethod.allCases) { method in
+                                Button {
+                                    withAnimation(.snappy(duration: 0.22)) {
+                                        sortMethodRaw = method.rawValue
+                                    }
+                                } label: {
+                                    if sortMethod == method {
+                                        Label(method.displayName, systemImage: "checkmark")
+                                    } else {
+                                        Text(method.displayName)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label(L10n.tr("排序方法", "並び替え"), systemImage: "arrow.up.arrow.down")
+                        }
+
+                        Menu {
+                            ForEach(AlbumDisplayMode.allCases) { mode in
+                                Button {
+                                    withAnimation(.snappy(duration: 0.22)) {
+                                        displayModeRaw = mode.rawValue
+                                    }
+                                } label: {
+                                    Label(mode.displayName, systemImage: displayMode == mode ? "checkmark" : mode.iconName)
+                                }
+                            }
+                        } label: {
+                            Label(L10n.tr("顯示方式", "表示形式"), systemImage: displayMode.iconName)
+                        }
+
+                        Divider()
+
                         Button {
                             pendingBatchPhotos = []
                             actionTargetMember = nil
                             showingBatchPairingSheet = true
                         } label: {
                             Label("批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
-                        }
-
-                        Button {
-                            showingQuickCreateSheet = true
-                        } label: {
-                            Label("新增團體 / 成員", systemImage: "person.badge.plus")
                         }
 
                         Button {
@@ -1057,11 +1169,11 @@ struct AlbumsRootView: View {
         .background(.bar)
     }
 
-    // MARK: - 團體相冊網格（基本相簿構造：團體 > 成員）
+    // MARK: - 團體相冊網格 / 清單（基本相簿構造：團體 > 成員）
 
     @ViewBuilder
     private var groupsAlbumGrid: some View {
-        if idolGroups.isEmpty && uncategorizedItems.isEmpty {
+        if sortedGroups.isEmpty && uncategorizedItems.isEmpty {
             ContentUnavailableView {
                 Label("尚無團體相冊", systemImage: "rectangle.stack")
             } description: {
@@ -1073,74 +1185,97 @@ struct AlbumsRootView: View {
                 .buttonStyle(.borderedProminent)
             }
             .padding(.top, 48)
-        } else {
+        } else if displayMode == .grid {
             LazyVGrid(columns: albumColumns, spacing: 12) {
-                ForEach(idolGroups) { group in
-                    NavigationLink(value: group) {
-                        ApplePhotoAlbumTile(
-                            primaryTitle: group.name,
-                            secondaryTitle: nil,
-                            coverImagesData: Self.groupCoverImages(for: group, allItems: validChekiItems)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button {
-                            actionTargetMember = group.sortedMembers.first
-                            showingCameraScanner = true
-                        } label: {
-                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
-                        }
-
-                        Button {
-                            actionTargetMember = group.sortedMembers.first
-                            showingAlbumPhotosPicker = true
-                        } label: {
-                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
-                        }
-
-                        Divider()
-
-                        Button {
-                            renameText = group.name
-                            renamingGroup = group
-                        } label: {
-                            Label(L10n.tr("修改團體名", "グループ名を変更"), systemImage: "pencil")
-                        }
-                    }
+                ForEach(sortedGroups) { group in
+                    groupAlbumEntryView(for: group, isList: false)
                 }
 
                 if !uncategorizedItems.isEmpty {
-                    NavigationLink(value: UncategorizedAlbumRoute()) {
-                        ApplePhotoAlbumTile(
-                            primaryTitle: "未分類",
-                            secondaryTitle: nil,
-                            coverImagesData: uncategorizedItems.compactMap(\.frontImageData)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button {
-                            actionTargetMember = nil
-                            showingCameraScanner = true
-                        } label: {
-                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
-                        }
+                    uncategorizedAlbumEntryView(isList: false)
+                }
+            }
+            .padding(.horizontal, 16)
+        } else {
+            LazyVStack(spacing: 10) {
+                ForEach(sortedGroups) { group in
+                    groupAlbumEntryView(for: group, isList: true)
+                }
 
-                        Button {
-                            actionTargetMember = nil
-                            showingAlbumPhotosPicker = true
-                        } label: {
-                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
-                        }
-                    }
+                if !uncategorizedItems.isEmpty {
+                    uncategorizedAlbumEntryView(isList: true)
                 }
             }
             .padding(.horizontal, 16)
         }
     }
 
-    // MARK: - 成員相冊網格（無視團體階層，直接在原本頁面展開所有成員相冊）
+    @ViewBuilder
+    private func groupAlbumEntryView(for group: IdolGroup, isList: Bool) -> some View {
+        let covers = Self.groupCoverImages(for: group, allItems: validChekiItems)
+        NavigationLink(value: group) {
+            if isList {
+                ApplePhotoAlbumListRow(
+                    primaryTitle: group.name,
+                    secondaryTitle: nil,
+                    coverImagesData: covers,
+                    showsDragHandle: sortMethod == .custom
+                )
+            } else {
+                ApplePhotoAlbumTile(
+                    primaryTitle: group.name,
+                    secondaryTitle: nil,
+                    coverImagesData: covers
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .onDrag {
+            draggingGroupID = group.id
+            return NSItemProvider(object: group.id.uuidString as NSString)
+        }
+        .onDrop(
+            of: [UTType.text],
+            delegate: GroupAlbumDropDelegate(
+                targetGroup: group,
+                groups: sortedGroups,
+                draggingGroupID: $draggingGroupID,
+                onReorder: { reordered in
+                    sortMethodRaw = AlbumSortMethod.custom.rawValue
+                    for (idx, item) in reordered.enumerated() {
+                        item.sortOrder = idx
+                    }
+                    try? modelContext.save()
+                }
+            )
+        )
+        .contextMenu {
+            Button {
+                actionTargetMember = group.sortedMembers.first
+                showingCameraScanner = true
+            } label: {
+                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+            }
+
+            Button {
+                actionTargetMember = group.sortedMembers.first
+                showingAlbumPhotosPicker = true
+            } label: {
+                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+            }
+
+            Divider()
+
+            Button {
+                renameText = group.name
+                renamingGroup = group
+            } label: {
+                Label(L10n.tr("修改團體名", "グループ名を変更"), systemImage: "pencil")
+            }
+        }
+    }
+
+    // MARK: - 成員相冊網格 / 清單（無視團體階層，直接在原本頁面展開所有成員相冊）
 
     @ViewBuilder
     private var allMembersAlbumGrid: some View {
@@ -1156,70 +1291,130 @@ struct AlbumsRootView: View {
                 .buttonStyle(.borderedProminent)
             }
             .padding(.top, 48)
-        } else {
+        } else if displayMode == .grid {
             LazyVGrid(columns: albumColumns, spacing: 12) {
                 ForEach(allExpandedMembers) { member in
-                    NavigationLink(value: member) {
-                        ApplePhotoAlbumTile(
-                            primaryTitle: member.albumTitle,
-                            secondaryTitle: nil,
-                            coverImagesData: Self.memberCoverImages(for: member, allItems: validChekiItems)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button {
-                            actionTargetMember = member
-                            showingCameraScanner = true
-                        } label: {
-                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
-                        }
-
-                        Button {
-                            actionTargetMember = member
-                            showingAlbumPhotosPicker = true
-                        } label: {
-                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
-                        }
-
-                        Divider()
-
-                        Button {
-                            renameText = member.stageName
-                            renamingMember = member
-                        } label: {
-                            Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
-                        }
-                    }
+                    memberAlbumEntryView(for: member, isList: false)
                 }
 
                 if !uncategorizedItems.isEmpty {
-                    NavigationLink(value: UncategorizedAlbumRoute()) {
-                        ApplePhotoAlbumTile(
-                            primaryTitle: "未分類",
-                            secondaryTitle: nil,
-                            coverImagesData: uncategorizedItems.compactMap(\.frontImageData)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button {
-                            actionTargetMember = nil
-                            showingCameraScanner = true
-                        } label: {
-                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
-                        }
-
-                        Button {
-                            actionTargetMember = nil
-                            showingAlbumPhotosPicker = true
-                        } label: {
-                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
-                        }
-                    }
+                    uncategorizedAlbumEntryView(isList: false)
                 }
             }
             .padding(.horizontal, 16)
+        } else {
+            LazyVStack(spacing: 10) {
+                ForEach(allExpandedMembers) { member in
+                    memberAlbumEntryView(for: member, isList: true)
+                }
+
+                if !uncategorizedItems.isEmpty {
+                    uncategorizedAlbumEntryView(isList: true)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    @ViewBuilder
+    private func memberAlbumEntryView(for member: IdolMember, isList: Bool) -> some View {
+        let covers = Self.memberCoverImages(for: member, allItems: validChekiItems)
+        NavigationLink(value: member) {
+            if isList {
+                ApplePhotoAlbumListRow(
+                    primaryTitle: member.albumTitle,
+                    secondaryTitle: nil,
+                    coverImagesData: covers,
+                    showsDragHandle: sortMethod == .custom
+                )
+            } else {
+                ApplePhotoAlbumTile(
+                    primaryTitle: member.albumTitle,
+                    secondaryTitle: nil,
+                    coverImagesData: covers
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .onDrag {
+            draggingMemberID = member.id
+            return NSItemProvider(object: member.id.uuidString as NSString)
+        }
+        .onDrop(
+            of: [UTType.text],
+            delegate: MemberAlbumDropDelegate(
+                targetMember: member,
+                members: allExpandedMembers,
+                draggingMemberID: $draggingMemberID,
+                onReorder: { reordered in
+                    sortMethodRaw = AlbumSortMethod.custom.rawValue
+                    for (idx, item) in reordered.enumerated() {
+                        item.sortOrder = idx
+                    }
+                    try? modelContext.save()
+                }
+            )
+        )
+        .contextMenu {
+            Button {
+                actionTargetMember = member
+                showingCameraScanner = true
+            } label: {
+                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+            }
+
+            Button {
+                actionTargetMember = member
+                showingAlbumPhotosPicker = true
+            } label: {
+                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+            }
+
+            Divider()
+
+            Button {
+                renameText = member.stageName
+                renamingMember = member
+            } label: {
+                Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func uncategorizedAlbumEntryView(isList: Bool) -> some View {
+        let covers = uncategorizedItems.compactMap(\.frontImageData)
+        NavigationLink(value: UncategorizedAlbumRoute()) {
+            if isList {
+                ApplePhotoAlbumListRow(
+                    primaryTitle: "未分類",
+                    secondaryTitle: nil,
+                    coverImagesData: covers,
+                    showsDragHandle: false
+                )
+            } else {
+                ApplePhotoAlbumTile(
+                    primaryTitle: "未分類",
+                    secondaryTitle: nil,
+                    coverImagesData: covers
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                actionTargetMember = nil
+                showingCameraScanner = true
+            } label: {
+                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+            }
+
+            Button {
+                actionTargetMember = nil
+                showingAlbumPhotosPicker = true
+            } label: {
+                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+            }
         }
     }
 
@@ -1249,7 +1444,7 @@ struct AlbumsRootView: View {
     }
 }
 
-// MARK: - 3. ApplePhotoAlbumTile (Apple 相簿 1:1 圓角滿版相冊磚，嚴格裁切點擊邊界)
+// MARK: - 3. ApplePhotoAlbumTile & ApplePhotoAlbumListRow & Drag Reorder DropDelegates
 
 struct ApplePhotoAlbumTile: View {
     let primaryTitle: String
@@ -1316,6 +1511,132 @@ struct ApplePhotoAlbumTile: View {
     }
 }
 
+/// 清單顯示方式（圖片放左邊，右邊顯示名稱）
+struct ApplePhotoAlbumListRow: View {
+    let primaryTitle: String
+    let secondaryTitle: String?
+    let coverImagesData: [Data]
+    var showsDragHandle: Bool = false
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Color(.secondarySystemFill)
+                .frame(width: 68, height: 68)
+                .overlay {
+                    if let firstData = coverImagesData.first,
+                       let uiImage = UIImage(data: firstData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .scaleEffect(1.18)
+                    } else {
+                        Image(systemName: "photo.on.rectangle")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(LocalizedStringKey(primaryTitle))
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                if let secondaryTitle {
+                    Text(LocalizedStringKey(secondaryTitle))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            if showsDragHandle {
+                Image(systemName: "line.3.horizontal")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            Color(.secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct GroupAlbumDropDelegate: DropDelegate {
+    let targetGroup: IdolGroup
+    let groups: [IdolGroup]
+    @Binding var draggingGroupID: UUID?
+    let onReorder: ([IdolGroup]) -> Void
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingGroupID = nil
+        return true
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let draggingID = draggingGroupID,
+              draggingID != targetGroup.id,
+              let fromIndex = groups.firstIndex(where: { $0.id == draggingID }),
+              let toIndex = groups.firstIndex(where: { $0.id == targetGroup.id }) else {
+            return
+        }
+        var updated = groups
+        let moved = updated.remove(at: fromIndex)
+        updated.insert(moved, at: toIndex)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.snappy(duration: 0.22)) {
+            onReorder(updated)
+        }
+    }
+}
+
+private struct MemberAlbumDropDelegate: DropDelegate {
+    let targetMember: IdolMember
+    let members: [IdolMember]
+    @Binding var draggingMemberID: UUID?
+    let onReorder: ([IdolMember]) -> Void
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingMemberID = nil
+        return true
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let draggingID = draggingMemberID,
+              draggingID != targetMember.id,
+              let fromIndex = members.firstIndex(where: { $0.id == draggingID }),
+              let toIndex = members.firstIndex(where: { $0.id == targetMember.id }) else {
+            return
+        }
+        var updated = members
+        let moved = updated.remove(at: fromIndex)
+        updated.insert(moved, at: toIndex)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.snappy(duration: 0.22)) {
+            onReorder(updated)
+        }
+    }
+}
+
 // MARK: - 4. GroupMembersAlbumView (團體 > 成員 第二層：點開某個團體後顯示該團體旗下的成員相冊)
 
 private struct GroupMembersAlbumView: View {
@@ -1323,6 +1644,9 @@ private struct GroupMembersAlbumView: View {
     let allItems: [ChekiItem]
 
     @Environment(\.modelContext) private var modelContext
+    @AppStorage("albumSortMethod") private var sortMethodRaw: String = AlbumSortMethod.custom.rawValue
+    @AppStorage("albumDisplayMode") private var displayModeRaw: String = AlbumDisplayMode.grid.rawValue
+
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
@@ -1335,6 +1659,26 @@ private struct GroupMembersAlbumView: View {
     @State private var showingRenameGroupAlert: Bool = false
     @State private var renamingMember: IdolMember? = nil
     @State private var renameText: String = ""
+    @State private var draggingMemberID: UUID? = nil
+
+    private var sortMethod: AlbumSortMethod {
+        AlbumSortMethod(rawValue: sortMethodRaw) ?? .custom
+    }
+
+    private var displayMode: AlbumDisplayMode {
+        AlbumDisplayMode(rawValue: displayModeRaw) ?? .grid
+    }
+
+    private var displayedMembers: [IdolMember] {
+        switch sortMethod {
+        case .name:
+            return group.members.sorted {
+                $0.stageName.localizedStandardCompare($1.stageName) == .orderedAscending
+            }
+        case .custom:
+            return group.sortedMembers
+        }
+    }
 
     private let albumColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -1343,7 +1687,7 @@ private struct GroupMembersAlbumView: View {
 
     var body: some View {
         ScrollView {
-            if group.sortedMembers.isEmpty {
+            if displayedMembers.isEmpty {
                 ContentUnavailableView {
                     Label("此團體尚無成員", systemImage: "person.badge.plus")
                 } description: {
@@ -1355,41 +1699,19 @@ private struct GroupMembersAlbumView: View {
                     .buttonStyle(.borderedProminent)
                 }
                 .padding(.top, 60)
-            } else {
+            } else if displayMode == .grid {
                 LazyVGrid(columns: albumColumns, spacing: 12) {
-                    ForEach(group.sortedMembers) { member in
-                        NavigationLink(value: member) {
-                            ApplePhotoAlbumTile(
-                                primaryTitle: member.albumTitle,
-                                secondaryTitle: nil,
-                                coverImagesData: AlbumsRootView.memberCoverImages(for: member, allItems: allItems)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button {
-                                actionTargetMember = member
-                                showingCameraScanner = true
-                            } label: {
-                                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
-                            }
-
-                            Button {
-                                actionTargetMember = member
-                                showingAlbumPhotosPicker = true
-                            } label: {
-                                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
-                            }
-
-                            Divider()
-
-                            Button {
-                                renameText = member.stageName
-                                renamingMember = member
-                            } label: {
-                                Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
-                            }
-                        }
+                    ForEach(displayedMembers) { member in
+                        groupMemberAlbumEntry(for: member, isList: false)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 28)
+            } else {
+                LazyVStack(spacing: 10) {
+                    ForEach(displayedMembers) { member in
+                        groupMemberAlbumEntry(for: member, isList: true)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -1424,14 +1746,14 @@ private struct GroupMembersAlbumView: View {
 
                     Menu {
                         Button {
-                            actionTargetMember = group.sortedMembers.first
+                            actionTargetMember = displayedMembers.first
                             showingCameraScanner = true
                         } label: {
                             Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
                         }
 
                         Button {
-                            actionTargetMember = group.sortedMembers.first
+                            actionTargetMember = displayedMembers.first
                             showingAlbumPhotosPicker = true
                         } label: {
                             Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
@@ -1444,9 +1766,9 @@ private struct GroupMembersAlbumView: View {
                             Label(L10n.tr("修改團體名", "グループ名を変更"), systemImage: "pencil")
                         }
 
-                        if !group.sortedMembers.isEmpty {
+                        if !displayedMembers.isEmpty {
                             Menu {
-                                ForEach(group.sortedMembers) { member in
+                                ForEach(displayedMembers) { member in
                                     Button {
                                         renameText = member.stageName
                                         renamingMember = member
@@ -1461,10 +1783,36 @@ private struct GroupMembersAlbumView: View {
 
                         Divider()
 
-                        Button {
-                            showingQuickCreateSheet = true
+                        Menu {
+                            ForEach(AlbumSortMethod.allCases) { method in
+                                Button {
+                                    withAnimation(.snappy(duration: 0.22)) {
+                                        sortMethodRaw = method.rawValue
+                                    }
+                                } label: {
+                                    if sortMethod == method {
+                                        Label(method.displayName, systemImage: "checkmark")
+                                    } else {
+                                        Text(method.displayName)
+                                    }
+                                }
+                            }
                         } label: {
-                            Label("新增成員", systemImage: "person.badge.plus")
+                            Label(L10n.tr("排序方法", "並び替え"), systemImage: "arrow.up.arrow.down")
+                        }
+
+                        Menu {
+                            ForEach(AlbumDisplayMode.allCases) { mode in
+                                Button {
+                                    withAnimation(.snappy(duration: 0.22)) {
+                                        displayModeRaw = mode.rawValue
+                                    }
+                                } label: {
+                                    Label(mode.displayName, systemImage: displayMode == mode ? "checkmark" : mode.iconName)
+                                }
+                            }
+                        } label: {
+                            Label(L10n.tr("顯示方式", "表示形式"), systemImage: displayMode.iconName)
                         }
 
                         Divider()
@@ -1529,6 +1877,71 @@ private struct GroupMembersAlbumView: View {
                     try? modelContext.save()
                 }
                 renamingMember = nil
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func groupMemberAlbumEntry(for member: IdolMember, isList: Bool) -> some View {
+        let covers = AlbumsRootView.memberCoverImages(for: member, allItems: allItems)
+        NavigationLink(value: member) {
+            if isList {
+                ApplePhotoAlbumListRow(
+                    primaryTitle: member.albumTitle,
+                    secondaryTitle: nil,
+                    coverImagesData: covers,
+                    showsDragHandle: sortMethod == .custom
+                )
+            } else {
+                ApplePhotoAlbumTile(
+                    primaryTitle: member.albumTitle,
+                    secondaryTitle: nil,
+                    coverImagesData: covers
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .onDrag {
+            draggingMemberID = member.id
+            return NSItemProvider(object: member.id.uuidString as NSString)
+        }
+        .onDrop(
+            of: [UTType.text],
+            delegate: MemberAlbumDropDelegate(
+                targetMember: member,
+                members: displayedMembers,
+                draggingMemberID: $draggingMemberID,
+                onReorder: { reordered in
+                    sortMethodRaw = AlbumSortMethod.custom.rawValue
+                    for (idx, item) in reordered.enumerated() {
+                        item.sortOrder = idx
+                    }
+                    try? modelContext.save()
+                }
+            )
+        )
+        .contextMenu {
+            Button {
+                actionTargetMember = member
+                showingCameraScanner = true
+            } label: {
+                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+            }
+
+            Button {
+                actionTargetMember = member
+                showingAlbumPhotosPicker = true
+            } label: {
+                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+            }
+
+            Divider()
+
+            Button {
+                renameText = member.stageName
+                renamingMember = member
+            } label: {
+                Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
             }
         }
     }
