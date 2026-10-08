@@ -640,15 +640,15 @@ struct ChekiDetailView: View {
     // MARK: - 4. 底部縮圖膠卷 (Filmstrip Scrubber) + 5 大標準工具列按鈕
 
     private func bottomControlsStack(isLandscape: Bool, containerWidth: CGFloat) -> some View {
-        VStack(spacing: isLandscape ? 2 : 8) {
+        VStack(spacing: isLandscape ? 4 : 18) {
             // 底部縮圖膠卷 (Filmstrip Scrubber)
             filmstripScrubberBar(isLandscape: isLandscape, containerWidth: containerWidth)
 
-            // Apple Photos 標準 5 大工具列按鈕（分享、愛心、ℹ️、調整、垃圾桶）
+            // Apple Photos 標準 5 大工具列按鈕（左圓分享、中三合一膠囊、右圓刪除）
             standardFiveIconToolbar(isLandscape: isLandscape)
         }
         .padding(.top, isLandscape ? 2 : 8)
-        .padding(.bottom, isLandscape ? 0 : 6)
+        .padding(.bottom, isLandscape ? -4 : -10)
         .background(
             LinearGradient(
                 colors: [
@@ -732,11 +732,12 @@ struct ChekiDetailView: View {
     }
 
     private func standardFiveIconToolbar(isLandscape: Bool) -> some View {
-        let iconFontSize: CGFloat = isLandscape ? 14.5 : 19
-        let pillHeight: CGFloat = isLandscape ? 34 : 46
-        let centerButtonWidth: CGFloat = isLandscape ? 42 : 54
+        let iconFontSize: CGFloat = isLandscape ? 14 : 18
+        let pillHeight: CGFloat = isLandscape ? 34 : 44
+        let centerButtonWidth: CGFloat = isLandscape ? 38 : 44
+        let outerPillSpacing: CGFloat = isLandscape ? 18 : 28
 
-        return HStack(alignment: .center) {
+        return HStack(alignment: .center, spacing: outerPillSpacing) {
             // 左側獨立圓形膠囊：1. 分享 (Share)
             Button {
                 shareCurrentItem()
@@ -755,10 +756,8 @@ struct ChekiDetailView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("分享拍立得")
 
-            Spacer()
-
             // 中央三合一膠囊：2. 愛心 (Favorite) + 3. 資訊 (Info) + 4. 調整 (Adjust)
-            HStack(spacing: isLandscape ? 4 : 6) {
+            HStack(spacing: isLandscape ? 2 : 2) {
                 // 2. 愛心 / 最愛 (Favorite)
                 Button {
                     toggleFavorite()
@@ -809,7 +808,7 @@ struct ChekiDetailView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("調整拍立得邊界與比例")
             }
-            .padding(.horizontal, isLandscape ? 6 : 8)
+            .padding(.horizontal, isLandscape ? 4 : 4)
             .frame(height: pillHeight)
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(
@@ -817,8 +816,6 @@ struct ChekiDetailView: View {
                     .strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
             )
             .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
-
-            Spacer()
 
             // 右側獨立圓形膠囊：5. 垃圾桶 (Delete)
             Button(role: .destructive) {
@@ -838,8 +835,6 @@ struct ChekiDetailView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("刪除拍立得")
         }
-        .frame(maxWidth: isLandscape ? 320 : 420)
-        .padding(.horizontal, isLandscape ? 16 : 24)
     }
 
     // MARK: - 5. 手勢與互動動作 (Gestures & Actions)
