@@ -13,6 +13,9 @@ struct ChekiLensApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .task {
+                    await StoreKitManager.shared.initializeStore()
+                }
         }
         .modelContainer(sharedModelContainer)
     }

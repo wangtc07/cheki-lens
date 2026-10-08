@@ -517,6 +517,9 @@ struct SettingsView: View {
             } message: {
                 Text(alertMessage ?? "")
             }
+            .task {
+                await StoreKitManager.shared.initializeStore()
+            }
         }
         .preferredColorScheme(
             (AppAppearanceMode(rawValue: appAppearanceModeRaw) ?? .system).resolvedColorScheme
@@ -578,7 +581,7 @@ struct SettingsView: View {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     showingProPurchaseSheet = true
                 } label: {
-                    Text("¥600 / NT$120 永久解鎖")
+                    Text(StoreKitManager.shared.bannerUnlockButtonTitle)
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(Color(red: 0.12, green: 0.11, blue: 0.29))
                         .frame(maxWidth: .infinity)
@@ -629,23 +632,10 @@ struct SettingsView: View {
         isRestoringPurchases = true
         defer { isRestoringPurchases = false }
 
-        do {
-            try await AppStore.sync()
-        } catch {
-            // 模擬器環境若無登入沙盒帳號則忽略同步錯誤，直接檢查本地與當前交易權益
-        }
+        let restored = await StoreKitManager.shared.restorePurchases()
+        isProLifetimeUnlocked = StoreKitManager.shared.isProUnlocked
 
-        var foundProEntitlement = false
-        for await result in Transaction.currentEntitlements {
-            if case .verified(let transaction) = result,
-               transaction.productID.lowercased().contains("pro") {
-                foundProEntitlement = true
-                break
-            }
-        }
-
-        if foundProEntitlement || isProLifetimeUnlocked {
-            isProLifetimeUnlocked = true
+        if restored || isProLifetimeUnlocked {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             alertTitle = "恢復購買成功"
             alertMessage = "已成功恢復您的 ChekiLens Pro 終身買斷授權！"
@@ -698,6 +688,7 @@ private struct ProLifetimePaywallSheet: View {
     let onRestorePurchases: () async -> Void
 
     @State private var isPurchasing: Bool = false
+    @State private var purchaseStatusNote: String? = nil
 
     private let features: [(icon: String, color: Color, title: String, desc: String)] = [
         ("4k.tv.fill", .indigo, "原畫質無損輸出 · 原生相簿原地裁切", "免費版於系統相簿保留未裁切原圖；升級 Pro 可直接在 iOS 原生相簿非破壞性原地裁切（不新增重複照片、保留原圖可復原）並無損輸出"),
@@ -706,6 +697,8 @@ private struct ProLifetimePaywallSheet: View {
     ]
 
     var body: some View {
+        let priceLabel = StoreKitManager.shared.displayPrice
+
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
@@ -733,12 +726,12 @@ private struct ProLifetimePaywallSheet: View {
                         Text("ChekiLens Pro 終身買斷")
                             .font(.title2.weight(.heavy))
 
-                        Text("一次買斷 NT$120 / ¥600 · 永久解鎖全功能")
+                        Text("一次買斷 \(priceLabel) · 永久解鎖全功能")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
 
-                    // 四大權益列表
+                    // 三大核心權益列表
                     VStack(spacing: 14) {
                         ForEach(features, id: \.title) { item in
                             HStack(alignment: .top, spacing: 14) {
@@ -764,6 +757,14 @@ private struct ProLifetimePaywallSheet: View {
                     }
                     .padding(.horizontal, 16)
 
+                    if let note = purchaseStatusNote {
+                        Text(note)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                    }
+
                     // 購買與恢復按鈕
                     VStack(spacing: 10) {
                         Button {
@@ -777,7 +778,7 @@ private struct ProLifetimePaywallSheet: View {
                                         .tint(.white)
                                 } else {
                                     Image(systemName: isProUnlocked ? "checkmark.seal.fill" : "lock.open.fill")
-                                    Text(isProUnlocked ? "已解鎖 Pro 終身版（點擊切換測試狀態）" : "NT$120 / ¥600 立即永久解鎖")
+                                    Text(isProUnlocked ? "已解鎖 Pro 終身版（點擊切換測試狀態）" : "\(priceLabel) 立即永久解鎖")
                                         .fontWeight(.bold)
                                 }
                             }
@@ -835,28 +836,39 @@ private struct ProLifetimePaywallSheet: View {
     @MainActor
     private func performPurchase() async {
         isPurchasing = true
+        purchaseStatusNote = nil
         defer { isPurchasing = false }
 
-        // 先嘗試透過 StoreKit 2 查詢正式 Non-Consumable 商品 (com.chekilens.pro.lifetime)
-        if let products = try? await Product.products(for: ["com.chekilens.pro.lifetime"]),
-           let proProduct = products.first {
-            if let result = try? await proProduct.purchase(),
-               case .success(let verification) = result,
-               case .verified(let transaction) = verification {
-                await transaction.finish()
-                isProUnlocked = true
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                dismiss()
-                return
-            }
+        // 若目前已解鎖且在開發測試中點擊，支援切換回免費版以測試浮水印與原生相簿未裁切行為
+        if isProUnlocked && StoreKitManager.shared.proProduct == nil {
+            StoreKitManager.shared.setProUnlocked(false)
+            isProUnlocked = false
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            return
         }
 
-        // 開發與模擬器環境 Fallback：切換 Pro 解鎖狀態以供測試驗證
-        try? await Task.sleep(for: .milliseconds(350))
-        isProUnlocked.toggle()
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        if isProUnlocked {
+        let outcome = await StoreKitManager.shared.purchaseProLifetime()
+        isProUnlocked = StoreKitManager.shared.isProUnlocked
+
+        switch outcome {
+        case .purchased, .restored:
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
             dismiss()
+
+        case .simulatedToggle(let unlocked):
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            if unlocked {
+                dismiss()
+            }
+
+        case .pending:
+            purchaseStatusNote = "交易等待家長或帳號核准中，核准後將自動解鎖 Pro。"
+
+        case .userCancelled:
+            break
+
+        case .failed(let message):
+            purchaseStatusNote = message
         }
     }
 }
