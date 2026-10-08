@@ -185,7 +185,7 @@ struct LibraryView: View {
             .sheet(isPresented: $showingQuickCreateSheet) {
                 QuickCreateIdolSheet()
             }
-            .sheet(isPresented: $showingSettingsSheet, onDismiss: {
+        .sheet(isPresented: $showingSettingsSheet, onDismiss: {
                 if autoSyncToPhotos {
                     Task {
                         await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
@@ -552,36 +552,7 @@ struct LibraryView: View {
             .buttonStyle(.plain)
             .contextMenu {
                 Menu {
-                    Button {
-                        item.idolMember = nil
-                        try? modelContext.save()
-                        if autoSyncToPhotos {
-                            Task {
-                                await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                                    [item],
-                                    modelContext: modelContext
-                                )
-                            }
-                        }
-                    } label: {
-                        Label("設為未分類", systemImage: "tray")
-                    }
-                    ForEach(idolMembers) { member in
-                        Button {
-                            item.idolMember = member
-                            try? modelContext.save()
-                            if autoSyncToPhotos {
-                                Task {
-                                    await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                                        [item],
-                                        modelContext: modelContext
-                                    )
-                                }
-                            }
-                        } label: {
-                            Text(member.albumTitle)
-                        }
-                    }
+                    MemberAssignmentMenuContent(item: item) { showingQuickCreateSheet = true }
                 } label: {
                     Label("指派推角成員", systemImage: "person.crop.circle.badge.plus")
                 }
@@ -1251,6 +1222,7 @@ struct AlbumHeroDetailView: View {
     private static let supportedColumnCounts = [1, 2, 3, 5]
     @State private var columnCount: Int = 5
     @State private var pinchBaselineColumnCount: Int? = nil
+    @State private var showingQuickCreateMember: Bool = false
 
     private var validAllChekiItems: [ChekiItem] {
         allChekiItems.filter { !$0.isDeleted && $0.modelContext != nil }
@@ -1333,6 +1305,9 @@ struct AlbumHeroDetailView: View {
         .ignoresSafeArea(edges: .top)
         .background(Color(.systemBackground))
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showingQuickCreateMember) {
+            QuickCreateIdolSheet()
+        }
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar((isSelectionMode || chromeState.shouldHideMainTabBar) ? .hidden : .visible, for: .tabBar)
         .onChange(of: isSelectionMode) { _, newValue in
@@ -1729,37 +1704,7 @@ struct AlbumHeroDetailView: View {
             .buttonStyle(.plain)
             .contextMenu {
                 Menu("指派推角成員") {
-                    Button {
-                        item.idolMember = nil
-                        try? modelContext.save()
-                        if autoSyncToPhotos {
-                            Task {
-                                await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                                    [item],
-                                    modelContext: modelContext
-                                )
-                            }
-                        }
-                    } label: {
-                        Label("未分類", systemImage: item.idolMember == nil ? "checkmark" : "tray")
-                    }
-
-                    ForEach(idolMembers) { member in
-                        Button {
-                            item.idolMember = member
-                            try? modelContext.save()
-                            if autoSyncToPhotos {
-                                Task {
-                                    await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                                        [item],
-                                        modelContext: modelContext
-                                    )
-                                }
-                            }
-                        } label: {
-                            Label(member.albumTitle, systemImage: item.idolMember?.id == member.id ? "checkmark" : "person")
-                        }
-                    }
+                    MemberAssignmentMenuContent(item: item) { showingQuickCreateMember = true }
                 }
 
                 Divider()

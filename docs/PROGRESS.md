@@ -275,4 +275,5 @@
 ### 階段 6：端到端整合與發布準備 (Phase 6: QA & Release)
 - [x] **Task 6.1**: 實機測試與效能調校（實機部署至 iPhone 12 mini `ジェ`；補齊 `CameraScannerView` 所有拍攝模式自動同步寫入 iOS 原生相簿 `Photos.app`；將 Mode B 雙角度去反光升級為「第 1 張拍完立即背景預處理 + 1440px 快速正面四角偵測 + 540px 配準代理 + 270×430 O(1) 滑動視窗權重遮罩 + Core Image GPU `CIBlendWithMask` 單次 4K 渲染 + 取景器追蹤每 6 幀節流」，消除 4K CPU 迴圈瓶頸）
 - [x] **Task 6.2**: 支援深色/淺色模式、動態字級 (Dynamic Type) 與日文 (`ja`)／繁體中文 (`zh-Hant`) 雙語系切換（預設自動匹配 iOS 系統語系，並可於「設定 › 一般與關於 › 語言」即時切換繁中／日文）
+  - 拍照/匯入後修改成員（`⋯` 選單、資訊欄、相簿長按選單）改為與批次工作台一致的「團體 ➔ 成員」多層選單，並含「新增成員…」（`MemberAssignmentMenuContent`；模型僅單一成員）
 - [ ] **Task 6.3**: 建立 App 圖示、啟動畫面與 App Store 截圖產生流程

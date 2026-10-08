@@ -16,6 +16,7 @@ struct ChekiInfoView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
 
+    @State private var showingQuickCreateMember: Bool = false
     @State private var isEditingDate: Bool = false
     @State private var isEditingTime: Bool = false
     @State private var memoText: String = ""
@@ -141,7 +142,7 @@ struct ChekiInfoView: View {
                 }
 
                 // 成員（點擊可直接切換歸檔成員）
-                if !idolMembers.isEmpty {
+                if true {
                     HStack {
                         Text("成員")
                             .foregroundStyle(.primary)
@@ -149,41 +150,7 @@ struct ChekiInfoView: View {
                         Spacer()
 
                         Menu {
-                            Button {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                item.idolMember = nil
-                                try? modelContext.save()
-                                if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
-                                    Task {
-                                        await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                                            [item],
-                                            modelContext: modelContext
-                                        )
-                                    }
-                                }
-                            } label: {
-                                Label("未分類", systemImage: item.idolMember == nil ? "checkmark" : "tray")
-                            }
-
-                            Divider()
-
-                            ForEach(idolMembers) { member in
-                                Button {
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    item.idolMember = member
-                                    try? modelContext.save()
-                                    if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
-                                        Task {
-                                            await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                                                [item],
-                                                modelContext: modelContext
-                                            )
-                                        }
-                                    }
-                                } label: {
-                                    Label(member.albumTitle, systemImage: item.idolMember?.id == member.id ? "checkmark" : "person")
-                                }
-                            }
+                            MemberAssignmentMenuContent(item: item) { showingQuickCreateMember = true }
                         } label: {
                             HStack(spacing: 4) {
                                 if let memberTitle = item.idolMember?.albumTitle {
@@ -214,6 +181,9 @@ struct ChekiInfoView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .sheet(isPresented: $showingQuickCreateMember) {
+            QuickCreateIdolSheet()
+        }
         .navigationTitle("資訊")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {

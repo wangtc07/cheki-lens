@@ -27,6 +27,7 @@ struct ChekiDetailView: View {
     private let initialItemID: UUID
 
     /// 當前正在檢視的拍立得（透過底部縮圖膠卷或左右滑動可即時切換）
+    @State private var showingQuickCreateMember: Bool = false
     @State private var currentItemID: UUID?
     /// 上一張檢視的拍立得 ID（確保跨張點擊縮圖時離場卡片也能平滑滑動）
     @State private var previousItemID: UUID?
@@ -221,6 +222,9 @@ struct ChekiDetailView: View {
             modeBSecondAnglePickerItem = nil
             Task { await synthesizeModeBSecondAnglePhoto(from: newPickerItem) }
         }
+        .sheet(isPresented: $showingQuickCreateMember) {
+            QuickCreateIdolSheet()
+        }
         .sheet(isPresented: $showingInfoSheet) {
             if let activeItem = currentItemOpt {
                 NavigationStack {
@@ -392,41 +396,7 @@ struct ChekiDetailView: View {
                 }
 
                 Menu {
-                    Button {
-                        let target = currentItem
-                        target.idolMember = nil
-                        try? modelContext.save()
-                        if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
-                            Task {
-                                await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                                    [target],
-                                    modelContext: modelContext
-                                )
-                            }
-                        }
-                    } label: {
-                        Label("未分類", systemImage: currentItem.idolMember == nil ? "checkmark" : "tray")
-                    }
-
-                    Divider()
-
-                    ForEach(idolMembers) { member in
-                        Button {
-                            let target = currentItem
-                            target.idolMember = member
-                            try? modelContext.save()
-                            if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
-                                Task {
-                                    await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                                        [target],
-                                        modelContext: modelContext
-                                    )
-                                }
-                            }
-                        } label: {
-                            Label(member.albumTitle, systemImage: currentItem.idolMember?.id == member.id ? "checkmark" : "person")
-                        }
-                    }
+                    MemberAssignmentMenuContent(item: currentItem) { showingQuickCreateMember = true }
                 } label: {
                     Label("指派推角成員", systemImage: "person.crop.circle")
                 }
