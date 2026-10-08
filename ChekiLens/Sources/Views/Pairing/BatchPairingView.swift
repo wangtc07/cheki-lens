@@ -769,12 +769,12 @@ struct BatchPairingView: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    /// 已選中的成員下拉膠囊框：直接點選膠囊本體可用多層下拉選單重選該成員，右側保持 `X` 按鈕可取消移除
+    /// 已選中的成員下拉膠囊框：直接點選膠囊本體可用多層多選下拉選單勾選／取消多位成員，右側保持 `X` 按鈕可快速移除
     private func selectedMemberDropdownCapsule(member: IdolMember, index: Int) -> some View {
         HStack(spacing: 2) {
-            // 左側主體：點選開啟多層下拉選單（團體 ➔ 成員 ➔ 新增成員）直接重選／替換此位置的成員
+            // 左側主體：點選開啟多層多選下拉選單（團體 ➔ 成員 ➔ 新增成員），點選項目不會自動關閉選單
             Menu {
-                memberHierarchyMenuContent(replacingAt: index)
+                memberHierarchyMenuContent(replacingAt: nil)
             } label: {
                 HStack(spacing: 5) {
                     Circle()
@@ -802,6 +802,7 @@ struct BatchPairingView: View {
                 .padding(.vertical, 6)
                 .contentShape(Rectangle())
             }
+            .menuActionDismissBehavior(.disabled)
             .buttonStyle(.plain)
 
             // 右側：保持 X 按鈕取消該成員
@@ -828,27 +829,19 @@ struct BatchPairingView: View {
 
     /// 未選擇的成員多層下拉選單膠囊（沒有選擇任何成員時顯示「未分類 · 選擇成員」，已有選擇時緊接在後方供多選追加）
     private var unselectedMemberDropdownCapsule: some View {
-        Menu {
+        let isEmpty = selectedTargetMembers.isEmpty
+        return Menu {
             memberHierarchyMenuContent(replacingAt: nil)
         } label: {
             HStack(spacing: 5) {
-                if selectedTargetMembers.isEmpty {
-                    Image(systemName: "person.crop.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("未分類 · 選擇成員")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: true, vertical: false)
-                } else {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.secondary)
-                    Text("選擇成員")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
+                Image(systemName: isEmpty ? "person.crop.circle" : "plus")
+                    .font(isEmpty ? .caption : .system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+
+                Text(LocalizedStringKey(isEmpty ? "未分類 · 選擇成員" : "選擇成員"))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(isEmpty ? .primary : .secondary)
+                    .fixedSize(horizontal: true, vertical: false)
 
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9.5, weight: .bold))
@@ -858,98 +851,77 @@ struct BatchPairingView: View {
             .padding(.vertical, 6)
             .background(Color(.tertiarySystemFill), in: Capsule())
         }
+        .menuActionDismissBehavior(.disabled)
         .buttonStyle(.plain)
     }
 
-    /// 多層級成員選單內容（第一層：團體 ➔ 第二層：成員，最後可新增成員）
-    /// - Parameter replacingAt: 若為 `Int` 代表重選並替換該索引的膠囊成員；若為 `nil` 代表在後方追加新成員
+    /// 多層級成員選單內容（第一層：團體 ➔ 第二層：成員，最後可新增成員；支援多選且點選不自動關閉）
     @ViewBuilder
     private func memberHierarchyMenuContent(replacingAt index: Int?) -> some View {
         let ungroupedMembers = idolMembers.filter { $0.group == nil }
-        let currentMemberAtSlot: IdolMember? = {
-            if let idx = index, selectedTargetMembers.indices.contains(idx) {
-                return selectedTargetMembers[idx]
-            }
-            return nil
-        }()
 
-        Section(index != nil ? "重新選擇成員" : "選擇成員（可多選）") {
+        Section("選擇成員（可多選）") {
             ForEach(idolGroups) { group in
                 let groupMembers = idolMembers.filter { $0.group?.id == group.id }
                 if !groupMembers.isEmpty {
                     Menu(group.name) {
                         ForEach(groupMembers) { member in
-                            let isCurrent = (currentMemberAtSlot?.id == member.id)
                             let isAlreadyInList = selectedTargetMembers.contains(where: { $0.id == member.id })
                             Button {
                                 selectTargetMember(member, replacingAt: index)
                             } label: {
                                 Label(
                                     member.stageName,
-                                    systemImage: isCurrent
-                                        ? "checkmark.circle.fill"
-                                        : (isAlreadyInList ? "checkmark" : "person")
+                                    systemImage: isAlreadyInList ? "checkmark.circle.fill" : "circle"
                                 )
                             }
+                            .menuActionDismissBehavior(.disabled)
                         }
                     }
+                    .menuActionDismissBehavior(.disabled)
                 }
             }
 
             if !ungroupedMembers.isEmpty {
                 Menu("未分團成員") {
                     ForEach(ungroupedMembers) { member in
-                        let isCurrent = (currentMemberAtSlot?.id == member.id)
                         let isAlreadyInList = selectedTargetMembers.contains(where: { $0.id == member.id })
                         Button {
                             selectTargetMember(member, replacingAt: index)
                         } label: {
                             Label(
                                 member.stageName,
-                                systemImage: isCurrent
-                                    ? "checkmark.circle.fill"
-                                    : (isAlreadyInList ? "checkmark" : "person")
+                                systemImage: isAlreadyInList ? "checkmark.circle.fill" : "circle"
                             )
                         }
+                        .menuActionDismissBehavior(.disabled)
                     }
                 }
+                .menuActionDismissBehavior(.disabled)
             }
         }
 
-        if let idx = index {
+        if !selectedTargetMembers.isEmpty {
             Divider()
             Button(role: .destructive) {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(.snappy(duration: 0.2)) {
-                    if selectedTargetMembers.indices.contains(idx) {
-                        selectedTargetMembers.remove(at: idx)
-                        defaultFallbackMember = selectedTargetMembers.first
-                    }
-                }
-            } label: {
-                Label("移除此成員", systemImage: "xmark.circle")
-            }
-        } else if !selectedTargetMembers.isEmpty {
-            Divider()
-            Button(role: .destructive) {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(.snappy(duration: 0.2)) {
-                    selectedTargetMembers.removeAll()
-                    defaultFallbackMember = nil
-                }
+                selectedTargetMembers.removeAll()
+                defaultFallbackMember = nil
             } label: {
                 Label("清空所有已選成員（設為未分類）", systemImage: "tray")
             }
+            .menuActionDismissBehavior(.disabled)
         }
 
         Divider()
 
-        // 最後一項：新增成員
+        // 最後一項：新增成員（點擊時應關閉選單以彈出建立成員 Sheet）
         Button {
             showingQuickCreateMemberSheet = true
         } label: {
             Label("新增成員…", systemImage: "person.badge.plus")
         }
+        .menuActionDismissBehavior(.enabled)
     }
 
     // MARK: - 3. 格狀卡片單元：撲克牌兩張展開樣式 (Playing-Card Fan) & 單張直立樣式
@@ -1390,6 +1362,7 @@ struct BatchPairingView: View {
                                 .menuActionDismissBehavior(.disabled)
                             }
                         }
+                        .menuActionDismissBehavior(.disabled)
                     }
                 }
 
@@ -1408,6 +1381,7 @@ struct BatchPairingView: View {
                             .menuActionDismissBehavior(.disabled)
                         }
                     }
+                    .menuActionDismissBehavior(.disabled)
                 }
             }
 
@@ -1418,6 +1392,7 @@ struct BatchPairingView: View {
             } label: {
                 Label("設為「未分類」", systemImage: slot.assignedMembers.isEmpty ? "checkmark" : "tray")
             }
+            .menuActionDismissBehavior(.disabled)
 
             Divider()
 
@@ -1426,6 +1401,7 @@ struct BatchPairingView: View {
             } label: {
                 Label("新增成員…", systemImage: "person.badge.plus")
             }
+            .menuActionDismissBehavior(.enabled)
         } label: {
             HStack(spacing: 6) {
                 if let primary = slot.assignedMembers.first {
@@ -1472,6 +1448,7 @@ struct BatchPairingView: View {
             .padding(.vertical, 7)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+        .menuActionDismissBehavior(.disabled)
         .buttonStyle(.plain)
     }
 
@@ -1498,6 +1475,8 @@ struct BatchPairingView: View {
 
     @ViewBuilder
     private func slotContextMenu(for slot: ChekiPairingSlot) -> some View {
+        let ungroupedMembers = idolMembers.filter { $0.group == nil }
+
         Button {
             openMagnifiedPreview(slotID: slot.id, side: .front)
         } label: {
@@ -1536,9 +1515,25 @@ struct BatchPairingView: View {
                             } label: {
                                 Label(member.stageName, systemImage: isAssigned ? "checkmark.circle.fill" : "circle")
                             }
+                            .menuActionDismissBehavior(.disabled)
                         }
                     }
+                    .menuActionDismissBehavior(.disabled)
                 }
+            }
+            if !ungroupedMembers.isEmpty {
+                Menu("未分團成員") {
+                    ForEach(ungroupedMembers) { member in
+                        let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
+                        Button {
+                            toggleMember(member, forSlotID: slot.id)
+                        } label: {
+                            Label(member.stageName, systemImage: isAssigned ? "checkmark.circle.fill" : "circle")
+                        }
+                        .menuActionDismissBehavior(.disabled)
+                    }
+                }
+                .menuActionDismissBehavior(.disabled)
             }
             Divider()
             Button {
@@ -1546,14 +1541,17 @@ struct BatchPairingView: View {
             } label: {
                 Label("未分類", systemImage: slot.assignedMembers.isEmpty ? "checkmark" : "tray")
             }
+            .menuActionDismissBehavior(.disabled)
             Button {
                 showingQuickCreateMemberSheet = true
             } label: {
                 Label("新增成員…", systemImage: "person.badge.plus")
             }
+            .menuActionDismissBehavior(.enabled)
         } label: {
             Label("指派歸檔成員", systemImage: "person.crop.circle")
         }
+        .menuActionDismissBehavior(.disabled)
 
         if slot.isPaired {
             Button {
@@ -2211,30 +2209,29 @@ struct BatchPairingView: View {
     private func selectTargetMember(_ member: IdolMember, replacingAt index: Int?) {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         let previousTargetIDs = Set(selectedTargetMembers.map(\.id))
-        withAnimation(.snappy(duration: 0.2)) {
-            if let idx = index, selectedTargetMembers.indices.contains(idx) {
-                // 直接點選已選成員膠囊重選成員：替換該位置的成員，並移除可能重複的項目
-                selectedTargetMembers[idx] = member
-                for i in selectedTargetMembers.indices.reversed() where i != idx && selectedTargetMembers[i].id == member.id {
-                    selectedTargetMembers.remove(at: i)
-                }
-            } else {
-                // 點選後方的「未選擇下拉選單」：追加選擇新成員（可多選用）
-                if !selectedTargetMembers.contains(where: { $0.id == member.id }) {
-                    selectedTargetMembers.append(member)
-                }
+        if let idx = index, selectedTargetMembers.indices.contains(idx) {
+            selectedTargetMembers[idx] = member
+            for i in selectedTargetMembers.indices.reversed() where i != idx && selectedTargetMembers[i].id == member.id {
+                selectedTargetMembers.remove(at: i)
             }
-            defaultFallbackMember = selectedTargetMembers.first
-            // 若未處於「選擇套用」模式，上方選擇歸檔成員時預設同步更新目前尚未單獨指定成員、或原本跟隨上方預設成員的卡片
-            if !isSelectingPhotosToApply {
-                for idx in slots.indices {
-                    let currentSlotIDs = Set(slots[idx].assignedMembers.map(\.id))
-                    if slots[idx].assignedMembers.isEmpty || currentSlotIDs == previousTargetIDs {
-                        slots[idx].assignedMembers = selectedTargetMembers
-                        photoMemberAssignment[slots[idx].frontPhoto.id] = selectedTargetMembers
-                        if let backID = slots[idx].backPhoto?.id {
-                            photoMemberAssignment[backID] = selectedTargetMembers
-                        }
+        } else {
+            // 多選切換：已存在則移除，尚未選擇則追加（選單不自動關閉）
+            if let existingIdx = selectedTargetMembers.firstIndex(where: { $0.id == member.id }) {
+                selectedTargetMembers.remove(at: existingIdx)
+            } else {
+                selectedTargetMembers.append(member)
+            }
+        }
+        defaultFallbackMember = selectedTargetMembers.first
+        // 若未處於「選擇套用」模式，上方選擇歸檔成員時預設同步更新目前尚未單獨指定成員、或原本跟隨上方預設成員的卡片
+        if !isSelectingPhotosToApply {
+            for idx in slots.indices {
+                let currentSlotIDs = Set(slots[idx].assignedMembers.map(\.id))
+                if slots[idx].assignedMembers.isEmpty || currentSlotIDs == previousTargetIDs {
+                    slots[idx].assignedMembers = selectedTargetMembers
+                    photoMemberAssignment[slots[idx].frontPhoto.id] = selectedTargetMembers
+                    if let backID = slots[idx].backPhoto?.id {
+                        photoMemberAssignment[backID] = selectedTargetMembers
                     }
                 }
             }
@@ -3272,7 +3269,7 @@ struct BatchPairingView: View {
                 targetItem.filmFormat = concreteFormat
                 targetItem.detectedAspectRatio = concreteFormat.aspectRatio
                 targetItem.borderInsetRatio = defaultInsetRatio
-                targetItem.idolMember = targetMember
+                targetItem.setAssignedMembers(effectiveMembers)
             } else {
                 let newItem = ChekiItem(
                     frontImageData: initialFrontData,
@@ -3286,7 +3283,8 @@ struct BatchPairingView: View {
                     processingState: .detecting,
                     frontAssetIdentifier: slot.frontPhoto.assetIdentifier,
                     backAssetIdentifier: slot.backPhoto?.assetIdentifier,
-                    idolMember: targetMember
+                    idolMember: targetMember,
+                    assignedMembers: effectiveMembers
                 )
                 modelContext.insert(newItem)
                 targetItem = newItem

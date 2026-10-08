@@ -314,11 +314,11 @@ struct ChekiDetailView: View {
 
                     HStack(spacing: 4) {
                         Text(Self.datePillTimeString(from: currentItem.displayDate))
-                        if let memberName = currentItem.idolMember?.stageName {
+                        if !currentItem.isUncategorized {
                             Text("·")
                             Image(systemName: "person.fill")
                                 .font(.system(size: 8))
-                            Text(memberName)
+                            Text(currentItem.assignedMembersDisplayString(from: idolMembers))
                                 .lineLimit(1)
                         } else if currentItem.ocrDate != nil {
                             Text("· OCR")
@@ -400,6 +400,7 @@ struct ChekiDetailView: View {
                 } label: {
                     Label("指派推角成員", systemImage: "person.crop.circle")
                 }
+                .menuActionDismissBehavior(.disabled)
 
                 Button {
                     Task { await syncCurrentItemToSystemPhotos() }

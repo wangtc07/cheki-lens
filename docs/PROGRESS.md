@@ -8,18 +8,14 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-09
-* **當前所屬階段**：Phase 6 — 端到端整合與發布準備 (QA & Release)
+* **當前所屬階段**：Phase 6.5 — 實機體驗回饋與相冊／調色擴充待辦清單 (UX & Album Polish Todo List)
 * **當前分支**：`main`
-* **當前進行中任務**：已完成 **Task 6.2**，並依據實機測試回饋完成單張檢視隱藏底部導覽列、「四角合成防反光」視覺錨點死鎖暨中央反光消除，以及**刪除照片零閃退與 iOS 系統相簿同步刪除修復**：
-  1. **單張檢視自動隱藏底部相冊與搜尋導覽按鈕 (`LocalizationManager.swift`, `ContentView.swift`, `LibraryView.swift`, `ChekiDetailView.swift`)**：
-     - 進入單張照片檢視 (`ChekiDetailView`) 時，自動同步隱藏 SwiftUI 與底層 `UITabBarController.tabBar`（相冊與搜尋按鈕完全消失），返回相冊時平順恢復；並修正日文模式下單面拍立得翻轉膠囊文字在地化。
-  2. **四角合成防反光：1,2,3,4 移至真正四個角落 + 視覺錨點追蹤使綠框死鎖在實體拍立得上 (`CameraScannerView.swift`, `VisionManager+AntiGlare.swift`)**：
-     - 將 `1, 2, 3, 4` 四個引導點移至拍立得外框真正的四個角落 (`0.08, 0.08` ~ `0.92, 0.92`)，並以 `120×160` 視覺錨點與邊界梯度追蹤鎖定實體拍立得位置；透過兩階段配準與乾淨中間調環境光估計 100% 消除第 1 張中央強光反光斑。
-  3. **徹底修復按下刪除後 App 閃退與 iOS 系統相簿未同步刪除問題 (`PhotoLibraryManager.swift`, `ChekiDetailView.swift`, `LibraryView.swift`, `CameraScannerView.swift`, `SettingsView.swift`, `IdolMember.swift`)**：
-     - **零閃退保證**：移除 `ChekiDetailView` 與 `NavigationStack` 對 SwiftData `@Model` 實體 (`let item: ChekiItem`) 的直接持有，改以純值型別 `ChekiDetailRoute(itemID: UUID)` 進行導覽並透過 `@Query` + `deletedItemIDs` 動態解析；修正原本 `filmstripItems` 在 `modelContext.delete(item)` 後將已刪除物件透過 `[item] + sorted` 重新塞回陣列導致的 SwiftData Fault 崩潰 (`EXC_BREAKPOINT`)。
-     - **100% 系統相簿同步刪除**：實作 `PhotoLibraryManager.deleteItemsAsync`，統一將 `autoSyncToPhotosLibrary` 預設對齊為 `true`，並支援以 `frontAssetIdentifier` / `backAssetIdentifier` 及拍攝時間軸 `±2.5s` 回退查找對應 `PHAsset`；等待 `confirmationDialog` 收合動畫完成後，先執行 `PHPhotoLibrary.shared().performChanges` 刪除系統相簿照片，再安全切換/關閉檢視頁面並從 SwiftData `modelContext` 移除。
-* **最新穩定 Git Commit**：fix(刪除): 修復刪除拍立得時SwiftData閃退並確保iOS系統相簿同步刪除
-* **下一動執行指示**：執行 **Task 6.3**（建立 App 圖示、啟動畫面與 App Store 截圖產生流程）
+* **當前進行中任務**：已完成 **Task 6.5.1 (區塊 1)**：
+  1. **拍照/匯入後修改成員全面升級為「多層多選選單」且點選不自動關閉 (`ChekiItem.swift`, `MemberAssignmentMenuContent.swift`, `ChekiInfoView.swift`, `ChekiDetailView.swift`, `BatchPairingView.swift`, `LibraryView.swift`, `PhotoLibraryManager.swift`)**：
+     - 擴充 `ChekiItem` 支援多位成員指派（保留主關聯 `idolMember` 向下相容並新增 `assignedMemberIDsJSON` 多成員清單與 `toggleAssignedMember` / `isAssigned(to:)` / `assignedMembers(from:)` 等輔助方法），同步支援多成員相冊歸類、搜尋與 iOS 系統相簿多相簿寫入。
+     - 將單張檢視 `⋯` 選單、資訊面板 (`ChekiInfoView`)、相簿網格長按選單及批次工作台 (`BatchPairingView`) 的成員選單全部加上 `.menuActionDismissBehavior(.disabled)`，點選成員勾選/取消勾選時選單保持開啟，點擊旁邊 (Lose Focus) 才關閉。
+* **最新穩定 Git Commit**：feat(成員選單): 完成 Task 6.5.1 拍照與匯入後雙層多選成員選單且點擊不自動關閉
+* **下一動執行指示**：執行 **Task 6.5.2 (區塊 2)**（相冊專輯長按選單與漢堡選單擴充：攝影追加、從相冊讀入、修改成員名／修改團體名）
 
 ---
 
@@ -276,4 +272,21 @@
 - [x] **Task 6.1**: 實機測試與效能調校（實機部署至 iPhone 12 mini `ジェ`；補齊 `CameraScannerView` 所有拍攝模式自動同步寫入 iOS 原生相簿 `Photos.app`；將 Mode B 雙角度去反光升級為「第 1 張拍完立即背景預處理 + 1440px 快速正面四角偵測 + 540px 配準代理 + 270×430 O(1) 滑動視窗權重遮罩 + Core Image GPU `CIBlendWithMask` 單次 4K 渲染 + 取景器追蹤每 6 幀節流」，消除 4K CPU 迴圈瓶頸）
 - [x] **Task 6.2**: 支援深色/淺色模式、動態字級 (Dynamic Type) 與日文 (`ja`)／繁體中文 (`zh-Hant`) 雙語系切換（預設自動匹配 iOS 系統語系，並可於「設定 › 一般與關於 › 語言」即時切換繁中／日文）
   - 拍照/匯入後修改成員（`⋯` 選單、資訊欄、相簿長按選單）改為與批次工作台一致的「團體 ➔ 成員」多層選單，並含「新增成員…」（`MemberAssignmentMenuContent`；模型僅單一成員）
+
+---
+
+### 階段 6.5：實機體驗回饋與相冊／調色擴充待辦清單 (Phase 6.5: UX & Album Polish Todo List)
+- [x] **Task 6.5.1 (區塊 1)**: 拍照/匯入後修改成員升級為「多層多選選單」（支援一張拍立得指派多位成員、點選成員時不會自動關閉選單、點擊旁邊 Lose Focus 才關閉）
+- [ ] **Task 6.5.2 (區塊 2)**: 相冊專輯長按選單與漢堡選單擴充（新增「攝影追加」與「從相冊讀入」，並於長按與漢堡選單兩邊追加「修改成員名（成員層級）」與「修改團體名（團體層級）」）
+- [ ] **Task 6.5.3 (區塊 3)**: 點開成員相冊時格狀顯示加上小圓角，並修正雙指縮放體驗（消除縮放閃黑畫面、主圖下方雙指縮放期間即時跟手縮放、雙指放開才確認切換欄數且過渡動畫更順暢緩慢）
+- [ ] **Task 6.5.4 (區塊 4)**: 成員相冊追加最後一格顯示 `+` 號（從 App 內挑選既有照片加入相冊，介面比照系統匯入但將 `コレクション` 改為 `相冊`，且「全部」支援過濾「未分類」與「選成員（雙層多選選單）」）
+- [ ] **Task 6.5.5 (區塊 5)**: 成員層級與團體層級漢堡選單重構（移除追加成員選項，改為「排序方法：名稱 / 客製（長按相冊卡片可拖動排序）」與「顯示方式：格狀 / 清單（左圖右名稱）」）
+- [ ] **Task 6.5.6 (區塊 6)**: 導覽列右上按鈕 UI 統一（團體層級、成員層級、全部展開顯示右上按鈕統一改為黑色系統白字風格，且專輯頁面右上的漢堡選單與 `+` 號整合為單一膠囊型按鈕）
+- [ ] **Task 6.5.7 (區塊 7)**: 單獨檢視拍立得時，下方工具列的修改按鈕統一改用白色（不再單獨使用黃色）
+- [ ] **Task 6.5.8 (區塊 8)**: 系統相簿調色同步更新与點選白色部分自動白平衡（點開照片或 App 重啟/喚醒時同步系統相簿調色修改；新增「點選白色部分校正白平衡」Core Image 色溫/色調自動校正並同步寫入系統相簿紀錄）
+- [ ] **Task 6.5.9 (區塊 9)**: 相冊內單張檢視時，左右滑動與底部膠卷修正為「僅顯示此相冊的內容與當前排序」
+
+---
+
 - [ ] **Task 6.3**: 建立 App 圖示、啟動畫面與 App Store 截圖產生流程
+

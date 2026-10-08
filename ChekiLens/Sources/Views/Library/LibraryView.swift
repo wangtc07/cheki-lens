@@ -89,16 +89,27 @@ struct LibraryView: View {
         Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: columnCount)
     }
 
-    static func matchesSearch(item: ChekiItem, query: String) -> Bool {
+    static func matchesSearch(item: ChekiItem, query: String, allMembers: [IdolMember] = []) -> Bool {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return true }
         let normalized = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
 
-        if let member = item.idolMember {
-            if member.stageName.localizedCaseInsensitiveContains(normalized) { return true }
-            if let groupName = member.group?.name,
-               groupName.localizedCaseInsensitiveContains(normalized) { return true }
-            if member.tags.contains(where: { $0.localizedCaseInsensitiveContains(normalized) }) { return true }
+        let resolvedMembers: [IdolMember] = {
+            if !allMembers.isEmpty {
+                return item.assignedMembers(from: allMembers)
+            } else if let primary = item.idolMember {
+                return [primary]
+            }
+            return []
+        }()
+
+        if !resolvedMembers.isEmpty {
+            for member in resolvedMembers {
+                if member.stageName.localizedCaseInsensitiveContains(normalized) { return true }
+                if let groupName = member.group?.name,
+                   groupName.localizedCaseInsensitiveContains(normalized) { return true }
+                if member.tags.contains(where: { $0.localizedCaseInsensitiveContains(normalized) }) { return true }
+            }
         } else if "未分類".localizedCaseInsensitiveContains(normalized) {
             return true
         }
@@ -556,6 +567,7 @@ struct LibraryView: View {
                 } label: {
                     Label("指派推角成員", systemImage: "person.crop.circle.badge.plus")
                 }
+                .menuActionDismissBehavior(.disabled)
 
                 Divider()
 
@@ -769,7 +781,7 @@ struct AlbumsRootView: View {
     }
 
     private var uncategorizedItems: [ChekiItem] {
-        validChekiItems.filter { $0.idolMember == nil }
+        validChekiItems.filter { $0.isUncategorized }
     }
 
     /// 取得所有成員（依團體順序與成員順序排列，確保在「成員」模式下完整展開所有團體的成員）
@@ -835,7 +847,7 @@ struct AlbumsRootView: View {
                 AlbumHeroDetailView(
                     primaryTitle: member.albumTitle,
                     secondaryTitle: nil,
-                    items: validChekiItems.filter { $0.idolMember?.id == member.id },
+                    items: validChekiItems.filter { $0.isAssigned(to: member) },
                     defaultMember: member
                 )
             }
@@ -953,7 +965,7 @@ struct AlbumsRootView: View {
                         ApplePhotoAlbumTile(
                             primaryTitle: group.name,
                             secondaryTitle: nil,
-                            coverImagesData: Self.groupCoverImages(for: group)
+                            coverImagesData: Self.groupCoverImages(for: group, allItems: validChekiItems)
                         )
                     }
                     .buttonStyle(.plain)
@@ -997,7 +1009,7 @@ struct AlbumsRootView: View {
                         ApplePhotoAlbumTile(
                             primaryTitle: member.albumTitle,
                             secondaryTitle: nil,
-                            coverImagesData: Self.memberCoverImages(for: member)
+                            coverImagesData: Self.memberCoverImages(for: member, allItems: validChekiItems)
                         )
                     }
                     .buttonStyle(.plain)
@@ -1018,17 +1030,25 @@ struct AlbumsRootView: View {
         }
     }
 
-    static func groupCoverImages(for group: IdolGroup) -> [Data] {
+    static func groupCoverImages(for group: IdolGroup, allItems: [ChekiItem] = []) -> [Data] {
         var result: [Data] = []
         for member in group.sortedMembers {
-            if let latest = member.latestCheki?.frontImageData {
-                result.append(latest)
+            if let cover = memberCoverImages(for: member, allItems: allItems).first {
+                result.append(cover)
             }
         }
         return result
     }
 
-    static func memberCoverImages(for member: IdolMember) -> [Data] {
+    static func memberCoverImages(for member: IdolMember, allItems: [ChekiItem] = []) -> [Data] {
+        if !allItems.isEmpty {
+            let memberItems = allItems
+                .filter { !$0.isDeleted && $0.modelContext != nil && $0.isAssigned(to: member) }
+                .sorted { $0.displayDate > $1.displayDate }
+            if let latest = memberItems.first?.frontImageData {
+                return [latest]
+            }
+        }
         if let latest = member.latestCheki?.frontImageData {
             return [latest]
         }
@@ -1138,7 +1158,7 @@ private struct GroupMembersAlbumView: View {
                             ApplePhotoAlbumTile(
                                 primaryTitle: member.albumTitle,
                                 secondaryTitle: nil,
-                                coverImagesData: AlbumsRootView.memberCoverImages(for: member)
+                                coverImagesData: AlbumsRootView.memberCoverImages(for: member, allItems: allItems)
                             )
                         }
                         .buttonStyle(.plain)
@@ -1231,9 +1251,9 @@ struct AlbumHeroDetailView: View {
     /// 即時從 SwiftData 查詢目前所在相簿的所有拍立得項目，確保從相簿追加或配對歸檔後立即更新目前所在的相簿
     private var liveItems: [ChekiItem] {
         if let defaultMember {
-            return validAllChekiItems.filter { $0.idolMember?.id == defaultMember.id }
+            return validAllChekiItems.filter { $0.isAssigned(to: defaultMember) }
         } else {
-            return validAllChekiItems.filter { $0.idolMember == nil }
+            return validAllChekiItems.filter { $0.isUncategorized }
         }
     }
 
@@ -1706,6 +1726,7 @@ struct AlbumHeroDetailView: View {
                 Menu("指派推角成員") {
                     MemberAssignmentMenuContent(item: item) { showingQuickCreateMember = true }
                 }
+                .menuActionDismissBehavior(.disabled)
 
                 Divider()
 
@@ -1842,7 +1863,7 @@ struct LibrarySearchView: View {
     }
 
     private var filteredItems: [ChekiItem] {
-        validChekiItems.filter { LibraryView.matchesSearch(item: $0, query: searchText) }
+        validChekiItems.filter { LibraryView.matchesSearch(item: $0, query: searchText, allMembers: idolMembers) }
     }
 
     private var availableHashtags: [String] {
@@ -1905,7 +1926,7 @@ struct LibrarySearchView: View {
                                             ApplePhotoAlbumTile(
                                                 primaryTitle: member.albumTitle,
                                                 secondaryTitle: nil,
-                                                coverImagesData: AlbumsRootView.memberCoverImages(for: member)
+                                                coverImagesData: AlbumsRootView.memberCoverImages(for: member, allItems: validChekiItems)
                                             )
                                         }
                                         .buttonStyle(.plain)
@@ -1969,7 +1990,7 @@ struct LibrarySearchView: View {
                 AlbumHeroDetailView(
                     primaryTitle: member.albumTitle,
                     secondaryTitle: nil,
-                    items: validChekiItems.filter { $0.idolMember?.id == member.id },
+                    items: validChekiItems.filter { $0.isAssigned(to: member) },
                     defaultMember: member
                 )
             }

@@ -17,6 +17,7 @@ struct ChekiInfoView: View {
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
 
     @State private var showingQuickCreateMember: Bool = false
+    @State private var showingMemberPopover: Bool = false
     @State private var isEditingDate: Bool = false
     @State private var isEditingTime: Bool = false
     @State private var memoText: String = ""
@@ -141,8 +142,9 @@ struct ChekiInfoView: View {
                     }
                 }
 
-                // 成員（點擊可直接切換歸檔成員）
-                if true {
+                // 成員（支援多層多選，點選成員不自動關閉選單，點旁邊 Lose Focus 才關閉）
+                let assignedMembers = item.assignedMembers(from: idolMembers)
+                VStack(alignment: .leading, spacing: assignedMembers.count > 1 ? 8 : 0) {
                     HStack {
                         Text("成員")
                             .foregroundStyle(.primary)
@@ -150,21 +152,66 @@ struct ChekiInfoView: View {
                         Spacer()
 
                         Menu {
-                            MemberAssignmentMenuContent(item: item) { showingQuickCreateMember = true }
+                            MemberAssignmentMenuContent(item: item) {
+                                showingQuickCreateMember = true
+                            }
                         } label: {
                             HStack(spacing: 4) {
-                                if let memberTitle = item.idolMember?.albumTitle {
-                                    Text(memberTitle)
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    Text("未分類")
-                                        .foregroundStyle(.secondary)
-                                }
+                                Text(item.assignedMembersDisplayString(from: idolMembers, includeGroupForSingle: true))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
                                 Image(systemName: "chevron.up.chevron.down")
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(.tertiary)
                             }
                             .contentShape(Rectangle())
+                        }
+                        .menuActionDismissBehavior(.disabled)
+                    }
+
+                    if !assignedMembers.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(assignedMembers) { member in
+                                    HStack(spacing: 4) {
+                                        Text(member.albumTitle)
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.primary)
+                                        Button {
+                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                            item.toggleAssignedMember(member, allMembers: idolMembers)
+                                            try? modelContext.save()
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(Color(.tertiarySystemFill), in: Capsule())
+                                }
+
+                                Menu {
+                                    MemberAssignmentMenuContent(item: item) {
+                                        showingQuickCreateMember = true
+                                    }
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 10, weight: .bold))
+                                        Text("選擇成員")
+                                            .font(.caption.weight(.medium))
+                                    }
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(Color(.tertiarySystemFill), in: Capsule())
+                                }
+                                .menuActionDismissBehavior(.disabled)
+                            }
+                            .padding(.top, 4)
                         }
                     }
                 }
@@ -183,6 +230,16 @@ struct ChekiInfoView: View {
         .listStyle(.insetGrouped)
         .sheet(isPresented: $showingQuickCreateMember) {
             QuickCreateIdolSheet()
+        }
+        .onChange(of: idolMembers.count) { oldCount, newCount in
+            if newCount > oldCount, let newest = idolMembers.last {
+                var current = item.assignedMembers(from: idolMembers)
+                if !current.contains(where: { $0.id == newest.id }) {
+                    current.append(newest)
+                    item.setAssignedMembers(current)
+                    try? modelContext.save()
+                }
+            }
         }
         .navigationTitle("資訊")
         .navigationBarTitleDisplayMode(.inline)

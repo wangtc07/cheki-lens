@@ -93,9 +93,12 @@ final class ChekiItem {
     /// 背面照片對應之 iOS 系統相簿 `PHAsset.localIdentifier`
     var backAssetIdentifier: String?
 
+    /// 多成員歸檔 ID 清單 JSON（支援一張拍立得同時歸檔至多位成員，與 `idolMember` 主關聯保持相容）
+    var assignedMemberIDsJSON: String?
+
     // MARK: Relations
 
-    /// 所屬偶像成員（可為 nil，表示尚未分類）
+    /// 所屬主偶像成員（可為 nil，表示尚未分類；當指派多位成員時為第一位成員）
     var idolMember: IdolMember?
 
     /// 附屬的備忘錄（若無則為 nil，懶加載）
@@ -124,6 +127,7 @@ final class ChekiItem {
         frontAssetIdentifier: String? = nil,
         backAssetIdentifier: String? = nil,
         idolMember: IdolMember? = nil,
+        assignedMembers: [IdolMember]? = nil,
         memo: ChekiMemo? = nil
     ) {
         self.id = id
@@ -144,7 +148,17 @@ final class ChekiItem {
         self.isSyncedToPhotoLibrary = isSyncedToPhotoLibrary
         self.frontAssetIdentifier = frontAssetIdentifier
         self.backAssetIdentifier = backAssetIdentifier
-        self.idolMember = idolMember
+        let resolvedMembers: [IdolMember] = {
+            if let assignedMembers, !assignedMembers.isEmpty {
+                return assignedMembers
+            }
+            if let idolMember {
+                return [idolMember]
+            }
+            return []
+        }()
+        self.idolMember = resolvedMembers.first
+        self.assignedMemberIDsJSON = Self.encodeMemberIDs(resolvedMembers.map(\.id))
         self.memo = memo
     }
 
@@ -163,6 +177,111 @@ extension ChekiItem {
     var hasBothSides: Bool {
         backImageData != nil
     }
+
+    /// 已指派的所有成員 UUID 陣列（去重且保序，並包含主 `idolMember`）
+    var assignedMemberIDs: [UUID] {
+        var ids: [UUID] = []
+        if let json = assignedMemberIDsJSON,
+           let data = json.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            for str in decoded {
+                if let uuid = UUID(uuidString: str), !ids.contains(uuid) {
+                    ids.append(uuid)
+                }
+            }
+        }
+        if let primary = idolMember, !primary.isDeleted, primary.modelContext != nil {
+            if !ids.contains(primary.id) {
+                ids.insert(primary.id, at: 0)
+            }
+        } else if idolMember == nil, assignedMemberIDsJSON == nil {
+            return []
+        }
+        return ids
+    }
+
+    /// 是否為「未分類」（無任何指派成員）
+    var isUncategorized: Bool {
+        if let primary = idolMember, !primary.isDeleted, primary.modelContext != nil {
+            return false
+        }
+        return assignedMemberIDs.isEmpty
+    }
+
+    /// 判斷此拍立得是否歸屬於指定成員（支援單一與多成員指派）
+    func isAssigned(to member: IdolMember) -> Bool {
+        guard !member.isDeleted, member.modelContext != nil else { return false }
+        if idolMember?.id == member.id { return true }
+        return assignedMemberIDs.contains(member.id)
+    }
+
+    /// 判斷此拍立得是否歸屬於指定成員 ID
+    func isAssigned(toMemberID memberID: UUID) -> Bool {
+        if idolMember?.id == memberID { return true }
+        return assignedMemberIDs.contains(memberID)
+    }
+
+    /// 從傳入的全部成員清單解析出此拍立得目前已指派的成員陣列（保序）
+    func assignedMembers(from allMembers: [IdolMember]) -> [IdolMember] {
+        let validPool = allMembers.filter { !$0.isDeleted && $0.modelContext != nil }
+        let byID = Dictionary(uniqueKeysWithValues: validPool.map { ($0.id, $0) })
+        var result: [IdolMember] = []
+        for id in assignedMemberIDs {
+            if let member = byID[id], !result.contains(where: { $0.id == member.id }) {
+                result.append(member)
+            }
+        }
+        if let primary = idolMember,
+           !primary.isDeleted,
+           primary.modelContext != nil,
+           !result.contains(where: { $0.id == primary.id }) {
+            result.insert(primary, at: 0)
+        }
+        return result
+    }
+
+    /// 設定此拍立得的歸檔成員清單（可為多位成員，或空陣列代表「未分類」）
+    func setAssignedMembers(_ members: [IdolMember]) {
+        var unique: [IdolMember] = []
+        for member in members where !member.isDeleted && member.modelContext != nil {
+            if !unique.contains(where: { $0.id == member.id }) {
+                unique.append(member)
+            }
+        }
+        self.idolMember = unique.first
+        self.assignedMemberIDsJSON = Self.encodeMemberIDs(unique.map(\.id))
+    }
+
+    /// 切換（勾選/取消勾選）某位成員的歸檔狀態（支援多選，不覆蓋其他已選成員）
+    func toggleAssignedMember(_ member: IdolMember, allMembers: [IdolMember]) {
+        var current = assignedMembers(from: allMembers)
+        if let idx = current.firstIndex(where: { $0.id == member.id }) {
+            current.remove(at: idx)
+        } else {
+            current.append(member)
+        }
+        setAssignedMembers(current)
+    }
+
+    /// 格式化顯示目前已指派的成員名稱摘要（例如：「河田陽菜、與田祐希」或「未分類」）
+    func assignedMembersDisplayString(from allMembers: [IdolMember], includeGroupForSingle: Bool = false) -> String {
+        let members = assignedMembers(from: allMembers)
+        guard !members.isEmpty else {
+            return L10n.tr("未分類", "未分類")
+        }
+        if members.count == 1 {
+            return includeGroupForSingle ? members[0].albumTitle : members[0].stageName
+        }
+        return members.map(\.stageName).joined(separator: "、")
+    }
+
+    private static func encodeMemberIDs(_ ids: [UUID]) -> String? {
+        guard !ids.isEmpty else { return nil }
+        let strings = ids.map(\.uuidString)
+        guard let data = try? JSONEncoder().encode(strings) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
 
     /// 指定面（正面或背面）是否保留有可復原的原始未裁切圖片
     func canRevertToOriginal(backside: Bool = false) -> Bool {

@@ -298,23 +298,31 @@ final class PhotoLibraryManager {
         let useGroupMemberAlbums = UserDefaults.standard.object(forKey: "createGroupMemberAlbumsInPhotos") as? Bool ?? true
         let timelineStrategy = UserDefaults.standard.string(forKey: "backsideTimelineStrategy") ?? "sameSecond"
 
+        let allMembers = (try? modelContext.fetch(FetchDescriptor<IdolMember>())) ?? []
         var syncedCount = 0
 
         for item in items {
-            let albumName = useGroupMemberAlbums ? (item.idolMember?.albumTitle ?? "ChekiLens") : "ChekiLens"
-            let folderName = useGroupMemberAlbums ? item.idolMember?.group?.name : nil
+            let assignedMembers = item.assignedMembers(from: allMembers)
+            let targetAlbumSpecs: [(albumName: String, folderName: String?)] = {
+                guard useGroupMemberAlbums, !assignedMembers.isEmpty else {
+                    return [("ChekiLens", nil)]
+                }
+                return assignedMembers.map { ($0.albumTitle, $0.group?.name) }
+            }()
+
             let frontSyncDate = overwriteExif ? item.displayDate : item.capturedAt
             let backSyncDate = (timelineStrategy == "plusOneSecond")
                 ? frontSyncDate.addingTimeInterval(1.0)
                 : frontSyncDate
 
-            guard let album = try? await getOrCreateAlbum(albumName: albumName, inFolder: folderName) else {
+            guard let primarySpec = targetAlbumSpecs.first,
+                  let primaryAlbum = try? await getOrCreateAlbum(albumName: primarySpec.albumName, inFolder: primarySpec.folderName) else {
                 continue
             }
 
             var didSyncItem = false
 
-            // 1. 正面同步
+            // 1. 正面同步（先寫入主相簿，若有多位成員再將同一 PHAsset 加入其餘成員相簿）
             if onlyAlbumAndDateIfAlreadySynced,
                item.isSyncedToPhotoLibrary,
                let existingFrontID = item.frontAssetIdentifier,
@@ -323,7 +331,7 @@ final class PhotoLibraryManager {
                 try? await addExistingAsset(
                     identifier: existingFrontID,
                     creationDate: frontSyncDate,
-                    to: album
+                    to: primaryAlbum
                 )
                 didSyncItem = true
             } else if let frontData = item.frontImageData,
@@ -333,7 +341,7 @@ final class PhotoLibraryManager {
                     originalImageData: item.originalFrontImageData,
                     existingAssetIdentifier: item.frontAssetIdentifier,
                     creationDate: frontSyncDate,
-                    to: album
+                    to: primaryAlbum
                 ) {
                     item.frontAssetIdentifier = updatedFrontID
                     didSyncItem = true
@@ -349,7 +357,7 @@ final class PhotoLibraryManager {
                 try? await addExistingAsset(
                     identifier: existingBackID,
                     creationDate: backSyncDate,
-                    to: album
+                    to: primaryAlbum
                 )
             } else if let backData = item.backImageData,
                       let backUI = UIImage(data: backData) {
@@ -358,9 +366,32 @@ final class PhotoLibraryManager {
                     originalImageData: item.originalBackImageData,
                     existingAssetIdentifier: item.backAssetIdentifier,
                     creationDate: backSyncDate,
-                    to: album
+                    to: primaryAlbum
                 ) {
                     item.backAssetIdentifier = updatedBackID
+                }
+            }
+
+            // 3. 若指派了多位成員，將同一個 PHAsset 一併掛入其餘成員的系統相簿
+            if targetAlbumSpecs.count > 1 {
+                for extraSpec in targetAlbumSpecs.dropFirst() {
+                    guard let extraAlbum = try? await getOrCreateAlbum(albumName: extraSpec.albumName, inFolder: extraSpec.folderName) else {
+                        continue
+                    }
+                    if let frontID = item.frontAssetIdentifier, !frontID.isEmpty {
+                        try? await addExistingAsset(
+                            identifier: frontID,
+                            creationDate: frontSyncDate,
+                            to: extraAlbum
+                        )
+                    }
+                    if let backID = item.backAssetIdentifier, !backID.isEmpty {
+                        try? await addExistingAsset(
+                            identifier: backID,
+                            creationDate: backSyncDate,
+                            to: extraAlbum
+                        )
+                    }
                 }
             }
 
