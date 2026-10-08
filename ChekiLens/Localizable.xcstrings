@@ -1,0 +1,3814 @@
+{
+  "sourceLanguage": "zh-Hant",
+  "strings": {
+    "全部": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべて"
+          }
+        }
+      }
+    },
+    "相冊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相冊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アルバム"
+          }
+        }
+      }
+    },
+    "搜尋": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜尋"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "検索"
+          }
+        }
+      }
+    },
+    "設定": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定"
+          }
+        }
+      }
+    },
+    "完成": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完成"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完了"
+          }
+        }
+      }
+    },
+    "取消": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キャンセル"
+          }
+        }
+      }
+    },
+    "儲存": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存"
+          }
+        }
+      }
+    },
+    "好": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "好"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "繼續": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "繼續"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "続ける"
+          }
+        }
+      }
+    },
+    "開始使用": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開始使用"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "はじめる"
+          }
+        }
+      }
+    },
+    "略過": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "略過"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スキップ"
+          }
+        }
+      }
+    },
+    "選取": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選取"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択"
+          }
+        }
+      }
+    },
+    "全選": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全選"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべて選択"
+          }
+        }
+      }
+    },
+    "取消全選": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消全選"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択を解除"
+          }
+        }
+      }
+    },
+    "選擇項目": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇項目"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "項目を選択"
+          }
+        }
+      }
+    },
+    "重設": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重設"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リセット"
+          }
+        }
+      }
+    },
+    "未分類": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未分類"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未分類"
+          }
+        }
+      }
+    },
+    "設為未分類": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設為未分類"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未分類に設定"
+          }
+        }
+      }
+    },
+    "%lld 個項目": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 個項目"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 項目"
+          }
+        }
+      }
+    },
+    "已選取 %lld 張照片": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已選取 %lld 張照片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 枚の写真を選択"
+          }
+        }
+      }
+    },
+    "確定要刪除%lld張照片嗎？": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "確定要刪除%lld張照片嗎？"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld枚の写真を削除しますか？"
+          }
+        }
+      }
+    },
+    "確定要刪除此照片嗎？": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "確定要刪除此照片嗎？"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この写真を削除しますか？"
+          }
+        }
+      }
+    },
+    "刪除 %lld 張拍立得": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除 %lld 張拍立得"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 枚のチェキを削除"
+          }
+        }
+      }
+    },
+    "刪除拍立得": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除拍立得"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェキを削除"
+          }
+        }
+      }
+    },
+    "刪除此拍立得": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除此拍立得"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このチェキを削除"
+          }
+        }
+      }
+    },
+    "此操作會將拍立得從 ChekiLens 典藏庫與 iOS 系統相簿中一併刪除。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此操作會將拍立得從 ChekiLens 典藏庫與 iOS 系統相簿中一併刪除。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このチェキは ChekiLens と iOS の「写真」アプリの両方から削除されます。"
+          }
+        }
+      }
+    },
+    "此操作會將拍立得從 ChekiLens 典藏庫移除，且無法復原。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此操作會將拍立得從 ChekiLens 典藏庫移除，且無法復原。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このチェキは ChekiLens から削除され、元に戻すことはできません。"
+          }
+        }
+      }
+    },
+    "此拍立得（含正反面與特典會備忘）將從典藏庫與 iOS 系統相簿中一併刪除。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此拍立得（含正反面與特典會備忘）將從典藏庫與 iOS 系統相簿中一併刪除。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このチェキ（両面およびメモを含む）は ChekiLens と iOS の「写真」アプリの両方から削除されます。"
+          }
+        }
+      }
+    },
+    "此拍立得（含背面與特典會備忘）將從典藏庫永久移除。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此拍立得（含背面與特典會備忘）將從典藏庫永久移除。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このチェキ（裏面およびメモを含む）はライブラリから完全に削除されます。"
+          }
+        }
+      }
+    },
+    "尚無拍立得典藏": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚無拍立得典藏"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェキがまだありません"
+          }
+        }
+      }
+    },
+    "從系統相簿匯入您的拍立得照片，或載入範例測試資料體驗完整相冊與正反面典藏功能。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從系統相簿匯入您的拍立得照片，或載入範例測試資料體驗完整相冊與正反面典藏功能。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「写真」アプリからチェキを取り込むか、サンプルデータを読み込んで両面コレクション機能をお試しください。"
+          }
+        }
+      }
+    },
+    "從相簿選擇照片（不限張數）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從相簿選擇照片（不限張數）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アルバムから写真を選択（枚数無制限）"
+          }
+        }
+      }
+    },
+    "開啟批次配對工作台（含測試資料）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟批次配對工作台（含測試資料）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一括ペアリングを開く（テストデータ付）"
+          }
+        }
+      }
+    },
+    "批次配對工作台（含測試資料）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "批次配對工作台（含測試資料）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一括ペアリング（テストデータ付）"
+          }
+        }
+      }
+    },
+    "載入範例測試資料": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "載入範例測試資料"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サンプルデータを読み込む"
+          }
+        }
+      }
+    },
+    "新增團體 / 成員": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增團體 / 成員"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グループ / メンバーを追加"
+          }
+        }
+      }
+    },
+    "新增團體與成員": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增團體與成員"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グループとメンバーを追加"
+          }
+        }
+      }
+    },
+    "新增成員與團體": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增成員與團體"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メンバーとグループを追加"
+          }
+        }
+      }
+    },
+    "新增推角成員": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增推角成員"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推しメンバーを追加"
+          }
+        }
+      }
+    },
+    "新增成員": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增成員"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メンバーを追加"
+          }
+        }
+      }
+    },
+    "尚無團體相冊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚無團體相冊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グループアルバムがありません"
+          }
+        }
+      }
+    },
+    "建立團體與推角成員，即可按「團體 ＞ 成員」階層管理拍立得相冊。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "建立團體與推角成員，即可按「團體 ＞ 成員」階層管理拍立得相冊。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グループと推しメンバーを作成すると、「グループ ＞ メンバー」階層でチェキを整理できます。"
+          }
+        }
+      }
+    },
+    "尚無成員相冊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚無成員相冊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メンバーアルバムがありません"
+          }
+        }
+      }
+    },
+    "新增您的推角成員，直接展開瀏覽所有成員的專屬相冊。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增您的推角成員，直接展開瀏覽所有成員的專屬相冊。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推しメンバーを追加すると、メンバー別の専用アルバムを一覧できます。"
+          }
+        }
+      }
+    },
+    "此團體尚無成員": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此團體尚無成員"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このグループにはメンバーがいません"
+          }
+        }
+      }
+    },
+    "點擊右上角「+」為 %@ 新增成員相冊。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點擊右上角「+」為 %@ 新增成員相冊。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "右上の「+」をタップして %@ にメンバーアルバムを追加しましょう。"
+          }
+        }
+      }
+    },
+    "尚無拍立得項目": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚無拍立得項目"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェキ項目がありません"
+          }
+        }
+      }
+    },
+    "點擊右上角「＋」或「⋯」匯入或拍攝拍立得至此相冊。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點擊右上角「＋」或「⋯」匯入或拍攝拍立得至此相冊。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "右上の「＋」または「⋯」から、このアルバムにチェキを取り込むか撮影できます。"
+          }
+        }
+      }
+    },
+    "使用相機拍攝至此相冊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用相機拍攝至此相冊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カメラで撮影してこのアルバムに追加"
+          }
+        }
+      }
+    },
+    "從相簿多選匯入（不限張數）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從相簿多選匯入（不限張數）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アルバムから複数選択して取り込む（無制限）"
+          }
+        }
+      }
+    },
+    "在配對工作台中匯入至此相冊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在配對工作台中匯入至此相冊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ペアリング画面でこのアルバムに取り込む"
+          }
+        }
+      }
+    },
+    "指派推角成員": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "指派推角成員"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推しメンバーを割り当て"
+          }
+        }
+      }
+    },
+    "相冊檢視階層": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相冊檢視階層"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アルバム表示階層"
+          }
+        }
+      }
+    },
+    "顯示密度（亦可雙指縮放）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示密度（亦可雙指縮放）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表示列数（ピンチ操作でも変更可）"
+          }
+        }
+      }
+    },
+    "%lld 欄顯示": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 欄顯示"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 列で表示"
+          }
+        }
+      }
+    },
+    "排序與篩選": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "排序與篩選"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "並び替えとフィルタ"
+          }
+        }
+      }
+    },
+    "由新到舊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由新到舊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新しい順"
+          }
+        }
+      }
+    },
+    "由舊到新": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "由舊到新"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "古い順"
+          }
+        }
+      }
+    },
+    "僅顯示正反雙面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "僅顯示正反雙面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "両面チェキのみ表示"
+          }
+        }
+      }
+    },
+    "管理": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理"
+          }
+        }
+      }
+    },
+    "設定（自動邊界微調）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定（自動邊界微調）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定（自動余白調整）"
+          }
+        }
+      }
+    },
+    "寫入 10 張帶日期拍立得至系統相簿 (Photos.app)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "寫入 10 張帶日期拍立得至系統相簿 (Photos.app)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日付入りテスト用チェキ10枚を「写真」に保存"
+          }
+        }
+      }
+    },
+    "iOS 系統相簿測試相片": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS 系統相簿測試相片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS「写真」テスト画像"
+          }
+        }
+      }
+    },
+    "AI 邊框偵測與正位中…": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 邊框偵測與正位中…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 枠検出・自動補正中…"
+          }
+        }
+      }
+    },
+    "AI 處理中…": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 處理中…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 処理中…"
+          }
+        }
+      }
+    },
+    "熱門 #標籤": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "熱門 #標籤"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "人気の #タグ"
+          }
+        }
+      }
+    },
+    "成員相冊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "成員相冊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メンバーアルバム"
+          }
+        }
+      }
+    },
+    "搜尋成員、團體、活動或 #標籤": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜尋成員、團體、活動或 #標籤"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メンバー、グループ、イベント、#タグを検索"
+          }
+        }
+      }
+    },
+    "推角成員資訊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推角成員資訊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推しメンバー情報"
+          }
+        }
+      }
+    },
+    "姓名": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "姓名"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名前"
+          }
+        }
+      }
+    },
+    "團體": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "團體"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グループ"
+          }
+        }
+      }
+    },
+    "標籤": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "標籤"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "タグ"
+          }
+        }
+      }
+    },
+    "快速帶入現有團體": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速帶入現有團體"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "既存のグループから選択"
+          }
+        }
+      }
+    },
+    "資訊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "資訊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "情報"
+          }
+        }
+      }
+    },
+    "拍攝資訊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拍攝資訊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "撮影情報"
+          }
+        }
+      }
+    },
+    "日期": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日期"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日付"
+          }
+        }
+      }
+    },
+    "選擇拍攝日期": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇拍攝日期"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "撮影日を選択"
+          }
+        }
+      }
+    },
+    "時間": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "時間"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "時刻"
+          }
+        }
+      }
+    },
+    "選擇拍攝時間": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇拍攝時間"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "撮影時刻を選択"
+          }
+        }
+      }
+    },
+    "規格": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "規格"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フィルム規格"
+          }
+        }
+      }
+    },
+    "成員": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "成員"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メンバー"
+          }
+        }
+      }
+    },
+    "備忘": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "備忘"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メモ"
+          }
+        }
+      }
+    },
+    "點擊輸入備忘…": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點擊輸入備忘…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "タップしてメモを入力…"
+          }
+        }
+      }
+    },
+    "正面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表面"
+          }
+        }
+      }
+    },
+    "背面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "背面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面"
+          }
+        }
+      }
+    },
+    "翻至正面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻至正面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表面へ裏返す"
+          }
+        }
+      }
+    },
+    "翻至背面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻至背面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面へ裏返す"
+          }
+        }
+      }
+    },
+    "雙擊翻回正面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "雙擊翻回正面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ダブルタップで表面に戻る"
+          }
+        }
+      }
+    },
+    "雙擊翻看背面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "雙擊翻看背面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ダブルタップで裏面を見る"
+          }
+        }
+      }
+    },
+    "背面尚未新增照片": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "背面尚未新增照片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面の写真がまだありません"
+          }
+        }
+      }
+    },
+    "可從系統相簿或 App 內現有照片選取綁定背面，\n亦可直接雙擊卡片翻回正面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可從系統相簿或 App 內現有照片選取綁定背面，\n亦可直接雙擊卡片翻回正面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「写真」アプリやアプリ内の写真から裏面を設定できます。\nダブルタップで表面に戻ります。"
+          }
+        }
+      }
+    },
+    "從系統相簿選取背面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從系統相簿選取背面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「写真」アプリから裏面を選択"
+          }
+        }
+      }
+    },
+    "從 App 內選取背面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從 App 內選取背面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリ内の写真から裏面を選択"
+          }
+        }
+      }
+    },
+    "翻回正面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻回正面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表面に戻る"
+          }
+        }
+      }
+    },
+    "換背面圖": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "換背面圖"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面を変更"
+          }
+        }
+      }
+    },
+    "補背面圖": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "補背面圖"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面を追加"
+          }
+        }
+      }
+    },
+    "更換背面照片（系統相簿）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更換背面照片（系統相簿）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面の写真を変更（「写真」アプリ）"
+          }
+        }
+      }
+    },
+    "補上背面照片（系統相簿）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "補上背面照片（系統相簿）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面の写真を追加（「写真」アプリ）"
+          }
+        }
+      }
+    },
+    "從 App 內選取背面照片": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從 App 內選取背面照片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリ内の写真から裏面を選択"
+          }
+        }
+      }
+    },
+    "對調正反面照片": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對調正反面照片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表裏の写真を入れ替える"
+          }
+        }
+      }
+    },
+    "移除背面照片": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除背面照片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面の写真を削除"
+          }
+        }
+      }
+    },
+    "加入最愛": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加入最愛"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入りに追加"
+          }
+        }
+      }
+    },
+    "取消最愛": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消最愛"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入りを解除"
+          }
+        }
+      }
+    },
+    "編輯資訊與備忘": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "編輯資訊與備忘"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "情報とメモを編集"
+          }
+        }
+      }
+    },
+    "手動調整四頂點裁切與比例": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手動調整四頂點裁切與比例"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "四隅のトリミングと比率を手動調整"
+          }
+        }
+      }
+    },
+    "復原背面為原始未裁切圖片": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "復原背面為原始未裁切圖片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面を未トリミングの元画像に戻す"
+          }
+        }
+      }
+    },
+    "復原正面為原始未裁切圖片": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "復原正面為原始未裁切圖片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表面を未トリミングの元画像に戻す"
+          }
+        }
+      }
+    },
+    "復原原圖": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "復原原圖"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元画像に戻す"
+          }
+        }
+      }
+    },
+    "Mode B 雙角度去反光合成": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mode B 雙角度去反光合成"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mode B マルチアングル反射除去合成"
+          }
+        }
+      }
+    },
+    "Mode B 雙角度去反光合成（Pro）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mode B 雙角度去反光合成（Pro）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mode B マルチアングル反射除去合成（Pro）"
+          }
+        }
+      }
+    },
+    "原地更新至 iOS 系統相簿": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原地更新至 iOS 系統相簿"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS「写真」アプリの画像を更新"
+          }
+        }
+      }
+    },
+    "同步至 iOS 系統相簿": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步至 iOS 系統相簿"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS「写真」アプリに同期"
+          }
+        }
+      }
+    },
+    "正在套用四頂點透視裁切...": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在套用四頂點透視裁切..."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "四隅の台形補正トリミングを適用中..."
+          }
+        }
+      }
+    },
+    "四個頂點可拖曳至相片外・雙指可縮放畫面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "四個頂點可拖曳至相片外・雙指可縮放畫面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "四隅は写真の外側へドラッグ可能・ピンチで拡大縮小"
+          }
+        }
+      }
+    },
+    "自動吸附": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動吸附"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動吸着"
+          }
+        }
+      }
+    },
+    "旋轉 90°": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "旋轉 90°"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "90° 回転"
+          }
+        }
+      }
+    },
+    "展開四點": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展開四點"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "四隅を広げる"
+          }
+        }
+      }
+    },
+    "邊界設定": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "邊界設定"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "余白設定"
+          }
+        }
+      }
+    },
+    "篩選範圍": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "篩選範圍"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フィルタ範囲"
+          }
+        }
+      }
+    },
+    "同相冊 (%@)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同相冊 (%@)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同じアルバム (%@)"
+          }
+        }
+      }
+    },
+    "合併並移除原獨立項目": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "合併並移除原獨立項目"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "統合して元の単体項目を削除"
+          }
+        }
+      }
+    },
+    "設為背面後自動移除原本多出的單張項目，避免相簿重複": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設為背面後自動移除原本多出的單張項目，避免相簿重複"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面に設定した後、重複を防ぐため元の単体項目を自動的に削除します"
+          }
+        }
+      }
+    },
+    "無可選取的 App 內照片": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無可選取的 App 內照片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択可能なアプリ内の写真がありません"
+          }
+        }
+      }
+    },
+    "目前篩選條件下沒有其他可作為背面的拍立得照片。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前篩選條件下沒有其他可作為背面的拍立得照片。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在の条件では、裏面に設定できる他のチェキ写真がありません。"
+          }
+        }
+      }
+    },
+    "設為背面": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設為背面"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面に設定"
+          }
+        }
+      }
+    },
+    "PRO LIFETIME": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PRO LIFETIME"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PRO LIFETIME"
+          }
+        }
+      }
+    },
+    "今日免費無浮水印 %lld/%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今日免費無浮水印 %lld/%lld"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本日の無料透かしなし枠 %lld/%lld"
+          }
+        }
+      }
+    },
+    "ChekiLens Pro 終身買斷": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ChekiLens Pro 終身買斷"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ChekiLens Pro 永久ライセンス（買い切り）"
+          }
+        }
+      }
+    },
+    "原畫質無損輸出 · 雙角度去反光合成 · 完全移除浮水印": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原畫質無損輸出 · 雙角度去反光合成 · 完全移除浮水印"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オリジナル画質出力 · マルチアングル反射除去 · 透かし完全非表示"
+          }
+        }
+      }
+    },
+    "一次買斷 %@ · 永久解鎖全功能": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一次買斷 %@ · 永久解鎖全功能"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "買い切り %@ · 全機能を永久アンロック"
+          }
+        }
+      }
+    },
+    "%@ 立即永久解鎖": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 立即永久解鎖"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ で今すぐ永久アンロック"
+          }
+        }
+      }
+    },
+    "已解鎖 Pro 終身版（點擊切換測試狀態）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已解鎖 Pro 終身版（點擊切換測試狀態）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pro 永久版アンロック済み（タップでテスト切替）"
+          }
+        }
+      }
+    },
+    "原畫質無損輸出 · 原生相簿原地裁切": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原畫質無損輸出 · 原生相簿原地裁切"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オリジナル画質出力 · 標準「写真」アプリで直接トリミング"
+          }
+        }
+      }
+    },
+    "免費版於系統相簿保留未裁切原圖；升級 Pro 可直接在 iOS 原生相簿非破壞性原地裁切（不新增重複照片、保留原圖可復原）並無損輸出": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "免費版於系統相簿保留未裁切原圖；升級 Pro 可直接在 iOS 原生相簿非破壞性原地裁切（不新增重複照片、保留原圖可復原）並無損輸出"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無料版は「写真」アプリに未トリミングの元画像を保存します。Proにアップグレードすると、iOS標準の「写真」アプリ内で重複を作らず非破壊トリミング（元画像への復元可能）と無劣化出力が可能になります"
+          }
+        }
+      }
+    },
+    "雙角度去反光合成": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "雙角度去反光合成"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マルチアングル反射除去合成"
+          }
+        }
+      }
+    },
+    "透過 Mode B 兩張微傾角度自動消除塑膠保護套強光反射": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "透過 Mode B 兩張微傾角度自動消除塑膠保護套強光反射"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mode B により複数アングルの写真からスリーブの強い光の反射を自動除去します"
+          }
+        }
+      }
+    },
+    "完全移除浮水印 · 終身買斷": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完全移除浮水印 · 終身買斷"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "透かし完全非表示 · 買い切り"
+          }
+        }
+      }
+    },
+    "移除 App 內裁切檢視與分享輸出時的 ChekiLens 浮水印，一次付費永久解鎖": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除 App 內裁切檢視與分享輸出時的 ChekiLens 浮水印，一次付費永久解鎖"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリ内プレビューや共有出力時の ChekiLens 透かしを非表示にします。一度の購入で永久に利用可能です"
+          }
+        }
+      }
+    },
+    "相簿同步與時間軸": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相簿同步與時間軸"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "写真アルバム同期とタイムライン"
+          }
+        }
+      }
+    },
+    "自動同步至 iOS 系統相簿": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動同步至 iOS 系統相簿"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS「写真」アプリへ自動同期"
+          }
+        }
+      }
+    },
+    "正位與配對完成後自動寫入系統「照片」App": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正位與配對完成後自動寫入系統「照片」App"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "補正・ペアリング完了後に標準の「写真」アプリへ自動保存します"
+          }
+        }
+      }
+    },
+    "建立「團體 ＞ 成員 (團體)」相簿階層": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "建立「團體 ＞ 成員 (團體)」相簿階層"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「グループ ＞ メンバー (グループ)」階層を作成"
+          }
+        }
+      }
+    },
+    "自動於系統相簿建立團體資料夾與成員專屬相簿": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動於系統相簿建立團體資料夾與成員專屬相簿"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「写真」アプリ内にグループフォルダとメンバー別アルバムを自動作成します"
+          }
+        }
+      }
+    },
+    "手寫日期覆寫相簿 EXIF 時間軸": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手寫日期覆寫相簿 EXIF 時間軸"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手書き日付で EXIF 撮影日時を上書き"
+          }
+        }
+      }
+    },
+    "依拍立得上的手寫日期自動排入拍攝當日時間軸": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "依拍立得上的手寫日期自動排入拍攝當日時間軸"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェキに書かれた日付を読み取り、撮影日時のタイムラインに反映します"
+          }
+        }
+      }
+    },
+    "正反面時間軸排序": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正反面時間軸排序"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表裏のタイムライン順序"
+          }
+        }
+      }
+    },
+    "開啟同步後，正反面雙圖會寫入系統相簿並保持相鄰；若在系統相簿中刪除此拍立得，或是於 ChekiLens 刪除照片時，兩邊皆可保持一致。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟同步後，正反面雙圖會寫入系統相簿並保持相鄰；若在系統相簿中刪除此拍立得，或是於 ChekiLens 刪除照片時，兩邊皆可保持一致。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同期をオンにすると、表裏の写真が「写真」アプリ内で隣り合って保存され、削除時も連動します。"
+          }
+        }
+      }
+    },
+    "匯入與手寫日期辨識 (OCR)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "匯入與手寫日期辨識 (OCR)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取り込みと手書き日付認識 (OCR)"
+          }
+        }
+      }
+    },
+    "匯入時自動辨識手寫日期": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "匯入時自動辨識手寫日期"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取り込み時に手書き日付を自動認識"
+          }
+        }
+      }
+    },
+    "使用 Apple Vision 自動讀取拍立得正面或背面手寫日期": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 Apple Vision 自動讀取拍立得正面或背面手寫日期"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple Vision を使用してチェキの表裏にある手書き日付を自動認識します"
+          }
+        }
+      }
+    },
+    "缺少年份時預設策略": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缺少年份時預設策略"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "年が省略されている場合の補完方法"
+          }
+        }
+      }
+    },
+    "當拍立得手寫日期僅標註月日（例如「10/24」）時，自動依此策略補齊年份。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "當拍立得手寫日期僅標註月日（例如「10/24」）時，自動依此策略補齊年份。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手書き日付に月日のみ（例：「10/24」）が書かれている場合、この設定に従って年を補完します。"
+          }
+        }
+      }
+    },
+    "儲存與輸出格式": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "儲存與輸出格式"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存と出力フォーマット"
+          }
+        }
+      }
+    },
+    "照片儲存模式": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "照片儲存模式"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "写真の保存モード"
+          }
+        }
+      }
+    },
+    "預設保留原始相片格式，避免非必要的轉檔耗損": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "預設保留原始相片格式，避免非必要的轉檔耗損"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デフォルトでは元の画像フォーマットを維持し、再圧縮による劣化を防ぎます"
+          }
+        }
+      }
+    },
+    "目標轉換格式": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目標轉換格式"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "変換先フォーマット"
+          }
+        }
+      }
+    },
+    "僅在選擇「轉換為指定格式」時套用": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "僅在選擇「轉換為指定格式」時套用"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「指定のフォーマットに変換」を選択した場合のみ適用されます"
+          }
+        }
+      }
+    },
+    "掃描與影像處理": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "掃描與影像處理"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スキャンと画像処理"
+          }
+        }
+      }
+    },
+    "預設拍立得規格": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "預設拍立得規格"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デフォルトのチェキ規格"
+          }
+        }
+      }
+    },
+    "自動識別邊框收縮 / 擴張": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動識別邊框收縮 / 擴張"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動枠検出時の内側縮小 / 外側拡張"
+          }
+        }
+      }
+    },
+    "負值向內裁切去黑邊，正值向外保留白邊": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "負值向內裁切去黑邊，正值向外保留白邊"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マイナス値で内側に縮小（黒縁除去）、プラス値で外側の白枠を保持"
+          }
+        }
+      }
+    },
+    "更內縮 (-3%)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更內縮 (-3%)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内側 (-3%)"
+          }
+        }
+      }
+    },
+    "標準 (0%)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "標準 (0%)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "標準 (0%)"
+          }
+        }
+      }
+    },
+    "微外擴 (+2%)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "微外擴 (+2%)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外側 (+2%)"
+          }
+        }
+      }
+    },
+    "反光對策模式": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "反光對策模式"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "光の反射対策モード"
+          }
+        }
+      }
+    },
+    "在自動判斷拍立得邊界時（包含批次匯入背景預裁切、相機拍攝正位、以及手動編輯器的「自動吸附」），會自動依此比例向內收縮（負值去除桌面黑邊陰影）或向外擴張（正值保留完整相紙白邊）。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在自動判斷拍立得邊界時（包含批次匯入背景預裁切、相機拍攝正位、以及手動編輯器的「自動吸附」），會自動依此比例向內收縮（負值去除桌面黑邊陰影）或向外擴張（正值保留完整相紙白邊）。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェキの境界を自動検出する際（一括取り込み、カメラ撮影、手動編集の「自動吸着」を含む）、この比率に従って内側へ縮小（背景の影を除去）または外側へ拡張（白枠を保持）します。"
+          }
+        }
+      }
+    },
+    "一般與關於": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一般與關於"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一般・このアプリについて"
+          }
+        }
+      }
+    },
+    "語言": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "語言"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "言語"
+          }
+        }
+      }
+    },
+    "外觀模式": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外觀模式"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外観モード"
+          }
+        }
+      }
+    },
+    "重新顯示歡迎導引與操作提示": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新顯示歡迎導引與操作提示"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ウェルカムガイドとヒントを再表示"
+          }
+        }
+      }
+    },
+    "重置首次配對提示與 3D 翻轉導引": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置首次配對提示與 3D 翻轉導引"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "初回ペアリングヒントと 3D 反転ガイドをリセットします"
+          }
+        }
+      }
+    },
+    "恢復購買項目 (Restore Purchases)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢復購買項目 (Restore Purchases)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "購入項目を復元 (Restore Purchases)"
+          }
+        }
+      }
+    },
+    "從 Apple ID 同步 ChekiLens Pro 終身買斷資格": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "從 Apple ID 同步 ChekiLens Pro 終身買斷資格"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple ID から ChekiLens Pro 永久ライセンスを同期します"
+          }
+        }
+      }
+    },
+    "版本": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "バージョン"
+          }
+        }
+      }
+    },
+    "切換回免費版（開發測試）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切換回免費版（開發測試）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無料版に切り替え（開発テスト）"
+          }
+        }
+      }
+    },
+    "重新顯示頂部 Pro 卡片與測試免費版浮水印": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新顯示頂部 Pro 卡片與測試免費版浮水印"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上部の Pro カードを再表示し、無料版の透かしをテストします"
+          }
+        }
+      }
+    },
+    "重置今日免費 1 張額度（開發測試）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置今日免費 1 張額度（開發測試）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本日の無料1枚枠をリセット（開発テスト）"
+          }
+        }
+      }
+    },
+    "歡迎使用 ChekiLens": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歡迎使用 ChekiLens"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ChekiLens へようこそ"
+          }
+        }
+      }
+    },
+    "專為偶像拍立得打造的數位典藏工具": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "專為偶像拍立得打造的數位典藏工具"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アイドルチェキのためのデジタルアーカイブツール"
+          }
+        }
+      }
+    },
+    "AI 自動偵測邊框與正位": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 自動偵測邊框與正位"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 自動枠検出・台形補正"
+          }
+        }
+      }
+    },
+    "自動辨識拍立得四角並進行透視校正，精準還原 86×54mm 實體比例。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動辨識拍立得四角並進行透視校正，精準還原 86×54mm 實體比例。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェキの四隅を自動認識して台形補正を行い、86×54mm の実物比率を忠実に再現します。"
+          }
+        }
+      }
+    },
+    "正反面雙面數位典藏": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正反面雙面數位典藏"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表裏両面のデジタルコレクション"
+          }
+        }
+      }
+    },
+    "將拍立得正面照片與背面簽名留言配對綁定，支援 3D 翻轉檢視。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "將拍立得正面照片與背面簽名留言配對綁定，支援 3D 翻轉檢視。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェキの表面写真と裏面のサイン・メッセージをペアリングし、3D 反転でいつでも見返せます。"
+          }
+        }
+      }
+    },
+    "手寫日期 OCR 智慧辨識": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手寫日期 OCR 智慧辨識"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手書き日付の OCR 自動認識"
+          }
+        }
+      }
+    },
+    "自動讀取拍立得上的手寫拍攝日期，並寫入相片 EXIF 時間軸。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動讀取拍立得上的手寫拍攝日期，並寫入相片 EXIF 時間軸。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェキに書かれた手書きの日付を自動で読み取り、写真の EXIF タイムラインに反映します。"
+          }
+        }
+      }
+    },
+    "團體與推角成員分類": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "團體與推角成員分類"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グループ＆推しメンバー別整理"
+          }
+        }
+      }
+    },
+    "依偶像團體、成員與活動 #標籤整理，打造專屬的數位拍立得相冊。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "依偶像團體、成員與活動 #標籤整理，打造專屬的數位拍立得相冊。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グループ、メンバー、イベントの #タグごとに整理し、自分だけのチェキアルバムを作れます。"
+          }
+        }
+      }
+    },
+    "正反面翻轉與透視正位": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正反面翻轉與透視正位"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表裏 3D 反転と自動台形補正"
+          }
+        }
+      }
+    },
+    "點擊下方拍立得體驗 3D 正反面翻轉，或切換透視校正預覽。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點擊下方拍立得體驗 3D 正反面翻轉，或切換透視校正預覽。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下のチェキをタップして 3D 表裏反転を体験するか、台形補正のプレビューを切り替えてみてください。"
+          }
+        }
+      }
+    },
+    "檢視正面照片": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "檢視正面照片"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表面の写真を見る"
+          }
+        }
+      }
+    },
+    "翻轉至背面留言": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻轉至背面留言"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面のメッセージへ反転"
+          }
+        }
+      }
+    },
+    "已正位 86×54": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已正位 86×54"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "補正済み 86×54"
+          }
+        }
+      }
+    },
+    "歪斜原圖": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歪斜原圖"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "補正前の元画像"
+          }
+        }
+      }
+    },
+    "Core Image 雙重幾何透視校正，自動裁切雜亂背景": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Core Image 雙重幾何透視校正，自動裁切雜亂背景"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Core Image 幾何学台形補正により、背景を自動でトリミング"
+          }
+        }
+      }
+    },
+    "正反面配對儲存，匯出至系統相簿時享有相同拍攝秒數": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正反面配對儲存，匯出至系統相簿時享有相同拍攝秒數"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表裏ペアで保存し、「写真」アプリへ書き出す際も同じ秒数で隣り合って配置"
+          }
+        }
+      }
+    },
+    "背面手寫與備忘": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "背面手寫與備忘"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裏面の手書きとメモ"
+          }
+        }
+      }
+    },
+    "OCR 辨識日期": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OCR 辨識日期"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OCR 認識日付"
+          }
+        }
+      }
+    },
+    "對話備忘錄": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "對話備忘錄"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "トークメモ"
+          }
+        }
+      }
+    },
+    "權限設定與隱私保護": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "權限設定與隱私保護"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクセス権限とプライバシー保護"
+          }
+        }
+      }
+    },
+    "ChekiLens 所有影像辨識與資料皆於您的 iPhone 本機端離線完成，絕不上傳雲端伺服器。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ChekiLens 所有影像辨識與資料皆於您的 iPhone 本機端離線完成，絕不上傳雲端伺服器。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ChekiLens の画像認識とデータ保存はすべて iPhone 本体内でオフライン処理され、外部サーバーに送信されることはありません。"
+          }
+        }
+      }
+    },
+    "相簿讀寫權限": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相簿讀寫權限"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "写真ライブラリのアクセス権限"
+          }
+        }
+      }
+    },
+    "用於匯入拍立得照片，以及將正位後的正反面照片同步回系統相簿。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用於匯入拍立得照片，以及將正位後的正反面照片同步回系統相簿。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チェキ写真の取り込みや、補正後の表裏写真を「写真」アプリへ同期するために使用します。"
+          }
+        }
+      }
+    },
+    "相機拍攝權限": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相機拍攝權限"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カメラの撮影権限"
+          }
+        }
+      }
+    },
+    "提供即時四角邊框預覽與防反光拍攝輔助（亦可稍後於拍攝時開啟）。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供即時四角邊框預覽與防反光拍攝輔助（亦可稍後於拍攝時開啟）。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リアルタイムの四隅枠プレビューと反射防止スキャン機能を提供します（後から撮影時に許可することも可能です）。"
+          }
+        }
+      }
+    },
+    "100% 裝置端安全運算": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "100% 裝置端安全運算"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "100% デバイス内での安全な処理"
+          }
+        }
+      }
+    },
+    "使用 Apple 原生 Vision 與 SwiftData 框架，無須註冊帳號即可離線典藏。": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 Apple 原生 Vision 與 SwiftData 框架，無須註冊帳號即可離線典藏。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple 標準の Vision と SwiftData フレームワークを使用し、アカウント登録不要でオフライン管理できます。"
+          }
+        }
+      }
+    },
+    "已允許": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已允許"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "許可済み"
+          }
+        }
+      }
+    },
+    "允許": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允許"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "許可"
+          }
+        }
+      }
+    },
+    "已拒絕": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已拒絕"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拒否済み"
+          }
+        }
+      }
+    },
+    "返回相機": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "返回相機"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カメラに戻る"
+          }
+        }
+      }
+    },
+    "立即合成無反光照片 (%lld/4 角點)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "立即合成無反光照片 (%lld/4 角點)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今すぐ反射除去合成 (%lld/4 箇所)"
+          }
+        }
+      }
+    },
+    "正反雙面 (1/2)：請對準拍立得【正面】": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正反雙面 (1/2)：請對準拍立得【正面】"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "両面撮影 (1/2)：チェキの【表面】を合わせてください"
+          }
+        }
+      }
+    },
+    "正反雙面 (2/2)：請翻面拍攝【背面手寫】": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正反雙面 (2/2)：請翻面拍攝【背面手寫】"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "両面撮影 (2/2)：裏返して【裏面】を撮影してください"
+          }
+        }
+      }
+    },
+    "⚡️ 四邊已固定：請移動至四個角，分別按快門 (%lld/4)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚡️ 四邊已固定：請移動至四個角，分別按快門 (%lld/4)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚡️ 枠固定済み：四隅の丸に順番に合わせてシャッターを押してください (%lld/4)"
+          }
+        }
+      }
+    },
+    "⚡️ 四角防反光：請先對準拍立得按第 1 次快門固定四邊位置": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚡️ 四角防反光：請先對準拍立得按第 1 次快門固定四邊位置"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚡️ 四隅反射防止：まずチェキに合わせて1回目のシャッターを押し、枠を固定してください"
+          }
+        }
+      }
+    },
+    "已鎖定 86×54mm 拍立得邊框": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已鎖定 86×54mm 拍立得邊框"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "86×54mm チェキ枠をロック中"
+          }
+        }
+      }
+    },
+    "批次匯入與配對": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "批次匯入與配對"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一括取り込み・ペアリング"
+          }
+        }
+      }
+    },
+    "配對模式": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配對模式"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ペアリングモード"
+          }
+        }
+      }
+    },
+    "載入 8 張內建測試組（多人＋雙正面警示）": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "載入 8 張內建測試組（多人＋雙正面警示）"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "8枚のテスト画像を読み込む（複数人＋両面警告）"
+          }
+        }
+      }
+    },
+    "一鍵修正所有警示項目": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一鍵修正所有警示項目"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべての警告項目を一括修正"
+          }
+        }
+      }
+    },
+    "清空工作台": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空工作台"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ワークベンチを空にする"
+          }
+        }
+      }
+    },
+    "已選取 %lld 張照片 · 將輸出 %lld 張拍立得": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已選取 %lld 張照片 · 將輸出 %lld 張拍立得"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 枚の写真を選択中 · %lld 枚のチェキを出力"
+          }
+        }
+      }
+    },
+    "已勾選 %lld / %lld 張": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已勾選 %lld / %lld 張"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / %lld 枚を選択中"
+          }
+        }
+      }
+    },
+    "背景偵測邊界 (%lld/%lld)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "背景偵測邊界 (%lld/%lld)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "枠をバックグラウンド検出中 (%lld/%lld)"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

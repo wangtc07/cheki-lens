@@ -12,11 +12,8 @@ enum MainLibraryTab: Hashable {
 struct ContentView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("appAppearanceMode") private var appAppearanceModeRaw: String = AppAppearanceMode.system.rawValue
+    @AppStorage("appLanguageMode") private var appLanguageModeRaw: String = AppLanguageMode.system.rawValue
     @State private var selectedTab: MainLibraryTab = .allPhotos
-
-    private var preferredScheme: ColorScheme? {
-        (AppAppearanceMode(rawValue: appAppearanceModeRaw) ?? .system).resolvedColorScheme
-    }
 
     var body: some View {
         Group {
@@ -38,7 +35,8 @@ struct ContentView: View {
                 OnboardingView()
             }
         }
-        .preferredColorScheme(preferredScheme)
+        .id(appLanguageModeRaw)
+        .applyAppAppearanceAndLocale()
     }
 }
 

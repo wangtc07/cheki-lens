@@ -103,9 +103,9 @@ final class StoreKitManager {
     /// 橫幅按鈕顯示文字
     var bannerUnlockButtonTitle: String {
         if let product = proProduct {
-            return "\(product.displayPrice) 永久解鎖"
+            return L10n.tr("\(product.displayPrice) 永久解鎖", "\(product.displayPrice) で永久ロック解除")
         }
-        return "¥600 / NT$120 永久解鎖"
+        return L10n.tr("¥600 / NT$120 永久解鎖", "¥600 / NT$120 で永久ロック解除")
     }
 
     // MARK: - Store Initialization & Product Loading

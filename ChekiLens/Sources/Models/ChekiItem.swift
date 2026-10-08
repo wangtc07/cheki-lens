@@ -226,10 +226,10 @@ extension ChekiItem {
         }
     }
 
-    /// 統一拍攝日期格式化：`yyyy年M月d日 EEEE`（例如 `2025年11月3日 星期一`）
+    /// 統一拍攝日期格式化：`yyyy年M月d日 EEEE`（例如繁中 `2025年11月3日 星期一` / 日文 `2025年11月3日 月曜日`）
     static func formatFullDateWithWeekday(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_Hant_TW")
+        formatter.locale = L10n.formattingLocale
         formatter.dateFormat = "yyyy年M月d日 EEEE"
         return formatter.string(from: date)
     }
@@ -333,7 +333,7 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
         case .mini:   return "Instax Mini"
         case .square: return "Instax Square"
         case .wide:   return "Instax Wide"
-        case .auto:   return "自動識別"
+        case .auto:   return L10n.tr("自動識別", "自動判別")
         }
     }
 
@@ -392,13 +392,13 @@ enum ProcessingState: String, Codable, CaseIterable, Sendable {
 
     var displayName: String {
         switch self {
-        case .unprocessed:    return "未處理"
-        case .detecting:      return "偵測中"
-        case .awaitingReview: return "等待確認"
-        case .corrected:      return "校正完成"
-        case .recognizingDate:return "OCR 辨識中"
-        case .completed:      return "完成"
-        case .error:          return "錯誤"
+        case .unprocessed:    return L10n.tr("未處理", "未処理")
+        case .detecting:      return L10n.tr("偵測中", "検出中")
+        case .awaitingReview: return L10n.tr("等待確認", "確認待ち")
+        case .corrected:      return L10n.tr("校正完成", "補正完了")
+        case .recognizingDate:return L10n.tr("OCR 辨識中", "OCR 認識中")
+        case .completed:      return L10n.tr("完成", "完了")
+        case .error:          return L10n.tr("錯誤", "エラー")
         }
     }
 }

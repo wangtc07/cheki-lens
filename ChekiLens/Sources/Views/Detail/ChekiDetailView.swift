@@ -1305,7 +1305,11 @@ struct ChekiDetailView: View {
         }
 
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        showToast(backside ? "已復原背面為原始未裁切圖片" : "已復原為原始未裁切圖片")
+        showToast(
+            backside
+                ? L10n.tr("已復原背面為原始未裁切圖片", "裏面を元の未トリミング画像に戻しました")
+                : L10n.tr("已復原為原始未裁切圖片", "元の未トリミング画像に戻しました")
+        )
     }
 
     @MainActor
@@ -1368,11 +1372,11 @@ struct ChekiDetailView: View {
     @MainActor
     private func synthesizeModeBSecondAnglePhoto(from pickerItem: PhotosPickerItem) async {
         guard PhotoLibraryManager.isProLifetimeUnlocked else {
-            showToast("Mode B 雙角度去反光合成為 Pro 專屬功能")
+            showToast(L10n.tr("Mode B 雙角度去反光合成為 Pro 專屬功能", "Mode B マルチアングル反射除去は Pro 限定機能です"))
             return
         }
         guard let secondData = try? await pickerItem.loadTransferable(type: Data.self) else {
-            showToast("無法讀取第二角度照片")
+            showToast(L10n.tr("無法讀取第二角度照片", "2枚目の写真を読み込めませんでした"))
             return
         }
 
@@ -1382,13 +1386,13 @@ struct ChekiDetailView: View {
             : (currentItem.originalFrontImageData ?? currentItem.frontImageData)
 
         guard let primaryData = primarySourceData else {
-            showToast("無法讀取主角度照片")
+            showToast(L10n.tr("無法讀取主角度照片", "メインの写真を読み込めませんでした"))
             return
         }
 
         let insetRatio = currentItem.borderInsetRatio
         let preferredFmt = currentItem.filmFormat
-        showToast("正在合成雙角度去反光⋯")
+        showToast(L10n.tr("正在合成雙角度去反光⋯", "マルチアングル反射除去を合成中⋯"))
 
         let fusedJPEG: Data? = await Task.detached(priority: .userInitiated) {
             guard let primaryCG = UIImage(data: primaryData)?.normalizedImage.cgImage,
@@ -1421,11 +1425,11 @@ struct ChekiDetailView: View {
             }
             try? modelContext.save()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            showToast("✨ 已完成 Mode B 雙角度去反光合成")
+            showToast(L10n.tr("✨ 已完成 Mode B 雙角度去反光合成", "✨ Mode B マルチアングル反射除去が完了しました"))
             await syncCurrentItemToSystemPhotos()
         } else {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
-            showToast("雙角度對位失敗，請確認兩張皆包含完整拍立得邊框")
+            showToast(L10n.tr("雙角度對位失敗，請確認兩張皆包含完整拍立得邊框", "位置合わせに失敗しました。両方の写真にチェキの枠が含まれているか確認してください"))
         }
     }
 
@@ -1463,7 +1467,7 @@ struct ChekiDetailView: View {
         withAnimation(flipAnimation) {
             flipProgress = 1.0
         }
-        showToast("已從 App 內選取並綁定背面照片")
+        showToast(L10n.tr("已從 App 內選取並綁定背面照片", "アプリ内の写真を裏面に設定しました"))
 
         if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
             Task {
@@ -1514,12 +1518,12 @@ struct ChekiDetailView: View {
             currentItem.isDateWrittenToAlbum = (currentItem.ocrDate != nil)
             try? modelContext.save()
             if PhotoLibraryManager.isProLifetimeUnlocked {
-                showToast("已原地更新系統相簿裁切圖（\(albumName)）")
+                showToast(L10n.tr("已原地更新系統相簿裁切圖（\(albumName)）", "「写真」アプリのトリミング画像を更新しました（\(albumName)）"))
             } else {
-                showToast("已同步至系統相簿（免費版保留未裁切原圖）")
+                showToast(L10n.tr("已同步至系統相簿（免費版保留未裁切原圖）", "「写真」アプリに同期しました（無料版は未トリミングの元画像を保持）"))
             }
         } catch {
-            showToast("相簿同步需要開啟照片存取權限")
+            showToast(L10n.tr("相簿同步需要開啟照片存取權限", "写真アルバムとの同期にはアクセス許可が必要です"))
         }
     }
 
@@ -1562,7 +1566,7 @@ struct ChekiDetailView: View {
         guard !shareItems.isEmpty else { return }
 
         if !isPro && !canUseDailyFreeQuota {
-            showToast("今日免費高畫質額度已滿（1/1），目前為 SNS 畫質＋浮水印")
+            showToast(L10n.tr("今日免費高畫質額度已滿（1/1），目前為 SNS 畫質＋浮水印", "本日の無料高画質枠（1/1）は使用済みです。SNS画質＋透かしで出力します"))
         }
 
         let activityVC = UIActivityViewController(activityItems: shareItems, applicationActivities: nil)
@@ -1571,7 +1575,7 @@ struct ChekiDetailView: View {
             Task { @MainActor in
                 if canUseDailyFreeQuota {
                     StoreKitManager.shared.consumeDailyFreeQuotaIfAvailable()
-                    showToast("已使用今日免費高畫質無浮水印輸出（1/1）")
+                    showToast(L10n.tr("已使用今日免費高畫質無浮水印輸出（1/1）", "本日の無料高画質（透かしなし）枠（1/1）を使用しました"))
                 }
             }
         }
@@ -2480,9 +2484,14 @@ private struct ChekiQuadCropEditorView: View {
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             if abs(defaultBorderInsetPercentage) > 0.05 {
-                showBanner(String(format: "已自動吸附頂點（套用邊界微調 %+.1f%%）", defaultBorderInsetPercentage))
+                showBanner(
+                    L10n.tr(
+                        String(format: "已自動吸附頂點（套用邊界微調 %+.1f%%）", defaultBorderInsetPercentage),
+                        String(format: "四隅を自動吸着しました（余白微調整 %+.1f%% 適用）", defaultBorderInsetPercentage)
+                    )
+                )
             } else {
-                showBanner("已自動吸附拍立得四個頂點")
+                showBanner(L10n.tr("已自動吸附拍立得四個頂點", "チェキの四隅を自動吸着しました"))
             }
         } else {
             let basePixels = Self.defaultQuadCorners.map {
@@ -2502,7 +2511,7 @@ private struct ChekiQuadCropEditorView: View {
                 }
             }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            showBanner("已重設為標準拍立得四頂點範圍")
+            showBanner(L10n.tr("已重設為標準拍立得四頂點範圍", "標準のチェキ四隅範囲にリセットしました"))
         }
     }
 
@@ -2548,7 +2557,11 @@ private struct ChekiQuadCropEditorView: View {
         }
 
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        onAppliedToast(editingBackside ? "已復原背面為原始未裁切圖片" : "已復原為原始未裁切圖片")
+        onAppliedToast(
+            editingBackside
+                ? L10n.tr("已復原背面為原始未裁切圖片", "裏面を元の未トリミング画像に戻しました")
+                : L10n.tr("已復原為原始未裁切圖片", "元の未トリミング画像に戻しました")
+        )
         dismiss()
     }
 
@@ -2653,14 +2666,14 @@ private struct ChekiQuadCropEditorView: View {
 
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 if PhotoLibraryManager.isProLifetimeUnlocked {
-                    onAppliedToast("已原地修改裁切並保留原始圖片")
+                    onAppliedToast(L10n.tr("已原地修改裁切並保留原始圖片", "元画像を保持したままトリミングを更新しました"))
                 } else {
-                    onAppliedToast("已更新 App 內裁切預覽（免費版原生相簿保留原圖）")
+                    onAppliedToast(L10n.tr("已更新 App 內裁切預覽（免費版原生相簿保留原圖）", "アプリ内のトリミングを更新しました（無料版は写真アプリの元画像を保持）"))
                 }
                 dismiss()
             }
         } else {
-            showBanner("裁切範圍無效，請確認四個頂點未交錯")
+            showBanner(L10n.tr("裁切範圍無效，請確認四個頂點未交錯", "トリミング範囲が無効です。四隅が交差していないか確認してください"))
         }
     }
 
@@ -2869,6 +2882,17 @@ private struct InAppBacksidePickerSheet: View {
         case singleOnly = "僅單面"
 
         var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .all:
+                return L10n.tr("全部照片", "すべての写真")
+            case .sameAlbum:
+                return L10n.tr("同相冊", "同じアルバム")
+            case .singleOnly:
+                return L10n.tr("僅單面", "片面のみ")
+            }
+        }
     }
 
     @State private var filterScope: FilterScope = .all
@@ -2925,7 +2949,7 @@ private struct InAppBacksidePickerSheet: View {
                                 if scope == .sameAlbum, let name = targetItem.idolMember?.stageName {
                                     Text("同相冊 (\(name))").tag(scope)
                                 } else {
-                                    Text(scope.rawValue).tag(scope)
+                                    Text(scope.displayName).tag(scope)
                                 }
                             }
                         }
@@ -2988,6 +3012,7 @@ private struct InAppBacksidePickerSheet: View {
                 }
             }
         }
+        .applyAppAppearanceAndLocale()
     }
 
     @ViewBuilder

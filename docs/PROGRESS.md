@@ -7,38 +7,17 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-* **最後更新時間**：2026-10-08
+* **最後更新時間**：2026-10-09
 * **當前所屬階段**：Phase 6 — 端到端整合與發布準備 (QA & Release)
-* **當前分支**：`fix/camera-snap-and-antiglare-alignment`
-* **當前進行中任務**：已完成 **Task 6.1** 實機問題專項修復與 **Google フォトスキャン 4 角點閃光去反光升級**：
-  1. **拍照後與手動裁切「自動吸附」四角精準鎖定**：將相機拍後正位與手動裁切左下角「自動吸附」改為與取景器一致的純淨 `VNDetectRectanglesRequest` + 自然手持透視保護（內角 `68°~112°` 且對角和 `180°±14°` 時跳過會造成平行四邊形斜拉至木桌面的 `refineQuadrilateral` 與 `CIDetector` 面積覆蓋），並於按下快門瞬間鎖定取景器綠框 `trackedQuadPoints` 作為先驗錨點。
-  2. **比照 Google フォトスキャン (PhotoScan) 4 角點開啟閃光燈對位與多角度 100% 去反光合成**：
-     - **相機互動 (`CameraScannerView.swift`)**：切換至「防反光」模式時自動開啟相機 LED 持續補光燈 (`setTorchModeOn`) 將鏡面反光聚攏，先拍攝基準中心照，接著在拍立得四角浮現 `左上 ①`、`右上 ②`、`右下 ③`、`左下 ④` 4 個引導圓圈與中央準心環；將準心移至圓圈對準約 0.35 秒即自動吸附連拍（亦支援手動點擊或隨時按「立即合成」）。同時解除未解鎖 Pro 時誤落入單張拍照之門檻。
-     - **全卡 `0% ~ 100%` 測地線光暈 100% 乾淨像素替換 (`VisionManager+AntiGlare.swift`)**：解除舊版頂部 `11.5%` 與底部 `22.5%` 邊框排除限制（解決頂部兔耳/氣球與底部手寫字反光無法消除問題），改用 `4×6` 截斷 L1 (`min(d, 85)`) 局部網格微平移對位 + 鏡面高光峰值種子 (`L >= 0.84`) + 4 輪測地線光暈膨脹，對反光核心與藍白光暈執行 `weight = 1.0`（100% 無反光像素替換），非反光區嚴格保持 `weight = 0.0` 零重影。
-  3. **手動四頂點裁切編輯器支援移出相片邊界外 (`ChekiDetailView.swift`, `VisionManager+PerspectiveCorrect.swift`, `ChekiItem.swift`)**：放寬頂點拖曳與儲存範圍至 `-0.45 ~ 1.45`、加寬畫布預設邊距 (`padding: 44`) 並支援雙指縮小至 `0.65x`，且於透視校正超出相片邊界時透過 `clampedToExtent()` 自動延續相紙白邊色澤，避免傾斜超出畫面的拍立得邊角產生黑邊缺角。
-  4. **單張全螢幕檢視單擊全畫面平滑漸進漸出與放大防跳動 (`ChekiDetailView.swift`)**：固定卡片基準 Layout Frame 並移除會觸發系統 Safe Area 重排的 `.statusBarHidden` 與 `if !isChromeHidden` 視圖銷毀重建，改以 GPU `scaleEffect` + `offset` 搭配翻頁同款漸進漸出曲線 (`pageAndZoomAnimation`) 驅動全畫面放大；當圖片處於放大狀態 (`isImageZoomed`) 時自動隱藏 icon，且單擊畫面僅切換 icon 顯示而不改變圖片倍率與座標，徹底消除畫面跳動與抖動。
-  5. **相簿與相冊多選模式支援 Apple 原生拖選多選與底部左圓分享／右圓刪除操作列 (`LibraryView.swift`)**：於「全部」與「相冊詳情」進入選取模式時自動隱藏底部主 `TabView` 導覽列，並對齊 iOS 原生相簿 (`Photos.app`) 改為左下圓形毛玻璃「分享 (`square.and.arrow.up`)」、中央「已選取 N 張照片」、右下圓形毛玻璃「刪除 (`trash`)」操作列（右上角為「全選」與圓形「✕」完成按鈕）；同時加入 `ApplePhotosDragSelectOverlay`，支援手指橫向滑動跨格連續範圍拖選／取消勾選（啟動後可繼續跨多列上下滑動批次選取，純垂直滑動則維持 `ScrollView` 原生順暢捲動）。
-  6. **從相簿追加後即時更新目前所在相簿，並於開啟「相簿同步」或變更成員時自動同步至 iOS 系統相簿 (`BatchPairingView.swift`, `LibraryView.swift`, `SettingsView.swift`, `PhotoLibraryManager.swift`, `ChekiDetailView.swift`, `ChekiInfoView.swift`)**：
-     - 修復 `BatchPairingView` 初始化與 `appendPickerItems` / `collectAllPhotosInOrder` 會遺失 `defaultMember`（目前所在相簿）或漏掉工作台二次追加照片的問題，確保在某個成員相冊內追加匯入照片時自動套用該成員相冊。
-     - 將 `AlbumHeroDetailView` 改為以 `@Query` 動態計算 `liveItems`，使從相簿追加照片或變更成員後立即更新目前所在的相簿畫面與張數。
-     - 新增 `PhotoLibraryManager.syncItemsToSystemPhotoLibrary` 批次同步機制：當使用者先從相簿追加匯入照片、事後再打開「同步至 iOS 系統相簿 (`autoSyncToPhotosLibrary`)」，或於相冊／詳情頁變更所屬成員時，立即更新目前所在的相簿並同步寫入 iOS 原生相簿 (`ChekiLens › 團體 › 成員`)。
-  7. **單張檢視背面體驗強化：移除測試手寫背面、空背面支援雙擊翻回正面、新增「從 App 內選取背面照片」(`ChekiDetailView.swift`)**：
-     - 自「尚未綁定背面照片」引導卡與右上角「正反雙面管理」選單移除「產生測試手寫簽名背面」功能。
-     - 為空背面引導卡綁定 `applyCardTapGestures`，使背面沒有照片時雙擊卡片同樣能平滑 3D 翻轉回正面。
-     - 新增 [`InAppBacksidePickerSheet`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Views/Detail/ChekiDetailView.swift#L2846-L3040) 與 [`attachBacksideFromInAppItem`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Views/Detail/ChekiDetailView.swift#L1420-L1462)，支援在空背面卡片與右上選單直接從 App 內現有拍立得項目（可依全部／同相冊／僅單面篩選，並支援自動合併移除原獨立單張項目）選取作為背面。
-  8. **成員相冊名稱格式統一為「人名 (團體)」與新增成員與團體欄位簡化 (`IdolMember.swift`, `LibraryView.swift`, `ChekiDetailView.swift`, `ChekiInfoView.swift`, `PhotoLibraryManager.swift`, `BatchPairingView.swift`, `CameraScannerView.swift`)**：於 `IdolMember` 新增 `albumTitle`（有團體時顯示 `"\(stageName) (\(groupName))"`，無團體時顯示 `stageName`），將「相冊 › 成員相冊」、團體內成員相冊、相冊詳情頁 Hero 標題、搜尋頁成員相冊、成員指派選單及系統相簿同步名稱統一改為「人名 (團體)」，並將 `QuickCreateIdolSheet`（「新增成員與團體」）輸入框提示精簡為 `姓名`、`團體`、`標籤`。
-  9. **四角防反光改為「首張固定四邊 + 陀螺儀移動追蹤 + 四角分別手動按快門 + 極速非中斷合成」(`CameraScannerView.swift`, `VisionManager+AntiGlare.swift`, `VisionManager+PerspectiveCorrect.swift`)**：
-     - **首張固定四邊 + 陀螺儀平滑位移 (`CMMotionManager`)**：拍下第 1 張照片瞬間立即呼叫 `lockQuadAndStartGyro()` 固定四邊位置並停止即時 `VNDetectRectanglesRequest` 矩形偵測 (`isQuadDetectionLocked = true`)，改由 `CMMotionManager` 60fps 姿態傾角 (`CMAttitude.multiply(byInverseOf:)`) 搭配阻尼加速度平移驅動四邊與 4 個角點圓圈平滑移動，徹底解決移動時四邊跳動問題。
-     - **四角分別手動按快門（取消到點自動觸發）**：移除自動倒數觸發快門計時器 (`photoScanDwellTimer`)，改為由使用者移動至四個角點後分別手動按下快門（`1/4` → `2/4` → `3/4` → `4/4`）或直接點選角點圓圈拍攝；同時防護 `AVCapturePhotoOutput` 的 `photoContinuation` 重入與取消釋放。
-     - **極速合成（`< 0.35s`）與跳出不中斷存檔**：消除 Debug `-Onone` 下 7.2 億次 `Array` 雙層迴圈 (`maxFilterFloatFast`) 與重型 CoreML Fallback 造成的數分鐘卡死，改以 $O(1)$ 滑動視窗 Box Filter 搭配 `1280px` 快速正位與共用 Metal `CIContext`，並將合成與相簿同步置於獨立非取消 `Task` 中執行，確保瞬間完成且跳出畫面也不會中斷。
-  10. **按下快門零卡頓秒存原圖、正位裁切與 OCR 全面移至背景執行 (`CameraScannerView.swift`, `UIImage+Normalized.swift`)**：
-     - **硬體快門直出 JPEG 封包 (`CapturedPhotoPacket`)**：`CameraSessionController.capturePhotoPacket` 設定 `photoQualityPrioritization = .speed`，於 `photoOutput(_:didFinishProcessingPhoto:)` 直接回傳硬體 ISP `fileDataRepresentation()` 原始 JPEG `Data` 與輕量 `UIImage`（移除原先在主執行緒重繪 12MP `4032×3024` `.normalizedImage` 的阻塞）。
-     - **先秒存原圖並立即結束 Loading (`isProcessingCapture = false`)**：無論「拍照」、「正反雙面」或「防反光」，快門拍下瞬間立即將原始圖片寫入 SwiftData `ChekiItem`（左下角預覽縮圖即時更新）並立刻解除快門 Loading 狀態，讓使用者可零延遲連續操作。
-     - **正位裁切、手寫日期 OCR、四角防反光合成與系統相簿同步全背景化**：於獨立背景 `Task` 中使用降採樣 `normalizedImage(maxDimension: 2048)` 執行四角偵測、透視正位裁切、OCR 日期辨識與防反光合成，完成後自動原地更新 `ChekiItem` 並同步至 iOS 系統相簿。
-     - **精簡資訊面板 (`ChekiInfoView.swift`)**：移除「拍攝資訊」區塊中的「處理狀態」欄位，僅保留日期、時間、規格、成員與備忘。
-     - **系統相簿同步刪除 (`PhotoLibraryManager.swift`, `LibraryView.swift`, `ChekiDetailView.swift`, `SettingsView.swift`, `CameraScannerView.swift`)**：新增 `PhotoLibraryManager.deleteItems`、`removeBackside` 與 `deleteAssetsFromSystemPhotoLibrary`，當開啟系統相簿同步（或項目已同步至系統相簿）時，於「全部」、「相冊詳情」或「單張全螢幕檢視」刪除拍立得（或移除背面照片）會一併透過 `PHAssetChangeRequest.deleteAssets` 自 iOS 系統相簿 (`Photos.app`) 刪除對應照片，並精簡刪除確認視窗主標題（「確定要刪除N張照片嗎？」／「確定要刪除此照片嗎？」）確保單行顯示不換行。
-* **最新穩定 Git Commit**：style(UI): 精簡刪除確認視窗主標題文字避免換行
-* **下一動執行指示**：執行 **Task 6.2**（支援深色/淺色模式與動態字級 Dynamic Type）
+* **當前分支**：`main`
+* **當前進行中任務**：已將 `fix/camera-snap-and-antiglare-alignment` 合併至 `main`，並完成 **Task 6.2**（支援深色/淺色模式、動態字級 Dynamic Type 與日文／繁體中文語系切換）：
+  1. **全域深色／淺色模式與 Dynamic Type 動態字級適配 (`LocalizationManager.swift`, `ContentView.swift`, 全視圖與彈出面板)**：
+     - 建立 `AppAppearanceAndLocaleModifier` 與 `.applyAppAppearanceAndLocale()`，於 `ContentView` 及所有 `sheet` / `fullScreenCover`（`SettingsView`、`BatchPairingView`、`ChekiInfoView`、`QuickCreateIdolSheet`、`OnboardingView`、`InAppBacksidePickerSheet`、`SlotFormatAndDateEditorSheet`、`ProLifetimePaywallSheet`）統一注入 `.preferredColorScheme`（跟隨系統 / 深色 / 淺色）與 `.dynamicTypeSize(...DynamicTypeSize.xxxLarge)` 動態字級保護，並為橫向操作按鈕補齊 `.lineLimit(1)` 與 `.minimumScaleFactor(0.8)` 防截斷。
+  2. **追加日文語系（自動匹配 iOS 系統語系 + 設定內自由切換繁中／日文）(`Localizable.xcstrings`, `LocalizationManager.swift`, `SettingsView.swift`, 全視圖)**：
+     - 新增 [`Localizable.xcstrings`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Localizable.xcstrings) String Catalog（涵蓋全 App 共 224 組繁體中文 `zh-Hant` 與日文 `ja` 在地化詞條）與 [`LocalizationManager.swift`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Utilities/LocalizationManager.swift) (`AppLanguageMode` / `L10n`)，並將 Xcode 專案 `knownRegions` 加入 `zh-Hant` 與 `ja`。
+     - 預設為「跟隨系統 (`system`)」：當 iOS 系統首選語言為日文 (`ja`) 時自動匹配顯示日本語介面與日本星期日期格式 (`yyyy年M月d日 EEEE`)，其餘預設顯示繁體中文；使用者亦可隨時於「設定 › 一般與關於 › 語言」手動切換為「跟隨系統」、「繁體中文」或「日本語」，無須重啟 App 即時全畫面生效。
+* **最新穩定 Git Commit**：feat(設定與多語系): 完成 Task 6.2 深淺色模式、Dynamic Type 與日文/繁中語系切換
+* **下一動執行指示**：執行 **Task 6.3**（建立 App 圖示、啟動畫面與 App Store 截圖產生流程）
 
 ---
 
@@ -293,5 +272,5 @@
 
 ### 階段 6：端到端整合與發布準備 (Phase 6: QA & Release)
 - [x] **Task 6.1**: 實機測試與效能調校（實機部署至 iPhone 12 mini `ジェ`；補齊 `CameraScannerView` 所有拍攝模式自動同步寫入 iOS 原生相簿 `Photos.app`；將 Mode B 雙角度去反光升級為「第 1 張拍完立即背景預處理 + 1440px 快速正面四角偵測 + 540px 配準代理 + 270×430 O(1) 滑動視窗權重遮罩 + Core Image GPU `CIBlendWithMask` 單次 4K 渲染 + 取景器追蹤每 6 幀節流」，消除 4K CPU 迴圈瓶頸）
-- [ ] **Task 6.2**: 支援深色/淺色模式與動態字級 (Dynamic Type)
+- [x] **Task 6.2**: 支援深色/淺色模式、動態字級 (Dynamic Type) 與日文 (`ja`)／繁體中文 (`zh-Hant`) 雙語系切換（預設自動匹配 iOS 系統語系，並可於「設定 › 一般與關於 › 語言」即時切換繁中／日文）
 - [ ] **Task 6.3**: 建立 App 圖示、啟動畫面與 App Store 截圖產生流程

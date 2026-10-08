@@ -10,6 +10,15 @@ enum AlbumHierarchyMode: String, CaseIterable, Identifiable {
     case members = "成員"
 
     var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .groups:
+            return L10n.tr("團體", "グループ")
+        case .members:
+            return L10n.tr("成員", "メンバー")
+        }
+    }
 }
 
 // MARK: - Uncategorized Album Route
@@ -363,7 +372,10 @@ struct LibraryView: View {
                                 Task {
                                     do {
                                         let count = try await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: true)
-                                        systemPhotoSeedAlertMessage = "已成功將 \(count) 張帶封面手寫日期的拍立得相片寫入 iOS 原生相簿 (Photos.app)。\n\n現在請點選右上角「＋」從系統相簿選取相片，即可實測導入與自動日期判斷！"
+                                        systemPhotoSeedAlertMessage = L10n.tr(
+                                            "已成功將 \(count) 張帶封面手寫日期的拍立得相片寫入 iOS 原生相簿 (Photos.app)。\n\n現在請點選右上角「＋」從系統相簿選取相片，即可實測導入與自動日期判斷！",
+                                            "日付入りのチェキ写真 \(count) 枚を iOS 標準の「写真」アプリに保存しました。\n\n右上の「＋」から写真を選択して、取り込みと日付の自動認識をお試しください！"
+                                        )
                                     } catch {
                                         systemPhotoSeedAlertMessage = error.localizedDescription
                                     }
@@ -913,7 +925,7 @@ struct AlbumsRootView: View {
             // 頂部「團體 | 成員」原地切換（點擊「成員」直接在此頁面展開所有成員相冊）
             Picker("相冊檢視階層", selection: $hierarchyMode.animation(.snappy(duration: 0.22))) {
                 ForEach(AlbumHierarchyMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+                    Text(mode.displayName).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
@@ -1072,14 +1084,14 @@ struct ApplePhotoAlbumTile: View {
                 .frame(width: size, height: size)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(primaryTitle)
+                    Text(LocalizedStringKey(primaryTitle))
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .minimumScaleFactor(0.88)
 
                     if let secondaryTitle {
-                        Text(secondaryTitle)
+                        Text(LocalizedStringKey(secondaryTitle))
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(.white)
                             .lineLimit(1)
@@ -1609,12 +1621,12 @@ struct AlbumHeroDetailView: View {
 
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(effectivePrimaryTitle)
+                        Text(LocalizedStringKey(effectivePrimaryTitle))
                             .font(.title.weight(.bold))
                             .foregroundStyle(.white)
 
                         if let effectiveSecondaryTitle {
-                            Text(effectiveSecondaryTitle)
+                            Text(LocalizedStringKey(effectiveSecondaryTitle))
                                 .font(.title2.weight(.bold))
                                 .foregroundStyle(.white)
                         }
@@ -2028,6 +2040,7 @@ struct QuickCreateIdolSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .applyAppAppearanceAndLocale()
     }
 
     private func saveMemberAndGroup() {

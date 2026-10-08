@@ -63,7 +63,7 @@ struct ChekiInfoView: View {
                         displayedComponents: [.date]
                     )
                     .datePickerStyle(.graphical)
-                    .environment(\.locale, Locale(identifier: "zh_Hant_TW"))
+                    .environment(\.locale, L10n.formattingLocale)
                     .padding(.vertical, 4)
                 }
 
@@ -186,8 +186,13 @@ struct ChekiInfoView: View {
                             }
                         } label: {
                             HStack(spacing: 4) {
-                                Text(item.idolMember?.albumTitle ?? "未分類")
-                                    .foregroundStyle(.secondary)
+                                if let memberTitle = item.idolMember?.albumTitle {
+                                    Text(memberTitle)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("未分類")
+                                        .foregroundStyle(.secondary)
+                                }
                                 Image(systemName: "chevron.up.chevron.down")
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(.tertiary)
@@ -218,6 +223,7 @@ struct ChekiInfoView: View {
         .task(id: item.id) {
             await autoRecognizeCoverDateIfNeeded()
         }
+        .applyAppAppearanceAndLocale()
     }
 
     // MARK: - Bindings & Persistence Helpers

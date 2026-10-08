@@ -12,6 +12,17 @@ enum BatchPairingMode: String, CaseIterable, Identifiable {
     case manualPair = "手動配對"
 
     var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .singleOnly:
+            return L10n.tr("直接執行", "そのまま実行")
+        case .autoPair:
+            return L10n.tr("自動配對", "自動ペアリング")
+        case .manualPair:
+            return L10n.tr("手動配對", "手動ペアリング")
+        }
+    }
 }
 
 // MARK: - DetectedPhotoSide (Vision 正反面特徵分類)
@@ -20,6 +31,17 @@ enum DetectedPhotoSide: String, Sendable {
     case analyzing   = "分析中"
     case likelyFront = "正面"
     case likelyBack  = "背面"
+
+    var displayName: String {
+        switch self {
+        case .analyzing:
+            return L10n.tr("分析中", "解析中")
+        case .likelyFront:
+            return L10n.tr("正面", "表面")
+        case .likelyBack:
+            return L10n.tr("背面", "裏面")
+        }
+    }
 }
 
 // MARK: - StagingChekiPhoto (工作台單張相片暫存項目 — 支援背景預先偵測拍立得邊界、透視裁切預覽與 OCR)
@@ -346,15 +368,18 @@ struct BatchPairingView: View {
             }
         }
         if uniqueNames.isEmpty {
-            return "未分類"
+            return L10n.tr("未分類", "未分類")
         } else if uniqueNames.count == 1 && !hasUncategorized {
             return uniqueNames[0]
         } else if uniqueNames.count == 1 && hasUncategorized {
-            return "\(uniqueNames[0]) ＋ 未分類"
+            return L10n.tr("\(uniqueNames[0]) ＋ 未分類", "\(uniqueNames[0]) ＋ 未分類")
         } else if uniqueNames.count == 2 && !hasUncategorized {
             return "\(uniqueNames[0])、\(uniqueNames[1])"
         } else {
-            return "\(uniqueNames[0])、\(uniqueNames[1]) 等 \(uniqueNames.count) 人"
+            return L10n.tr(
+                "\(uniqueNames[0])、\(uniqueNames[1]) 等 \(uniqueNames.count) 人",
+                "\(uniqueNames[0])、\(uniqueNames[1]) ほか \(uniqueNames.count) 名"
+            )
         }
     }
 
@@ -365,7 +390,7 @@ struct BatchPairingView: View {
                 VStack(spacing: 8) {
                     Picker("配對模式", selection: $pairingMode) {
                         ForEach(BatchPairingMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+                            Text(mode.displayName).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -412,7 +437,10 @@ struct BatchPairingView: View {
                                 Task {
                                     do {
                                         let count = try await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: true)
-                                        systemPhotoSeedAlertMessage = "已成功將 \(count) 張帶封面手寫日期的拍立得相片寫入 iOS 原生相簿 (Photos.app)。\n\n現在可點選上方「＋」直接從系統相簿選取這 \(count) 張相片進行導入與自動日期判斷測試！"
+                                        systemPhotoSeedAlertMessage = L10n.tr(
+                                            "已成功將 \(count) 張帶封面手寫日期的拍立得相片寫入 iOS 原生相簿 (Photos.app)。\n\n現在可點選上方「＋」直接從系統相簿選取這 \(count) 張相片進行導入與自動日期判斷測試！",
+                                            "日付入りのチェキ写真 \(count) 枚を iOS 標準の「写真」アプリに保存しました。\n\n上部の「＋」からこれら \(count) 枚の写真を選択して、取り込みと日付の自動認識をテストできます！"
+                                        )
                                     } catch {
                                         systemPhotoSeedAlertMessage = error.localizedDescription
                                     }
@@ -544,6 +572,7 @@ struct BatchPairingView: View {
             }
         }
         .interactiveDismissDisabled()
+        .applyAppAppearanceAndLocale()
     }
 
     @ViewBuilder
@@ -575,6 +604,7 @@ struct BatchPairingView: View {
             )
             .presentationDetents([.height(500), .large])
             .presentationDragIndicator(.visible)
+            .applyAppAppearanceAndLocale()
         }
     }
 

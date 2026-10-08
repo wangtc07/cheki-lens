@@ -95,6 +95,7 @@ struct OnboardingView: View {
                 refreshPermissionStatuses()
             }
         }
+        .applyAppAppearanceAndLocale()
     }
 
     // MARK: - Page 1: Apple HIG Welcome Overview
@@ -135,11 +136,11 @@ struct OnboardingView: View {
                                 )
 
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(feature.title)
+                                Text(LocalizedStringKey(feature.title))
                                     .font(.headline)
                                     .foregroundStyle(.primary)
 
-                                Text(feature.description)
+                                Text(LocalizedStringKey(feature.description))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -216,6 +217,8 @@ struct OnboardingView: View {
                             systemImage: "arrow.triangle.2.circlepath"
                         )
                         .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -229,6 +232,8 @@ struct OnboardingView: View {
                             systemImage: isPerspectiveCorrected ? "checkmark.rectangle.portrait.fill" : "crop.rotate"
                         )
                         .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -460,9 +465,9 @@ struct OnboardingView: View {
                 )
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.subheadline.weight(.semibold))
-                Text(subtitle)
+                Text(LocalizedStringKey(subtitle))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -475,7 +480,7 @@ struct OnboardingView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.green)
             } else {
-                Button(buttonTitle, action: action)
+                Button(LocalizedStringKey(buttonTitle), action: action)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }
@@ -519,22 +524,22 @@ struct OnboardingView: View {
     private var photoPermissionButtonTitle: String {
         switch photoAuthStatus {
         case .notDetermined:
-            return "允許"
+            return L10n.tr("允許", "許可")
         case .denied, .restricted:
-            return "已拒絕"
+            return L10n.tr("已拒絕", "拒否済み")
         default:
-            return "已允許"
+            return L10n.tr("已允許", "許可済み")
         }
     }
 
     private var cameraPermissionButtonTitle: String {
         switch cameraAuthStatus {
         case .notDetermined:
-            return "允許"
+            return L10n.tr("允許", "許可")
         case .denied, .restricted:
-            return "已拒絕"
+            return L10n.tr("已拒絕", "拒否済み")
         default:
-            return "已允許"
+            return L10n.tr("已允許", "許可済み")
         }
     }
 

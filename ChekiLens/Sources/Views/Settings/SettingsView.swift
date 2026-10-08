@@ -14,18 +14,18 @@ enum BacksideTimelineStrategy: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .sameSecond:
-            return "正反面同一秒（緊密相鄰）"
+            return L10n.tr("正反面同一秒（緊密相鄰）", "両面を同じ秒に設定（隣接配置）")
         case .plusOneSecond:
-            return "背面延後 1 秒（正面固定在左）"
+            return L10n.tr("背面延後 1 秒（正面固定在左）", "裏面を 1 秒遅らせる（表面を左に固定）")
         }
     }
 
     var shortLabel: String {
         switch self {
         case .sameSecond:
-            return "同一秒"
+            return L10n.tr("同一秒", "同じ秒")
         case .plusOneSecond:
-            return "背面 +1 秒"
+            return L10n.tr("背面 +1 秒", "裏面 +1 秒")
         }
     }
 }
@@ -40,9 +40,9 @@ enum OCRMissingYearStrategy: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .importYear:
-            return "相片匯入當年度"
+            return L10n.tr("相片匯入當年度", "写真を取り込んだ年")
         case .exifYear:
-            return "原圖 EXIF 拍攝年度"
+            return L10n.tr("原圖 EXIF 拍攝年度", "元画像の EXIF 撮影年")
         }
     }
 }
@@ -57,9 +57,9 @@ enum PhotoStorageMode: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .keepOriginal:
-            return "保留原圖格式（不轉換）"
+            return L10n.tr("保留原圖格式（不轉換）", "元のフォーマットを維持（変換しない）")
         case .convertFormat:
-            return "轉換為指定格式"
+            return L10n.tr("轉換為指定格式", "指定のフォーマットに変換")
         }
     }
 }
@@ -76,13 +76,13 @@ enum PreferredExportImageFormat: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .original:
-            return "原圖格式 (不轉換)"
+            return L10n.tr("原圖格式 (不轉換)", "元のフォーマット (変換しない)")
         case .heic:
-            return "HEIC (節省空間)"
+            return L10n.tr("HEIC (節省空間)", "HEIC (容量節約)")
         case .jpeg:
-            return "JPEG (最佳相容性)"
+            return L10n.tr("JPEG (最佳相容性)", "JPEG (高い互換性)")
         case .png:
-            return "無失真 PNG (典藏專用)"
+            return L10n.tr("無失真 PNG (典藏專用)", "ロスレス PNG (アーカイブ用)")
         }
     }
 }
@@ -97,18 +97,18 @@ enum AntiReflectionMode: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .modeA:
-            return "Mode A（單張智慧抑制）"
+            return L10n.tr("Mode A（單張智慧抑制）", "Mode A（1枚スマート反射抑制）")
         case .modeB:
-            return "Mode B（雙角度合成 · Pro）"
+            return L10n.tr("Mode B（雙角度合成 · Pro）", "Mode B（マルチアングル合成 · Pro）")
         }
     }
 
     var shortLabel: String {
         switch self {
         case .modeA:
-            return "Mode A (單張)"
+            return L10n.tr("Mode A (單張)", "Mode A (1枚)")
         case .modeB:
-            return "Mode B (Pro)"
+            return L10n.tr("Mode B (Pro)", "Mode B (Pro)")
         }
     }
 }
@@ -124,11 +124,11 @@ enum AppAppearanceMode: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .system:
-            return "跟隨系統"
+            return L10n.tr("跟隨系統", "システム設定に従う")
         case .dark:
-            return "深色模式"
+            return L10n.tr("深色模式", "ダークモード")
         case .light:
-            return "淺色模式"
+            return L10n.tr("淺色模式", "ライトモード")
         }
     }
 
@@ -177,6 +177,7 @@ struct SettingsView: View {
     @AppStorage("antiReflectionMode") private var antiReflectionModeRaw: String = AntiReflectionMode.modeA.rawValue
 
     // MARK: 第 5 組：一般與關於
+    @AppStorage("appLanguageMode") private var appLanguageModeRaw: String = AppLanguageMode.system.rawValue
     @AppStorage("appAppearanceMode") private var appAppearanceModeRaw: String = AppAppearanceMode.system.rawValue
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
     @AppStorage("hasSeenBatchPairingCoachMark") private var hasSeenBatchPairingCoachMark: Bool = false
@@ -401,6 +402,19 @@ struct SettingsView: View {
 
                 // 5. 第 5 組：一般與關於 (General & About)
                 Section {
+                    Picker(selection: $appLanguageModeRaw) {
+                        ForEach(AppLanguageMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode.rawValue)
+                        }
+                    } label: {
+                        SettingsRowLabel(
+                            title: "語言",
+                            subtitle: nil,
+                            systemImage: "globe",
+                            iconColor: .teal
+                        )
+                    }
+
                     Picker(selection: $appAppearanceModeRaw) {
                         ForEach(AppAppearanceMode.allCases) { mode in
                             Text(mode.displayName).tag(mode.rawValue)
@@ -507,7 +521,10 @@ struct SettingsView: View {
                             HStack {
                                 SettingsRowLabel(
                                     title: "重置今日免費 1 張額度（開發測試）",
-                                    subtitle: "目前使用進度 \(min(StoreKitManager.dailyFreeLimit, dailyFreeQuotaUsedCount))/\(StoreKitManager.dailyFreeLimit)（點擊重置為 0/1）",
+                                    subtitle: L10n.tr(
+                                        "目前使用進度 \(min(StoreKitManager.dailyFreeLimit, dailyFreeQuotaUsedCount))/\(StoreKitManager.dailyFreeLimit)（點擊重置為 0/1）",
+                                        "本日の無料枠使用状況 \(min(StoreKitManager.dailyFreeLimit, dailyFreeQuotaUsedCount))/\(StoreKitManager.dailyFreeLimit)（タップして 0/1 にリセット）"
+                                    ),
                                     systemImage: "arrow.counterclockwise.circle.fill",
                                     iconColor: .purple
                                 )
@@ -544,6 +561,7 @@ struct SettingsView: View {
                 )
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                .applyAppAppearanceAndLocale()
             }
             .alert(
                 alertTitle,
@@ -586,9 +604,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .preferredColorScheme(
-            (AppAppearanceMode(rawValue: appAppearanceModeRaw) ?? .system).resolvedColorScheme
-        )
+        .applyAppAppearanceAndLocale()
     }
 
     @MainActor
@@ -676,8 +692,10 @@ struct SettingsView: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             defaultBorderInsetPercentage = targetValue
         } label: {
-            Text(title)
+            Text(LocalizedStringKey(title))
                 .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
@@ -695,12 +713,18 @@ struct SettingsView: View {
 
         if restored || isProLifetimeUnlocked {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            alertTitle = "恢復購買成功"
-            alertMessage = "已成功恢復您的 ChekiLens Pro 終身買斷授權！"
+            alertTitle = L10n.tr("恢復購買成功", "購入の復元に成功しました")
+            alertMessage = L10n.tr(
+                "已成功恢復您的 ChekiLens Pro 終身買斷授權！",
+                "ChekiLens Pro 永久ライセンスを正常に復元しました！"
+            )
         } else {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
-            alertTitle = "恢復購買項目"
-            alertMessage = "目前此 Apple ID 尚未查找到 ChekiLens Pro 購買紀錄。若於開發環境測試，可點擊頂部卡片進入預覽解鎖。"
+            alertTitle = L10n.tr("恢復購買項目", "購入項目の復元")
+            alertMessage = L10n.tr(
+                "目前此 Apple ID 尚未查找到 ChekiLens Pro 購買紀錄。若於開發環境測試，可點擊頂部卡片進入預覽解鎖。",
+                "この Apple ID では ChekiLens Pro の購入履歴が見つかりませんでした。開発環境でテストする場合は、上部のカードをタップしてプレビュー解除できます。"
+            )
         }
     }
 }
@@ -725,11 +749,11 @@ private struct SettingsRowLabel: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.body)
                     .foregroundStyle(.primary)
                 if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
+                    Text(LocalizedStringKey(subtitle))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -800,9 +824,9 @@ private struct ProLifetimePaywallSheet: View {
                                     .background(item.color.gradient, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(item.title)
+                                    Text(LocalizedStringKey(item.title))
                                         .font(.subheadline.weight(.bold))
-                                    Text(item.desc)
+                                    Text(LocalizedStringKey(item.desc))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .fixedSize(horizontal: false, vertical: true)
@@ -836,8 +860,13 @@ private struct ProLifetimePaywallSheet: View {
                                         .tint(.white)
                                 } else {
                                     Image(systemName: isProUnlocked ? "checkmark.seal.fill" : "lock.open.fill")
-                                    Text(isProUnlocked ? "已解鎖 Pro 終身版（點擊切換測試狀態）" : "\(priceLabel) 立即永久解鎖")
-                                        .fontWeight(.bold)
+                                    if isProUnlocked {
+                                        Text("已解鎖 Pro 終身版（點擊切換測試狀態）")
+                                            .fontWeight(.bold)
+                                    } else {
+                                        Text("\(priceLabel) 立即永久解鎖")
+                                            .fontWeight(.bold)
+                                    }
                                 }
                             }
                             .frame(maxWidth: .infinity)
@@ -920,7 +949,10 @@ private struct ProLifetimePaywallSheet: View {
             }
 
         case .pending:
-            purchaseStatusNote = "交易等待家長或帳號核准中，核准後將自動解鎖 Pro。"
+            purchaseStatusNote = L10n.tr(
+                "交易等待家長或帳號核准中，核准後將自動解鎖 Pro。",
+                "承認待ちです。承認されると自動的に Pro が解除されます。"
+            )
 
         case .userCancelled:
             break

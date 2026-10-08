@@ -187,11 +187,13 @@
 				};
 			};
 			buildConfigurationList = D7EF56E0306DECA300C522ED /* Build configuration list for PBXProject "ChekiLens" */;
-			developmentRegion = en;
+			developmentRegion = "zh-Hant";
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hant",
+				ja,
 			);
 			mainGroup = D7EF56DC306DECA300C522ED;
 			minimizedProjectReferenceProxies = 1;
