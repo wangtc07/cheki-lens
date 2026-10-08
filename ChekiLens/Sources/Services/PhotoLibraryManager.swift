@@ -472,34 +472,11 @@ enum ChekiWatermarkRenderer {
         format.scale = image.scale
         let renderer = UIGraphicsImageRenderer(size: size, format: format)
 
-        return renderer.image { ctx in
+        return renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: size))
-            let cg = ctx.cgContext
             let shortSide = min(size.width, size.height)
 
-            // 1. 中央斜向半透明浮水印 ("ChekiLens")
-            cg.saveGState()
-            cg.translateBy(x: size.width * 0.5, y: size.height * 0.44)
-            cg.rotate(by: -26.0 * .pi / 180.0)
-
-            let centerFontSize = max(18, shortSide * 0.095)
-            let centerShadow = NSShadow()
-            centerShadow.shadowColor = UIColor.black.withAlphaComponent(0.28)
-            centerShadow.shadowBlurRadius = max(2, shortSide * 0.008)
-            centerShadow.shadowOffset = CGSize(width: 0, height: 1)
-
-            let centerAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: centerFontSize, weight: .heavy),
-                .foregroundColor: UIColor.white.withAlphaComponent(0.32),
-                .kern: centerFontSize * 0.08,
-                .shadow: centerShadow
-            ]
-            let centerText = NSAttributedString(string: "ChekiLens", attributes: centerAttrs)
-            let centerSize = centerText.size()
-            centerText.draw(at: CGPoint(x: -centerSize.width / 2, y: -centerSize.height / 2))
-            cg.restoreGState()
-
-            // 2. 右下角拍立得白邊品牌浮水印章 ("ChekiLens")
+            // 右下角拍立得白邊品牌浮水印章 ("ChekiLens")
             let badgeFontSize = max(12, shortSide * 0.038)
             let badgeText = "ChekiLens"
             let badgeAttrs: [NSAttributedString.Key: Any] = [
@@ -539,7 +516,7 @@ enum ChekiWatermarkRenderer {
 }
 
 /// App 內檢視裁切後拍立得時的非破壞性浮水印疊加層：
-/// - 免費版 (`isProLifetimeUnlocked == false`)：在 App 內查看裁切後的拍立得照片時顯示浮水印。
+/// - 免費版 (`isProLifetimeUnlocked == false`)：在 App 內查看裁切後的拍立得照片時於右下角顯示浮水印。
 /// - Pro 終身買斷版 (`isProLifetimeUnlocked == true`)：自動完全隱藏浮水印。
 struct ChekiWatermarkOverlayView: View {
     @AppStorage("isProLifetimeUnlocked") private var isProLifetimeUnlocked: Bool = false
@@ -555,17 +532,6 @@ struct ChekiWatermarkOverlayView: View {
 
         ZStack {
             if !isProLifetimeUnlocked {
-                if !compact {
-                    // 中央斜向半透明浮水印
-                    Text("ChekiLens")
-                        .font(.system(size: 24, weight: .heavy, design: .rounded))
-                        .tracking(2.0)
-                        .foregroundStyle(Color.white.opacity(0.28))
-                        .shadow(color: Color.black.opacity(0.25), radius: 2, x: 0, y: 1)
-                        .rotationEffect(.degrees(-25))
-                        .offset(y: -14)
-                }
-
                 // 右下角品牌浮水印標記
                 VStack {
                     Spacer()
