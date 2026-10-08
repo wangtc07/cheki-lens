@@ -717,8 +717,7 @@ private struct AppleLibraryPhotoCell: View {
         let isValid = !item.isDeleted && item.modelContext != nil
         ZStack(alignment: .topTrailing) {
             if isValid,
-               let data = item.frontImageData,
-               let uiImage = UIImage(data: data) {
+               let uiImage = ChekiThumbnailCache.shared.image(for: item) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFit()
@@ -1569,6 +1568,7 @@ struct AlbumHeroDetailView: View {
     private static let supportedColumnCounts = [1, 2, 3, 5]
     @State private var columnCount: Int = 5
     @State private var pinchBaselineColumnCount: Int? = nil
+    @State private var livePinchScale: CGFloat = 1.0
     @State private var showingQuickCreateMember: Bool = false
 
     private var validAllChekiItems: [ChekiItem] {
@@ -1606,51 +1606,79 @@ struct AlbumHeroDetailView: View {
         }
     }
 
-    private var gridColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: 2), count: columnCount)
+    private var gridSpacing: CGFloat {
+        switch columnCount {
+        case 1: return 10
+        case 2: return 8
+        case 3: return 6
+        default: return 4
+        }
     }
 
-    private var heroCoverData: Data? {
-        displayedItems.first?.frontImageData ?? liveItems.first?.frontImageData
+    private var cellCornerRadius: CGFloat {
+        switch columnCount {
+        case 1: return 12
+        case 2: return 10
+        case 3: return 7
+        default: return 5
+        }
+    }
+
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: columnCount)
+    }
+
+    private var heroCoverItem: ChekiItem? {
+        displayedItems.first ?? liveItems.first
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 2) {
-                heroHeaderView
+        ZStack(alignment: .top) {
+            Color(.systemBackground)
+                .ignoresSafeArea()
 
-                if displayedItems.isEmpty {
-                    ContentUnavailableView {
-                        Label("尚無拍立得項目", systemImage: "photo.on.rectangle")
-                    } description: {
-                        Text("點擊右上角「＋」或「⋯」匯入或拍攝拍立得至此相冊。")
-                    }
-                    .padding(.vertical, 48)
-                } else {
-                    LazyVGrid(columns: gridColumns, spacing: 2) {
-                        ForEach(displayedItems) { item in
-                            albumPhotoCell(for: item)
+            ScrollView {
+                VStack(spacing: 6) {
+                    heroHeaderView
+                        .transaction { transaction in
+                            transaction.animation = nil
                         }
-                    }
-                    .overlay {
-                        if isSelectionMode {
-                            ApplePhotosDragSelectOverlay(
-                                itemIDs: displayedItems.map(\.persistentModelID),
-                                columnCount: columnCount,
-                                spacing: 2,
-                                cellAspectRatio: 1.0,
-                                selectedItemIDs: $selectedItemIDs
-                            )
+
+                    if displayedItems.isEmpty {
+                        ContentUnavailableView {
+                            Label("尚無拍立得項目", systemImage: "photo.on.rectangle")
+                        } description: {
+                            Text("點擊右上角「＋」或「⋯」匯入或拍攝拍立得至此相冊。")
                         }
+                        .padding(.vertical, 48)
+                    } else {
+                        LazyVGrid(columns: gridColumns, spacing: gridSpacing) {
+                            ForEach(displayedItems) { item in
+                                albumPhotoCell(for: item)
+                            }
+                        }
+                        .overlay {
+                            if isSelectionMode {
+                                ApplePhotosDragSelectOverlay(
+                                    itemIDs: displayedItems.map(\.persistentModelID),
+                                    columnCount: columnCount,
+                                    spacing: gridSpacing,
+                                    cellAspectRatio: 1.0,
+                                    selectedItemIDs: $selectedItemIDs
+                                )
+                            }
+                        }
+                        .padding(.horizontal, columnCount >= 5 ? 6 : 10)
+                        .padding(.top, 2)
+                        .scaleEffect(livePinchScale, anchor: .top)
+                        .animation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15), value: columnCount)
                     }
-                    .animation(.spring(response: 0.3, dampingFraction: 0.82), value: columnCount)
                 }
+                .padding(.bottom, isSelectionMode ? 96 : 40)
             }
-            .padding(.bottom, isSelectionMode ? 96 : 40)
+            .simultaneousGesture(pinchZoomGesture)
+            .ignoresSafeArea(edges: .top)
         }
-        .simultaneousGesture(pinchZoomGesture)
-        .ignoresSafeArea(edges: .top)
-        .background(Color(.systemBackground))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingQuickCreateMember) {
             QuickCreateIdolSheet()
@@ -1737,7 +1765,7 @@ struct AlbumHeroDetailView: View {
                             Menu {
                                 ForEach(Self.supportedColumnCounts, id: \.self) { count in
                                     Button {
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                                        withAnimation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15)) {
                                             columnCount = count
                                         }
                                     } label: {
@@ -1933,126 +1961,138 @@ struct AlbumHeroDetailView: View {
         )
     }
 
+    /// 雙指縮放手勢：縮放期間主圖下方網格即時跟隨雙指縮放，雙指放開時才確認切換欄數並以更順暢緩慢的彈簧動畫過渡
     private var pinchZoomGesture: some Gesture {
         MagnifyGesture()
             .onChanged { value in
                 if pinchBaselineColumnCount == nil {
                     pinchBaselineColumnCount = columnCount
                 }
-                guard let baseCount = pinchBaselineColumnCount,
-                      let baseIndex = Self.supportedColumnCounts.firstIndex(of: baseCount) else { return }
-
+                let rawMag = value.magnification
+                let dampedScale: CGFloat
+                if rawMag >= 1.0 {
+                    dampedScale = 1.0 + min(rawMag - 1.0, 1.2) * 0.32
+                } else {
+                    dampedScale = 1.0 - min(1.0 - rawMag, 0.55) * 0.32
+                }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    livePinchScale = dampedScale
+                }
+            }
+            .onEnded { value in
+                defer { pinchBaselineColumnCount = nil }
+                let baseCount = pinchBaselineColumnCount ?? columnCount
+                let baseIndex = Self.supportedColumnCounts.firstIndex(of: baseCount) ?? (Self.supportedColumnCounts.count - 1)
                 let magnification = value.magnification
                 var targetIndex = baseIndex
 
-                if magnification > 1.65 {
+                if magnification > 1.58 {
                     targetIndex = max(0, baseIndex - 2)
-                } else if magnification > 1.22 {
+                } else if magnification > 1.15 {
                     targetIndex = max(0, baseIndex - 1)
-                } else if magnification < 0.60 {
+                } else if magnification < 0.62 {
                     targetIndex = min(Self.supportedColumnCounts.count - 1, baseIndex + 2)
-                } else if magnification < 0.82 {
+                } else if magnification < 0.86 {
                     targetIndex = min(Self.supportedColumnCounts.count - 1, baseIndex + 1)
                 }
 
                 let newCount = Self.supportedColumnCounts[targetIndex]
                 if newCount != columnCount {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                        columnCount = newCount
-                    }
                 }
-            }
-            .onEnded { _ in
-                pinchBaselineColumnCount = nil
+                withAnimation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15)) {
+                    columnCount = newCount
+                    livePinchScale = 1.0
+                }
             }
     }
 
     private var heroHeaderView: some View {
-        GeometryReader { geo in
-            let width = geo.size.width
-            let height = geo.size.height
-            ZStack(alignment: .bottomLeading) {
-                if let data = heroCoverData,
-                   let uiImage = UIImage(data: data) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFill()
-                        .scaleEffect(1.22)
-                        .frame(width: width, height: height)
-                        .clipped()
-                } else {
-                    LinearGradient(
-                        colors: [Color.indigo.opacity(0.8), Color.purple.opacity(0.85)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .frame(width: width, height: height)
+        ZStack(alignment: .bottomLeading) {
+            Color(.secondarySystemBackground)
+                .frame(maxWidth: .infinity)
+                .frame(height: 390)
+                .overlay {
+                    if let heroItem = heroCoverItem,
+                       let uiImage = ChekiThumbnailCache.shared.image(for: heroItem) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .scaleEffect(1.22)
+                    } else {
+                        LinearGradient(
+                            colors: [Color.indigo.opacity(0.8), Color.purple.opacity(0.85)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    }
                 }
+                .clipped()
 
-                LinearGradient(
-                    colors: [
-                        .black.opacity(0.25),
-                        .clear,
-                        .black.opacity(0.75)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(width: width, height: height)
+            LinearGradient(
+                colors: [
+                    .black.opacity(0.25),
+                    .clear,
+                    .black.opacity(0.75)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 390)
 
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(LocalizedStringKey(effectivePrimaryTitle))
-                            .font(.title.weight(.bold))
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey(effectivePrimaryTitle))
+                        .font(.title.weight(.bold))
+                        .foregroundStyle(.white)
+
+                    if let effectiveSecondaryTitle {
+                        Text(LocalizedStringKey(effectiveSecondaryTitle))
+                            .font(.title2.weight(.bold))
                             .foregroundStyle(.white)
-
-                        if let effectiveSecondaryTitle {
-                            Text(LocalizedStringKey(effectiveSecondaryTitle))
-                                .font(.title2.weight(.bold))
-                                .foregroundStyle(.white)
-                        }
-
-                        HStack(spacing: 5) {
-                            Image(systemName: "rectangle.stack")
-                                .font(.caption)
-                            Text("\(displayedItems.count) 個項目")
-                                .font(.subheadline.weight(.medium))
-                        }
-                        .foregroundStyle(.white.opacity(0.88))
-                        .padding(.top, 2)
                     }
-                    .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
 
-                    Spacer()
-
-                    if let firstItem = displayedItems.first {
-                        NavigationLink(value: ChekiDetailRoute(itemID: firstItem.id)) {
-                            Image(systemName: "play.fill")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 40, height: 40)
-                                .background(.ultraThinMaterial, in: Circle())
-                        }
-                        .buttonStyle(.plain)
+                    HStack(spacing: 5) {
+                        Image(systemName: "rectangle.stack")
+                            .font(.caption)
+                        Text("\(displayedItems.count) 個項目")
+                            .font(.subheadline.weight(.medium))
                     }
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.top, 2)
                 }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 16)
+                .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
+
+                Spacer()
+
+                if let firstItem = displayedItems.first {
+                    NavigationLink(value: ChekiDetailRoute(itemID: firstItem.id)) {
+                        Image(systemName: "play.fill")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .frame(width: width, height: height)
-            .clipped()
-            .contentShape(Rectangle())
+            .padding(.horizontal, 18)
+            .padding(.bottom, 16)
         }
+        .frame(maxWidth: .infinity)
         .frame(height: 390)
         .clipped()
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
     private func albumPhotoCell(for item: ChekiItem) -> some View {
         let isSelected = selectedItemIDs.contains(item.persistentModelID)
         if isSelectionMode {
-            AlbumSquareThumbnailCell(item: item)
+            AlbumSquareThumbnailCell(item: item, cornerRadius: cellCornerRadius)
                 .overlay(alignment: .bottomTrailing) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.headline)
@@ -2069,7 +2109,7 @@ struct AlbumHeroDetailView: View {
                 }
         } else {
             NavigationLink(value: ChekiDetailRoute(itemID: item.id)) {
-                AlbumSquareThumbnailCell(item: item)
+                AlbumSquareThumbnailCell(item: item, cornerRadius: cellCornerRadius)
             }
             .buttonStyle(.plain)
             .contextMenu {
@@ -2141,32 +2181,52 @@ struct AlbumHeroDetailView: View {
     }
 }
 
+private final class ChekiThumbnailCache: @unchecked Sendable {
+    static let shared = ChekiThumbnailCache()
+    private let cache = NSCache<NSString, UIImage>()
+
+    private init() {
+        cache.countLimit = 300
+    }
+
+    func image(for item: ChekiItem) -> UIImage? {
+        guard !item.isDeleted, item.modelContext != nil, let data = item.frontImageData else {
+            return nil
+        }
+        let key = "\(item.id.uuidString)-\(data.count)-\(data.hashValue)" as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+        guard let decoded = UIImage(data: data) else { return nil }
+        cache.setObject(decoded, forKey: key)
+        return decoded
+    }
+}
+
 private struct AlbumSquareThumbnailCell: View {
     let item: ChekiItem
+    var cornerRadius: CGFloat = 5
 
     var body: some View {
         let isValid = !item.isDeleted && item.modelContext != nil
-        GeometryReader { geo in
-            let size = geo.size.width
-            ZStack(alignment: .topTrailing) {
+        Color(.secondarySystemFill)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
                 if isValid,
-                   let data = item.frontImageData,
-                   let uiImage = UIImage(data: data) {
+                   let uiImage = ChekiThumbnailCache.shared.image(for: item) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFill()
                         .scaleEffect(1.22)
-                        .frame(width: size, height: size)
-                        .clipped()
                 } else {
-                    Rectangle()
-                        .fill(Color(.systemGray5))
-                        .frame(width: size, height: size)
+                    Image(systemName: "photo")
+                        .foregroundStyle(.secondary)
                 }
-
+            }
+            .overlay {
                 ChekiWatermarkOverlayView(compact: true)
-                    .frame(width: size, height: size)
-
+            }
+            .overlay(alignment: .topTrailing) {
                 if isValid && item.hasBothSides {
                     Image(systemName: "rectangle.portrait.on.rectangle.portrait.fill")
                         .font(.system(size: 10, weight: .semibold))
@@ -2176,13 +2236,8 @@ private struct AlbumSquareThumbnailCell: View {
                         .padding(4)
                 }
             }
-            .frame(width: size, height: size)
-            .clipped()
-            .contentShape(Rectangle())
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .clipped()
-        .contentShape(Rectangle())
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
 
