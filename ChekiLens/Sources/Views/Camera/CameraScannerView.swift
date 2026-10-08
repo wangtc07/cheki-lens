@@ -99,13 +99,26 @@ final class CameraSessionController: NSObject, ObservableObject {
     nonisolated(unsafe) private var missedQuadFrameCount: Int = 0
     nonisolated(unsafe) var isPausedForProcessing: Bool = false
 
-    /// 四角合成防反光：拍下第 1 張後立即鎖定四邊位置並停止 Vision 矩形偵測，改由陀螺儀平滑位移
+    /// 四角合成防反光：拍下第 1 張後立即鎖定四邊形狀並停止 Vision 矩形重抓，改用視覺錨點平移追蹤 (`VNTranslationalImageRegistrationRequest` + 拍立得局部錨點比對) 讓綠框與 1~4 角點死鎖在實體拍立得位置上
     nonisolated(unsafe) var isQuadDetectionLocked: Bool = false
-    private var lockedInitialQuad: [CGPoint]? = nil
-    private var initialAttitude: CMAttitude? = nil
-    private var gyroVelocity: CGPoint = .zero
-    private var gyroAccelOffset: CGPoint = .zero
-    @Published var gyroScreenOffset: CGPoint = .zero
+    nonisolated(unsafe) private var shouldCaptureAnchorFrame: Bool = false
+    nonisolated(unsafe) private var lockedInitialQuad: [CGPoint]? = nil
+    nonisolated(unsafe) private var anchorTrackCGImage: CGImage? = nil
+    nonisolated(unsafe) private var prevTrackCGImage: CGImage? = nil
+    nonisolated(unsafe) private var trackedVisualOffset: CGPoint = .zero
+    nonisolated(unsafe) private static let sharedTrackingCIContext = CIContext(options: [.cacheIntermediates: false])
+
+    private struct ChekiAnchorSample: Sendable {
+        let x: Int
+        let y: Int
+        let r: Float
+        let g: Float
+        let b: Float
+        let gx: Float
+        let gy: Float
+        let weight: Float
+    }
+    nonisolated(unsafe) private var anchorSamples: [ChekiAnchorSample] = []
 
     func start() async {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
@@ -144,7 +157,7 @@ final class CameraSessionController: NSObject, ObservableObject {
         isSessionRunning = false
     }
 
-    /// 鎖定第 1 張拍立得四邊座標並停止 Vision 即時偵測，改用陀螺儀 (`CMMotionManager`) 追蹤移動至四個角落
+    /// 鎖定第 1 張拍立得四邊形狀並停止 Vision 矩形偵測，啟動視覺錨點追蹤使綠框與 1,2,3,4 釘在實體拍立得上
     @discardableResult
     func lockQuadAndStartGyro() -> [CGPoint] {
         let baseQuad = trackedQuadPoints ?? [
@@ -153,62 +166,26 @@ final class CameraSessionController: NSObject, ObservableObject {
             CGPoint(x: 0.79, y: 0.86),
             CGPoint(x: 0.21, y: 0.86)
         ]
-        isQuadDetectionLocked = true
         lockedInitialQuad = baseQuad
         trackedQuadPoints = baseQuad
-        initialAttitude = nil
-        gyroVelocity = .zero
-        gyroAccelOffset = .zero
-        gyroScreenOffset = .zero
-
-        guard motionManager.isDeviceMotionAvailable else { return baseQuad }
-        motionManager.deviceMotionUpdateInterval = 1.0 / 60.0
-        motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] motion, _ in
-            guard let self, self.isQuadDetectionLocked, let motion else { return }
-            guard let initial = self.initialAttitude else {
-                self.initialAttitude = motion.attitude.copy() as? CMAttitude
-                return
-            }
-            guard let relAttitude = motion.attitude.copy() as? CMAttitude,
-                  let base = self.lockedInitialQuad else { return }
-            relAttitude.multiply(byInverseOf: initial)
-
-            // 1. 陀螺儀姿態傾角位移 (Roll 對應左右平移視角、Pitch 對應上下俯仰視角)
-            let tiltDx = CGFloat(tan(relAttitude.roll)) * 1.15
-            let tiltDy = CGFloat(tan(relAttitude.pitch)) * 0.95
-
-            // 2. 輔助結合線性加速度阻尼積分，讓純水平移動手機時也能平滑帶動四角
-            let dt: CGFloat = 1.0 / 60.0
-            let ax = CGFloat(motion.userAcceleration.x)
-            let ay = CGFloat(motion.userAcceleration.y)
-            self.gyroVelocity.x = (self.gyroVelocity.x - ax * dt * 1.8) * 0.90
-            self.gyroVelocity.y = (self.gyroVelocity.y + ay * dt * 1.8) * 0.90
-            self.gyroAccelOffset.x = max(-0.22, min(0.22, (self.gyroAccelOffset.x + self.gyroVelocity.x * dt * 12.0) * 0.985))
-            self.gyroAccelOffset.y = max(-0.22, min(0.22, (self.gyroAccelOffset.y + self.gyroVelocity.y * dt * 12.0) * 0.985))
-
-            let rawDx = max(-0.48, min(0.48, tiltDx + self.gyroAccelOffset.x))
-            let rawDy = max(-0.48, min(0.48, tiltDy + self.gyroAccelOffset.y))
-
-            let alpha: CGFloat = 0.28
-            let smoothDx = self.gyroScreenOffset.x * (1.0 - alpha) + rawDx * alpha
-            let smoothDy = self.gyroScreenOffset.y * (1.0 - alpha) + rawDy * alpha
-            self.gyroScreenOffset = CGPoint(x: smoothDx, y: smoothDy)
-
-            self.trackedQuadPoints = base.map { pt in
-                CGPoint(x: pt.x + smoothDx, y: pt.y + smoothDy)
-            }
-        }
+        trackedVisualOffset = .zero
+        anchorTrackCGImage = nil
+        prevTrackCGImage = nil
+        anchorSamples = []
+        shouldCaptureAnchorFrame = true
+        isQuadDetectionLocked = true
         return baseQuad
     }
 
-    /// 解除四邊鎖定並停止陀螺儀更新，恢復一般 Vision 即時偵測
+    /// 解除四邊鎖定，恢復一般 Vision 即時偵測
     func unlockQuadAndStopGyro() {
         isQuadDetectionLocked = false
+        shouldCaptureAnchorFrame = false
         lockedInitialQuad = nil
-        initialAttitude = nil
-        gyroVelocity = .zero
-        gyroAccelOffset = .zero
-        gyroScreenOffset = .zero
+        anchorTrackCGImage = nil
+        prevTrackCGImage = nil
+        anchorSamples = []
+        trackedVisualOffset = .zero
         if motionManager.isDeviceMotionActive {
             motionManager.stopDeviceMotionUpdates()
         }
@@ -391,15 +368,16 @@ final class CameraSessionController: NSObject, ObservableObject {
                 )
             }
 
-            // 模擬器下若處於 Google フォトスキャン 四邊閃光拍攝（Step 1~4），在四個不同角落繪製模擬閃光燈強光白斑，
-            // 驗證多視角合成後能將四個角落各自的白斑 100% 互補消除。
+            // 模擬器下若處於四角合成防反光拍攝（Step 1 為中央反光，Step 2~5 為四個角落各自的反光），
+            // 驗證多視角合成後能將第 1 張中央強光白斑 100% 互補消除。
             if !isBackside && glareAngleStep >= 1 {
                 let glareCenter: CGPoint
-                switch (glareAngleStep - 1) % 4 {
-                case 0: glareCenter = CGPoint(x: 175, y: 185) // 左上強光白斑
-                case 1: glareCenter = CGPoint(x: 365, y: 185) // 右上強光白斑
-                case 2: glareCenter = CGPoint(x: 365, y: 475) // 右下強光白斑
-                default: glareCenter = CGPoint(x: 175, y: 475) // 左下強光白斑
+                switch glareAngleStep {
+                case 1:  glareCenter = CGPoint(x: 270, y: 360) // 第 1 張：中央強光白斑
+                case 2:  glareCenter = CGPoint(x: 135, y: 145) // 左上 1 角點強光白斑
+                case 3:  glareCenter = CGPoint(x: 405, y: 145) // 右上 2 角點強光白斑
+                case 4:  glareCenter = CGPoint(x: 405, y: 575) // 右下 3 角點強光白斑
+                default: glareCenter = CGPoint(x: 135, y: 575) // 左下 4 角點強光白斑
                 }
                 let glareColors = [
                     UIColor(white: 1.0, alpha: 0.96).cgColor,
@@ -468,11 +446,21 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        // 當正在處理快門影像合成、或四角防反光首張已固定四邊位置時，停止 Vision 即時偵測（不再跳動）
-        guard !isPausedForProcessing, !isQuadDetectionLocked else { return }
+        guard !isPausedForProcessing else { return }
         sampleFrameCounter &+= 1
-        guard sampleFrameCounter % 3 == 0 else { return }
 
+        // 四角合成防反光：第 1 張鎖定四邊形狀後，停止 Vision 矩形重抓（四邊不再跳動變形），
+        // 改以輕量視覺拍立得錨點追蹤計算拍立得在畫面中的剛體平移 (dx, dy)，讓綠框與 1,2,3,4 死鎖在實體拍立得上
+        if isQuadDetectionLocked {
+            guard shouldCaptureAnchorFrame || sampleFrameCounter % 2 == 0 else { return }
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+                  let baseQuad = lockedInitialQuad,
+                  baseQuad.count == 4 else { return }
+            updateLockedQuadVisualTracking(pixelBuffer: pixelBuffer, baseQuad: baseQuad)
+            return
+        }
+
+        guard sampleFrameCounter % 3 == 0 else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         let request = VNDetectRectanglesRequest()
@@ -510,6 +498,212 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
                     }
                 }
             }
+        }
+    }
+
+    /// 在 120×160 直向縮圖上追蹤已鎖定之拍立得剛體平移，使綠框與 1~4 角點緊貼實體拍立得（即使部分角點移出畫面外亦精準鎖定）
+    private nonisolated func updateLockedQuadVisualTracking(
+        pixelBuffer: CVPixelBuffer,
+        baseQuad: [CGPoint]
+    ) {
+        let trackW = 120
+        let trackH = 160
+        let ciImg = CIImage(cvPixelBuffer: pixelBuffer).oriented(.right)
+        let ext = ciImg.extent
+        guard ext.width > 16, ext.height > 16 else { return }
+
+        let scaledCI = ciImg
+            .transformed(by: CGAffineTransform(
+                scaleX: CGFloat(trackW) / ext.width,
+                y: CGFloat(trackH) / ext.height
+            ))
+            .cropped(to: CGRect(x: 0, y: 0, width: trackW, height: trackH))
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        var curBuf = [UInt8](repeating: 0, count: trackW * trackH * 4)
+        guard let curCG = Self.sharedTrackingCIContext.createCGImage(
+            scaledCI,
+            from: CGRect(x: 0, y: 0, width: trackW, height: trackH)
+        ),
+        let ctx = CGContext(
+            data: &curBuf,
+            width: trackW,
+            height: trackH,
+            bitsPerComponent: 8,
+            bytesPerRow: trackW * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return }
+        ctx.interpolationQuality = .low
+        ctx.draw(curCG, in: CGRect(x: 0, y: 0, width: trackW, height: trackH))
+
+        let tl = baseQuad[0], tr = baseQuad[1], br = baseQuad[2], bl = baseQuad[3]
+        func bilerp(_ u: CGFloat, _ v: CGFloat) -> CGPoint {
+            let top = CGPoint(x: tl.x + (tr.x - tl.x) * u, y: tl.y + (tr.y - tl.y) * u)
+            let bot = CGPoint(x: bl.x + (br.x - bl.x) * u, y: bl.y + (br.y - bl.y) * u)
+            return CGPoint(x: top.x + (bot.x - top.x) * v, y: top.y + (bot.y - top.y) * v)
+        }
+
+        // 首幀：擷取拍立得白邊外框、內框與相片特徵作為錨點模板（自動略過閃光燈反光區 L > 220）
+        if shouldCaptureAnchorFrame || anchorSamples.isEmpty {
+            var samples: [ChekiAnchorSample] = []
+            let gridSteps = 16
+            for iv in 0...gridSteps {
+                let v = -0.02 + 1.04 * (CGFloat(iv) / CGFloat(gridSteps))
+                for iu in 0...gridSteps {
+                    let u = -0.02 + 1.04 * (CGFloat(iu) / CGFloat(gridSteps))
+                    let pt = bilerp(u, v)
+                    let px = Int((pt.x * CGFloat(trackW)).rounded())
+                    let py = Int((pt.y * CGFloat(trackH)).rounded())
+                    guard px >= 2, px < trackW - 2, py >= 2, py < trackH - 2 else { continue }
+                    let idx = (py * trackW + px) * 4
+                    let r = Float(curBuf[idx])
+                    let g = Float(curBuf[idx + 1])
+                    let b = Float(curBuf[idx + 2])
+                    let lum = 0.299 * r + 0.587 * g + 0.114 * b
+                    // 排除第 1 張中央閃光燈反光白斑，避免追著反光跑
+                    if lum > 222.0 && u > 0.12 && u < 0.88 && v > 0.10 && v < 0.78 {
+                        continue
+                    }
+                    let idxL = (py * trackW + (px - 1)) * 4
+                    let idxR = (py * trackW + (px + 1)) * 4
+                    let idxU = ((py - 1) * trackW + px) * 4
+                    let idxD = ((py + 1) * trackW + px) * 4
+                    let lumL = 0.299 * Float(curBuf[idxL]) + 0.587 * Float(curBuf[idxL + 1]) + 0.114 * Float(curBuf[idxL + 2])
+                    let lumR = 0.299 * Float(curBuf[idxR]) + 0.587 * Float(curBuf[idxR + 1]) + 0.114 * Float(curBuf[idxR + 2])
+                    let lumU = 0.299 * Float(curBuf[idxU]) + 0.587 * Float(curBuf[idxU + 1]) + 0.114 * Float(curBuf[idxU + 2])
+                    let lumD = 0.299 * Float(curBuf[idxD]) + 0.587 * Float(curBuf[idxD + 1]) + 0.114 * Float(curBuf[idxD + 2])
+                    let gx = lumR - lumL
+                    let gy = lumD - lumU
+                    let isEdge = (u <= 0.08 || u >= 0.92 || v <= 0.08 || v >= 0.92 || abs(v - 0.78) <= 0.06)
+                    let weight: Float = isEdge ? 1.6 : 1.0
+                    samples.append(ChekiAnchorSample(
+                        x: px, y: py, r: r, g: g, b: b, gx: gx, gy: gy, weight: weight
+                    ))
+                }
+            }
+            anchorSamples = samples
+            anchorTrackCGImage = curCG
+            prevTrackCGImage = curCG
+            trackedVisualOffset = .zero
+            shouldCaptureAnchorFrame = false
+            return
+        }
+
+        // 先利用相鄰幀 Vision 影像平移註冊取得快速初估位移
+        var predDxPx = Int((trackedVisualOffset.x * CGFloat(trackW)).rounded())
+        var predDyPx = Int((trackedVisualOffset.y * CGFloat(trackH)).rounded())
+        if let prevCG = prevTrackCGImage {
+            let regReq = VNTranslationalImageRegistrationRequest(targetedCGImage: curCG)
+            let regHandler = VNImageRequestHandler(cgImage: prevCG, options: [:])
+            try? regHandler.perform([regReq])
+            if let obs = regReq.results?.first {
+                let stepDx = -obs.alignmentTransform.tx
+                let stepDy = obs.alignmentTransform.ty
+                if hypot(stepDx, stepDy) < CGFloat(trackW) * 0.35 {
+                    predDxPx += Int(stepDx.rounded())
+                    predDyPx += Int(stepDy.rounded())
+                }
+            }
+        }
+        prevTrackCGImage = curCG
+
+        let samples = anchorSamples
+        let minValidCount = max(14, samples.count / 4)
+
+        func evaluateShift(dx: Int, dy: Int) -> Float {
+            var errSum: Float = 0
+            var weightSum: Float = 0
+            var validCount = 0
+            for s in samples {
+                let qx = s.x + dx
+                let qy = s.y + dy
+                guard qx >= 2, qx < trackW - 2, qy >= 2, qy < trackH - 2 else { continue }
+                let idx = (qy * trackW + qx) * 4
+                let r = Float(curBuf[idx])
+                let g = Float(curBuf[idx + 1])
+                let b = Float(curBuf[idx + 2])
+                let lum = 0.299 * r + 0.587 * g + 0.114 * b
+                // 若當前像素處於移動後的閃光燈強反光核，跳過不計入誤差
+                if lum > 235.0 && (s.r * 0.299 + s.g * 0.587 + s.b * 0.114) < 205.0 {
+                    continue
+                }
+                let idxL = (qy * trackW + (qx - 1)) * 4
+                let idxR = (qy * trackW + (qx + 1)) * 4
+                let idxU = ((qy - 1) * trackW + qx) * 4
+                let idxD = ((qy + 1) * trackW + qx) * 4
+                let lumL = 0.299 * Float(curBuf[idxL]) + 0.587 * Float(curBuf[idxL + 1]) + 0.114 * Float(curBuf[idxL + 2])
+                let lumR = 0.299 * Float(curBuf[idxR]) + 0.587 * Float(curBuf[idxR + 1]) + 0.114 * Float(curBuf[idxR + 2])
+                let lumU = 0.299 * Float(curBuf[idxU]) + 0.587 * Float(curBuf[idxU + 1]) + 0.114 * Float(curBuf[idxU + 2])
+                let lumD = 0.299 * Float(curBuf[idxD]) + 0.587 * Float(curBuf[idxD + 1]) + 0.114 * Float(curBuf[idxD + 2])
+                let gx = lumR - lumL
+                let gy = lumD - lumU
+
+                let colorDiff = (abs(r - s.r) + abs(g - s.g) + abs(b - s.b)) / 3.0
+                let gradDiff = (abs(gx - s.gx) + abs(gy - s.gy)) * 0.85
+                let cost = min(90.0, colorDiff * 0.38 + gradDiff * 0.62)
+                errSum += cost * s.weight
+                weightSum += s.weight
+                validCount += 1
+            }
+            guard validCount >= minValidCount, weightSum > 1.0 else {
+                return .greatestFiniteMagnitude
+            }
+            let driftPenalty = hypot(Float(dx - predDxPx), Float(dy - predDyPx)) * 0.18
+            return (errSum / weightSum) + driftPenalty
+        }
+
+        // 第一階段：粗搜尋（涵蓋相鄰幀預測周圍 ±27px 與基準周圍）
+        var bestDx = predDxPx
+        var bestDy = predDyPx
+        var bestCost = evaluateShift(dx: bestDx, dy: bestDy)
+
+        let searchMinX = max(-85, predDxPx - 27)
+        let searchMaxX = min(85, predDxPx + 27)
+        let searchMinY = max(-115, predDyPx - 33)
+        let searchMaxY = min(115, predDyPx + 33)
+
+        for dy in stride(from: searchMinY, through: searchMaxY, by: 3) {
+            for dx in stride(from: searchMinX, through: searchMaxX, by: 3) {
+                let c = evaluateShift(dx: dx, dy: dy)
+                if c < bestCost {
+                    bestCost = c
+                    bestDx = dx
+                    bestDy = dy
+                }
+            }
+        }
+
+        // 第二階段：1px 精細對位
+        let fineCenterDx = bestDx
+        let fineCenterDy = bestDy
+        for dy in (fineCenterDy - 2)...(fineCenterDy + 2) {
+            for dx in (fineCenterDx - 2)...(fineCenterDx + 2) {
+                let c = evaluateShift(dx: dx, dy: dy)
+                if c < bestCost {
+                    bestCost = c
+                    bestDx = dx
+                    bestDy = dy
+                }
+            }
+        }
+
+        let rawNormDx = CGFloat(bestDx) / CGFloat(trackW)
+        let rawNormDy = CGFloat(bestDy) / CGFloat(trackH)
+        let smoothedOffset = CGPoint(
+            x: trackedVisualOffset.x * 0.30 + rawNormDx * 0.70,
+            y: trackedVisualOffset.y * 0.30 + rawNormDy * 0.70
+        )
+        trackedVisualOffset = smoothedOffset
+
+        let shiftedQuad = baseQuad.map { pt in
+            CGPoint(x: pt.x + smoothedOffset.x, y: pt.y + smoothedOffset.y)
+        }
+
+        Task { @MainActor in
+            guard self.isQuadDetectionLocked else { return }
+            self.trackedQuadPoints = shiftedQuad
         }
     }
 }
@@ -1182,14 +1376,14 @@ struct CameraScannerView: View {
         photoScanCornerCompleted = [false, false, false, false]
     }
 
-    /// 根據拍立得外框四角 `[TL, TR, BR, BL]` 雙線性內插出四個象限目標圓點位置 `(左上, 右上, 右下, 左下)`
+    /// 根據拍立得外框四角 `[TL, TR, BR, BL]` 雙線性內插出四個角落目標圓點位置 `(左上 1, 右上 2, 右下 3, 左下 4)`
     static func computeFourCornerTargetPoints(from quad: [CGPoint]) -> [CGPoint] {
         guard quad.count == 4 else { return defaultPreviewQuad }
         let uvCoords: [(CGFloat, CGFloat)] = [
-            (0.30, 0.28), // 0: 左上
-            (0.70, 0.28), // 1: 右上
-            (0.70, 0.72), // 2: 右下
-            (0.30, 0.72)  // 3: 左下
+            (0.08, 0.08), // 0: 左上角 1
+            (0.92, 0.08), // 1: 右上角 2
+            (0.92, 0.92), // 2: 右下角 3
+            (0.08, 0.92)  // 3: 左下角 4
         ]
         return uvCoords.map { (u, v) in
             let topX = quad[0].x + (quad[1].x - quad[0].x) * u

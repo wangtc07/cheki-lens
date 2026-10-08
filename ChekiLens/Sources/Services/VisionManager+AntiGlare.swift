@@ -512,7 +512,7 @@ extension VisionManager {
             throw VisionError.detectionFailed
         }
 
-        // 1. 取得第 1 張的正位結果（若有背景預處理結果則 0ms 直接取用）
+        // 1. 取得第 1 張（完整置中基準圖）的正位結果（若有背景預處理結果則 0ms 直接取用）
         let firstPrepared: ModeBPreparedFirstAngle
         if let preparedFirstAngle {
             firstPrepared = preparedFirstAngle
@@ -527,10 +527,19 @@ extension VisionManager {
         }
 
         let resolvedFormat = firstPrepared.resolvedFormat
+        let baseW0 = max(1.0, firstPrepared.originalSize.width)
+        let baseH0 = max(1.0, firstPrepared.originalSize.height)
+        let baseNormCorners0: [CGPoint] = VisionManager.orderPoints(
+            firstPrepared.adjustedDetection.corners
+        ).map {
+            CGPoint(x: $0.x / baseW0, y: $0.y / baseH0)
+        }
+
         var croppedResults: [CropResult] = [firstPrepared.cropResult]
         var detections: [DetectionResult] = [firstPrepared.adjustedDetection]
+        var normalizedQuadsPerFrame: [[CGPoint]] = [baseNormCorners0]
 
-        // 2. 依序對第 2..N 張四角照片執行極速透視正位（直接使用陀螺儀追蹤座標 + 輕量 Vision 微調，絕不落入重型 CoreML fallback）
+        // 2. 依序對第 2..N 張四角照片執行極速透視正位（支援部分拍立得移出畫面外的四角特寫對位）
         let maxDonorRawSide: CGFloat = 1280.0
         for idx in 1..<rawImages.count {
             let fullImg = rawImages[idx]
@@ -552,33 +561,34 @@ extension VisionManager {
 
             let imgSize = CGSize(width: workingImg.width, height: workingImg.height)
             let prior = idx < priorNormalizedQuads.count ? priorNormalizedQuads[idx] : nil
-            if let det = try? await detectQuadFastForCamera(
-                in: workingImg,
-                imageSize: imgSize,
-                isKnownFrontPhoto: true,
-                priorNormalizedCorners: prior,
-                allowHeavyFallbacks: false
+
+            let donorNormCorners = estimateDonorNormalizedQuadInRawFrame(
+                baseRawImage: firstPrepared.originalCGImage,
+                baseNormCorners: baseNormCorners0,
+                donorImage: workingImg,
+                donorSize: imgSize,
+                priorNormalizedCorners: prior
+            )
+
+            let pixelCorners = donorNormCorners.map {
+                CGPoint(x: $0.x * imgSize.width, y: $0.y * imgSize.height)
+            }
+            let adjDet = DetectionResult(
+                corners: pixelCorners,
+                method: .visionNative,
+                confidence: 0.94,
+                imageSize: imgSize
+            )
+            if let crop = try? perspectiveCorrect(
+                image: workingImg,
+                corners: pixelCorners,
+                detection: adjDet,
+                format: mapToChekiFilmFormat(resolvedFormat),
+                preserveCornerOrder: true
             ) {
-                let insetCorners = applyBorderInset(
-                    corners: det.corners,
-                    imageSize: imgSize,
-                    ratio: borderInsetRatio
-                )
-                let adjDet = DetectionResult(
-                    corners: insetCorners,
-                    method: det.method,
-                    confidence: det.confidence,
-                    imageSize: imgSize
-                )
-                if let crop = try? perspectiveCorrect(
-                    image: workingImg,
-                    corners: insetCorners,
-                    detection: adjDet,
-                    format: mapToChekiFilmFormat(resolvedFormat)
-                ) {
-                    croppedResults.append(crop)
-                    detections.append(adjDet)
-                }
+                croppedResults.append(crop)
+                detections.append(adjDet)
+                normalizedQuadsPerFrame.append(donorNormCorners)
             }
         }
 
@@ -596,10 +606,11 @@ extension VisionManager {
             )
         }
 
-        // 3. 以第 1 張固定好四邊的基準照片為底圖（或最乾淨幀），將其餘各角度的無反光區域極速修補進來
+        // 3. 永遠以第 1 張完整置中拍攝的拍立得為 Base 底圖，將四角照片中畫面內 (In-Bounds) 的無反光區域精準對位修補進來
         let croppedCGs = croppedResults.map(\.cgImage)
         let (finalCGImage, glareBefore, glareAfter) = fuseMultiFrameGlareFree(
-            croppedImages: croppedCGs
+            croppedImages: croppedCGs,
+            donorNormalizedQuads: normalizedQuadsPerFrame
         )
 
         return ModeBAntiGlareResult(
@@ -632,79 +643,204 @@ extension VisionManager {
         )
     }
 
-    // MARK: - 4. Google フォトスキャン 局部網格配準與測地線光暈 100% 替換核心
+    // MARK: - 4. 四角移動原始幀對位 + 局部網格配準與測地線光暈 100% 替換核心
 
-    /// 評估每張正位圖的強光反光懲罰分（特別加重四周白框的反光權重，因為白框壓紋與簽名處最需要保持原生連續性），
-    /// 回傳最適合作為基準底圖 (Base Frame) 的索引排序。
-    private func rankFramesByCleanliness(_ images: [CGImage]) -> [Int] {
-        guard images.count > 1 else { return [0] }
-        let sampleW = 160
-        let sampleH = 256
-        let sampleRect = CGRect(x: 0, y: 0, width: sampleW, height: sampleH)
-        let colorSpace = Self.sharedSRGBColorSpace
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
-
-        var buffers: [[UInt8]] = []
-        for img in images {
-            var buf = [UInt8](repeating: 0, count: sampleW * sampleH * 4)
-            if let ctx = CGContext(
-                data: &buf,
-                width: sampleW,
-                height: sampleH,
-                bitsPerComponent: 8,
-                bytesPerRow: sampleW * 4,
-                space: colorSpace,
-                bitmapInfo: bitmapInfo
-            ) {
-                ctx.interpolationQuality = .low
-                ctx.draw(img, in: sampleRect)
-            }
-            buffers.append(buf)
+    /// 計算第 2..N 張四角照片中拍立得在原始畫面的正規化四角座標 `[TL, TR, BR, BL]`（允許超出 `0...1` 畫面邊界，絕不錯誤夾限）
+    private func estimateDonorNormalizedQuadInRawFrame(
+        baseRawImage: CGImage,
+        baseNormCorners: [CGPoint],
+        donorImage: CGImage,
+        donorSize: CGSize,
+        priorNormalizedCorners: [CGPoint]?
+    ) -> [CGPoint] {
+        guard baseNormCorners.count == 4 else {
+            return priorNormalizedCorners ?? baseNormCorners
         }
 
-        // 對每個像素找出所有幀中的最低亮度 minLum，若某幀在該處比 minLum 高出 0.18 且本身 > 0.84，計入反光懲罰
-        var scores = [Float](repeating: 0, count: images.count)
-        for y in 0..<sampleH {
-            let isBorder = (y < sampleH * 10 / 100) || (y > sampleH * 76 / 100)
-            let borderWeight: Float = isBorder ? 2.2 : 1.0
-            for x in 0..<sampleW {
-                let idx = (y * sampleW + x) * 4
-                var minLum: Float = 1.0
-                var lums = [Float](repeating: 0, count: images.count)
-                for k in 0..<images.count {
-                    let b = buffers[k]
-                    let l = (0.299 * Float(b[idx]) + 0.587 * Float(b[idx + 1]) + 0.114 * Float(b[idx + 2])) / 255.0
-                    lums[k] = l
-                    if l < minLum { minLum = l }
+        // 先計算取景器追蹤框 prior 相對於第 1 張基準框的初始平移量
+        var initNormDx: CGFloat = 0
+        var initNormDy: CGFloat = 0
+        if let prior = priorNormalizedCorners, prior.count == 4 {
+            let orderedPrior = VisionManager.orderPoints(prior)
+            initNormDx = (orderedPrior[0].x - baseNormCorners[0].x
+                        + orderedPrior[1].x - baseNormCorners[1].x
+                        + orderedPrior[2].x - baseNormCorners[2].x
+                        + orderedPrior[3].x - baseNormCorners[3].x) * 0.25
+            initNormDy = (orderedPrior[0].y - baseNormCorners[0].y
+                        + orderedPrior[1].y - baseNormCorners[1].y
+                        + orderedPrior[2].y - baseNormCorners[2].y
+                        + orderedPrior[3].y - baseNormCorners[3].y) * 0.25
+        }
+
+        // 在 120×160 縮圖上直接比對第 1 張拍立得非反光錨點與第 k 張四角照片，精確求出剛體位移 (normDx, normDy)
+        let trackW = 120
+        let trackH = 160
+        let colorSpace = Self.sharedSRGBColorSpace
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        var buf0 = [UInt8](repeating: 0, count: trackW * trackH * 4)
+        var bufK = [UInt8](repeating: 0, count: trackW * trackH * 4)
+
+        var refinedNormDx = initNormDx
+        var refinedNormDy = initNormDy
+
+        if let ctx0 = CGContext(data: &buf0, width: trackW, height: trackH, bitsPerComponent: 8, bytesPerRow: trackW * 4, space: colorSpace, bitmapInfo: bitmapInfo),
+           let ctxK = CGContext(data: &bufK, width: trackW, height: trackH, bitsPerComponent: 8, bytesPerRow: trackW * 4, space: colorSpace, bitmapInfo: bitmapInfo) {
+            ctx0.interpolationQuality = .low
+            ctxK.interpolationQuality = .low
+            ctx0.draw(baseRawImage, in: CGRect(x: 0, y: 0, width: trackW, height: trackH))
+            ctxK.draw(donorImage, in: CGRect(x: 0, y: 0, width: trackW, height: trackH))
+
+            let tl = baseNormCorners[0], tr = baseNormCorners[1], br = baseNormCorners[2], bl = baseNormCorners[3]
+            func bilerp(_ u: CGFloat, _ v: CGFloat) -> CGPoint {
+                let top = CGPoint(x: tl.x + (tr.x - tl.x) * u, y: tl.y + (tr.y - tl.y) * u)
+                let bot = CGPoint(x: bl.x + (br.x - bl.x) * u, y: bl.y + (br.y - bl.y) * u)
+                return CGPoint(x: top.x + (bot.x - top.x) * v, y: top.y + (bot.y - top.y) * v)
+            }
+
+            struct SamplePt {
+                let x: Int, y: Int
+                let r: Float, g: Float, b: Float
+                let gx: Float, gy: Float
+                let weight: Float
+            }
+            var samples: [SamplePt] = []
+            let steps = 16
+            for iv in 0...steps {
+                let v = -0.02 + 1.04 * (CGFloat(iv) / CGFloat(steps))
+                for iu in 0...steps {
+                    let u = -0.02 + 1.04 * (CGFloat(iu) / CGFloat(steps))
+                    let pt = bilerp(u, v)
+                    let px = Int((pt.x * CGFloat(trackW)).rounded())
+                    let py = Int((pt.y * CGFloat(trackH)).rounded())
+                    guard px >= 2, px < trackW - 2, py >= 2, py < trackH - 2 else { continue }
+                    let idx = (py * trackW + px) * 4
+                    let r = Float(buf0[idx]), g = Float(buf0[idx + 1]), b = Float(buf0[idx + 2])
+                    let lum = 0.299 * r + 0.587 * g + 0.114 * b
+                    if lum > 222.0 && u > 0.12 && u < 0.88 && v > 0.10 && v < 0.78 { continue }
+
+                    let idxL = (py * trackW + (px - 1)) * 4
+                    let idxR = (py * trackW + (px + 1)) * 4
+                    let idxU = ((py - 1) * trackW + px) * 4
+                    let idxD = ((py + 1) * trackW + px) * 4
+                    let gx = (0.299 * Float(buf0[idxR]) + 0.587 * Float(buf0[idxR + 1]) + 0.114 * Float(buf0[idxR + 2]))
+                           - (0.299 * Float(buf0[idxL]) + 0.587 * Float(buf0[idxL + 1]) + 0.114 * Float(buf0[idxL + 2]))
+                    let gy = (0.299 * Float(buf0[idxD]) + 0.587 * Float(buf0[idxD + 1]) + 0.114 * Float(buf0[idxD + 2]))
+                           - (0.299 * Float(buf0[idxU]) + 0.587 * Float(buf0[idxU + 1]) + 0.114 * Float(buf0[idxU + 2]))
+                    let isEdge = (u <= 0.08 || u >= 0.92 || v <= 0.08 || v >= 0.92 || abs(v - 0.78) <= 0.06)
+                    samples.append(SamplePt(x: px, y: py, r: r, g: g, b: b, gx: gx, gy: gy, weight: isEdge ? 1.6 : 1.0))
                 }
-                for k in 0..<images.count {
-                    let diff = lums[k] - minLum
-                    if lums[k] >= 0.84 && diff >= 0.18 {
-                        scores[k] += diff * borderWeight
+            }
+
+            let minValid = max(14, samples.count / 4)
+            let priorDxPx = Int((initNormDx * CGFloat(trackW)).rounded())
+            let priorDyPx = Int((initNormDy * CGFloat(trackH)).rounded())
+
+            func evalShift(_ dx: Int, _ dy: Int) -> Float {
+                var errSum: Float = 0
+                var wSum: Float = 0
+                var count = 0
+                for s in samples {
+                    let qx = s.x + dx
+                    let qy = s.y + dy
+                    guard qx >= 2, qx < trackW - 2, qy >= 2, qy < trackH - 2 else { continue }
+                    let idx = (qy * trackW + qx) * 4
+                    let r = Float(bufK[idx]), g = Float(bufK[idx + 1]), b = Float(bufK[idx + 2])
+                    let lum = 0.299 * r + 0.587 * g + 0.114 * b
+                    if lum > 235.0 && (0.299 * s.r + 0.587 * s.g + 0.114 * s.b) < 205.0 { continue }
+
+                    let idxL = (qy * trackW + (qx - 1)) * 4
+                    let idxR = (qy * trackW + (qx + 1)) * 4
+                    let idxU = ((qy - 1) * trackW + qx) * 4
+                    let idxD = ((qy + 1) * trackW + qx) * 4
+                    let gx = (0.299 * Float(bufK[idxR]) + 0.587 * Float(bufK[idxR + 1]) + 0.114 * Float(bufK[idxR + 2]))
+                           - (0.299 * Float(bufK[idxL]) + 0.587 * Float(bufK[idxL + 1]) + 0.114 * Float(bufK[idxL + 2]))
+                    let gy = (0.299 * Float(bufK[idxD]) + 0.587 * Float(bufK[idxD + 1]) + 0.114 * Float(bufK[idxD + 2]))
+                           - (0.299 * Float(bufK[idxU]) + 0.587 * Float(bufK[idxU + 1]) + 0.114 * Float(bufK[idxU + 2]))
+                    let cDiff = (abs(r - s.r) + abs(g - s.g) + abs(b - s.b)) / 3.0
+                    let gDiff = (abs(gx - s.gx) + abs(gy - s.gy)) * 0.85
+                    errSum += min(90.0, cDiff * 0.38 + gDiff * 0.62) * s.weight
+                    wSum += s.weight
+                    count += 1
+                }
+                guard count >= minValid, wSum > 1.0 else { return .greatestFiniteMagnitude }
+                let priorPenalty = hypot(Float(dx - priorDxPx), Float(dy - priorDyPx)) * 0.12
+                return (errSum / wSum) + priorPenalty
+            }
+
+            var bestDx = priorDxPx
+            var bestDy = priorDyPx
+            var bestCost = evalShift(bestDx, bestDy)
+
+            for dy in stride(from: -110, through: 110, by: 3) {
+                for dx in stride(from: -82, through: 82, by: 3) {
+                    let c = evalShift(dx, dy)
+                    if c < bestCost {
+                        bestCost = c
+                        bestDx = dx
+                        bestDy = dy
                     }
                 }
             }
+            let cDx = bestDx, cDy = bestDy
+            for dy in (cDy - 2)...(cDy + 2) {
+                for dx in (cDx - 2)...(cDx + 2) {
+                    let c = evalShift(dx, dy)
+                    if c < bestCost {
+                        bestCost = c
+                        bestDx = dx
+                        bestDy = dy
+                    }
+                }
+            }
+            refinedNormDx = CGFloat(bestDx) / CGFloat(trackW)
+            refinedNormDy = CGFloat(bestDy) / CGFloat(trackH)
         }
 
-        return Array(0..<images.count).sorted { scores[$0] < scores[$1] }
+        let shiftedNormCorners = baseNormCorners.map {
+            CGPoint(x: $0.x + refinedNormDx, y: $0.y + refinedNormDy)
+        }
+
+        // 僅當拍立得四個角皆完整在畫面內部 (0.04...0.96) 時，才允許以 Vision 矩形微調透視角度；
+        // 若拍攝四角特寫導致任一角靠近或超出畫面邊緣，直接使用剛體追蹤之 shiftedNormCorners（絕不裁切壓扁！）
+        let allCornersWellInside = shiftedNormCorners.allSatisfy {
+            $0.x >= 0.04 && $0.x <= 0.96 && $0.y >= 0.04 && $0.y <= 0.96
+        }
+        if allCornersWellInside,
+           let visionPts = detectCleanVisionQuadOnProxy(
+               proxyImage: donorImage,
+               proxySize: donorSize,
+               priorNormalizedCorners: shiftedNormCorners
+           ) {
+            let normVision = VisionManager.orderPoints(visionPts).map {
+                CGPoint(x: $0.x / max(1.0, donorSize.width), y: $0.y / max(1.0, donorSize.height))
+            }
+            let meanDiff = zip(normVision, shiftedNormCorners).reduce(0.0) { acc, pair in
+                acc + hypot(Double(pair.0.x - pair.1.x), Double(pair.0.y - pair.1.y))
+            } / 4.0
+            if meanDiff < 0.065 {
+                return normVision
+            }
+        }
+
+        return shiftedNormCorners
     }
 
     /// 多視角無反光合成核心 (`fuseMultiFrameGlareFree`)：
-    /// - 支援 2~4+ 張不同角度或四角閃光拍攝的正位圖。
-    /// - 自動以最乾淨的一張作為 Base Frame，並依序使用其餘各張的無反光區域進行 100% 乾淨替換。
+    /// - 永遠以第 1 張完整置中拍攝之拍立得 (`croppedImages[0]`) 為基準底圖 (Base Frame)。
+    /// - 針對其餘四角拍攝圖 (`k = 1..<count`)：
+    ///   1. 計算畫面內有效遮罩 (`rawValidB`)，自動排除移出相機畫面外的延伸區域。
+    ///   2. 執行兩階段配準：先執行全域粗平移搜尋 (`±36px` X, `±48px` Y) 消除手持移動視差，再執行 4×6 局部非剛性網格微調。
+    ///   3. 以乾淨中間調估算全域環境曝光差（絕不把白衣上的反光斑誤吸納為環境光差），100% 消除中央與白衣/深色外套上的閃光燈反光核與光暈。
     private func fuseMultiFrameGlareFree(
-        croppedImages: [CGImage]
+        croppedImages: [CGImage],
+        donorNormalizedQuads: [[CGPoint]] = []
     ) -> (fused: CGImage, glareBefore: Double, glareAfter: Double) {
-        guard let firstImg = croppedImages.first else {
+        guard let baseCG = croppedImages.first else {
             fatalError("croppedImages must not be empty")
         }
         guard croppedImages.count >= 2 else {
-            return (firstImg, 0.0, 0.0)
+            return (baseCG, 0.0, 0.0)
         }
-
-        let rankedIndices = rankFramesByCleanliness(croppedImages)
-        let orderedImages = rankedIndices.map { croppedImages[$0] }
-        let baseCG = orderedImages[0]
 
         let fullWidth = baseCG.width
         let fullHeight = baseCG.height
@@ -713,7 +849,7 @@ extension VisionManager {
             return (baseCG, 0.0, 0.0)
         }
 
-        // 建立 420px 極速分析畫布（即使在 Xcode Debug -Onone 模式下亦僅需 ~35ms，並於最後透過 GPU CIBlendWithMask 還原 4K 畫質）
+        // 建立 420px 極速分析畫布（並於最後透過 GPU CIBlendWithMask 還原 4K 畫質）
         let maxWorkSide: Double = 420.0
         let workScale = min(1.0, maxWorkSide / Double(max(fullWidth, fullHeight)))
         let width = max(64, Int((Double(fullWidth) * workScale).rounded()))
@@ -738,13 +874,19 @@ extension VisionManager {
         ctxBase.interpolationQuality = .high
         ctxBase.draw(baseCG, in: workRect)
 
-        // 保留初始 Base Frame 副本，用於產生最終 4K GPU 融合遮罩
+        // 保留初始 Base Frame 副本，用於全域對位基準與產生最終 4K GPU 融合遮罩
         let initialBaseBuf = currentBuf
+        var baseLum0 = [Float](repeating: 0, count: width * height)
+        for p in 0..<(width * height) {
+            let i = p * 4
+            baseLum0[p] = (0.299 * Float(initialBaseBuf[i]) + 0.587 * Float(initialBaseBuf[i + 1]) + 0.114 * Float(initialBaseBuf[i + 2])) / 255.0
+        }
+
         var cumulativeReplacedMask = [Float](repeating: 0, count: width * height)
         var initialGlarePixelCount = 0
 
-        for k in 1..<orderedImages.count {
-            let donorCG = orderedImages[k]
+        for k in 1..<croppedImages.count {
+            let donorCG = croppedImages[k]
             var bufB = [UInt8](repeating: 0, count: width * height * 4)
             guard let ctxB = CGContext(
                 data: &bufB,
@@ -758,14 +900,112 @@ extension VisionManager {
             ctxB.interpolationQuality = .high
             ctxB.draw(donorCG, in: workRect)
 
-            // 1. 4×6 穩健截斷式 L1 局部網格配準 (Truncated-L1 Sub-Block Shift Map)
+            // 計算 Donor k 在原始相機畫面內的真實有效像素遮罩 (排除移出畫面外的 clampedToExtent 拉伸區)
+            var rawValidB = [Bool](repeating: true, count: width * height)
+            if k < donorNormalizedQuads.count, donorNormalizedQuads[k].count == 4 {
+                let q = donorNormalizedQuads[k]
+                let tl = q[0], tr = q[1], br = q[2], bl = q[3]
+                // 注意：CGContext memory row y=0 對應拍立得頂部 (v=0)
+                for y in 0..<height {
+                    let v = (CGFloat(y) + 0.5) / CGFloat(height)
+                    let topX = tl.x + (tr.x - tl.x) * 0.0
+                    let _ = topX
+                    for x in 0..<width {
+                        let u = (CGFloat(x) + 0.5) / CGFloat(width)
+                        let tx = tl.x + (tr.x - tl.x) * u
+                        let ty = tl.y + (tr.y - tl.y) * u
+                        let bx = bl.x + (br.x - bl.x) * u
+                        let by = bl.y + (br.y - bl.y) * u
+                        let rx = tx + (bx - tx) * v
+                        let ry = ty + (by - ty) * v
+                        if rx < 0.02 || rx > 0.98 || ry < 0.02 || ry > 0.98 {
+                            rawValidB[y * width + x] = false
+                        }
+                    }
+                }
+            }
+
+            var rawLumB = [Float](repeating: 0, count: width * height)
+            for p in 0..<(width * height) {
+                let i = p * 4
+                rawLumB[p] = (0.299 * Float(bufB[i]) + 0.587 * Float(bufB[i + 1]) + 0.114 * Float(bufB[i + 2])) / 255.0
+            }
+
+            // 第一階段：全域粗平移對位 (±36px X, ±48px Y)，解決移動到四角時的透視與高度殘差
+            var bestGlobalDx = 0
+            var bestGlobalDy = 0
+            var bestGlobalCost: Float = .greatestFiniteMagnitude
+
+            initialBaseBuf.withUnsafeBufferPointer { ptrA in
+                bufB.withUnsafeBufferPointer { ptrB in
+                    func evalGlobal(_ dx: Int, _ dy: Int, step: Int) -> Float {
+                        var errSum: Float = 0
+                        var count = 0
+                        for y in stride(from: 14, to: height - 14, by: step) {
+                            let sy = y + dy
+                            guard sy >= 4, sy < height - 4 else { continue }
+                            for x in stride(from: 14, to: width - 14, by: step) {
+                                let sx = x + dx
+                                guard sx >= 4, sx < width - 4 else { continue }
+                                let pA = y * width + x
+                                let pB = sy * width + sx
+                                guard rawValidB[pB] else { continue }
+                                // 跳過雙方的高光反光區，僅以乾淨的拍立得紋理與邊界對位
+                                if baseLum0[pA] > 0.87 || rawLumB[pB] > 0.87 { continue }
+
+                                let iA = pA * 4
+                                let iB = pB * 4
+                                let cDiff = (abs(Float(ptrA[iA]) - Float(ptrB[iB]))
+                                           + abs(Float(ptrA[iA + 1]) - Float(ptrB[iB + 1]))
+                                           + abs(Float(ptrA[iA + 2]) - Float(ptrB[iB + 2]))) / 3.0
+                                let gxA = (baseLum0[pA + 1] - baseLum0[pA - 1]) * 255.0
+                                let gyA = (baseLum0[pA + width] - baseLum0[pA - width]) * 255.0
+                                let gxB = (rawLumB[pB + 1] - rawLumB[pB - 1]) * 255.0
+                                let gyB = (rawLumB[pB + width] - rawLumB[pB - width]) * 255.0
+                                let gDiff = abs(gxA - gxB) + abs(gyA - gyB)
+
+                                errSum += min(85.0, cDiff * 0.38 + gDiff * 0.62)
+                                count += 1
+                            }
+                        }
+                        guard count >= 45 else { return .greatestFiniteMagnitude }
+                        let penalty = hypot(Float(dx), Float(dy)) * 0.14
+                        return (errSum / Float(count)) + penalty
+                    }
+
+                    for dy in stride(from: -45, through: 45, by: 3) {
+                        for dx in stride(from: -36, through: 36, by: 3) {
+                            let c = evalGlobal(dx, dy, step: 6)
+                            if c < bestGlobalCost {
+                                bestGlobalCost = c
+                                bestGlobalDx = dx
+                                bestGlobalDy = dy
+                            }
+                        }
+                    }
+                    let cDx = bestGlobalDx, cDy = bestGlobalDy
+                    bestGlobalCost = evalGlobal(cDx, cDy, step: 4)
+                    for dy in (cDy - 2)...(cDy + 2) {
+                        for dx in (cDx - 2)...(cDx + 2) {
+                            let c = evalGlobal(dx, dy, step: 4)
+                            if c < bestGlobalCost {
+                                bestGlobalCost = c
+                                bestGlobalDx = dx
+                                bestGlobalDy = dy
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 第二階段：以 (bestGlobalDx, bestGlobalDy) 為中心的 4×6 穩健局部網格微調 (±7px)
             let cols = 4
             let rows = 6
-            var gridShiftX = [Float](repeating: 0, count: (cols + 1) * (rows + 1))
-            var gridShiftY = [Float](repeating: 0, count: (cols + 1) * (rows + 1))
-            let searchRange = min(8, max(4, width / 55))
+            var gridShiftX = [Float](repeating: Float(bestGlobalDx), count: (cols + 1) * (rows + 1))
+            var gridShiftY = [Float](repeating: Float(bestGlobalDy), count: (cols + 1) * (rows + 1))
+            let localRange = 7
 
-            currentBuf.withUnsafeBufferPointer { ptrA in
+            initialBaseBuf.withUnsafeBufferPointer { ptrA in
                 bufB.withUnsafeBufferPointer { ptrB in
                     for gy in 0...rows {
                         let centerY = Int(Double(gy) / Double(rows) * Double(height - 1))
@@ -776,29 +1016,42 @@ extension VisionManager {
                             let x0 = max(8, centerX - width / (cols * 2))
                             let x1 = min(width - 9, centerX + width / (cols * 2))
 
-                            var bestDx = 0
-                            var bestDy = 0
+                            var bestDx = bestGlobalDx
+                            var bestDy = bestGlobalDy
                             var bestCost: Float = .greatestFiniteMagnitude
 
-                            for dy in -searchRange...searchRange {
-                                for dx in -searchRange...searchRange {
+                            for dy in (bestGlobalDy - localRange)...(bestGlobalDy + localRange) {
+                                for dx in (bestGlobalDx - localRange)...(bestGlobalDx + localRange) {
                                     var errSum: Float = 0
                                     var count: Int = 0
                                     for y in stride(from: y0, to: y1, by: 4) {
-                                        let sy = min(height - 1, max(0, y + dy))
+                                        let sy = y + dy
+                                        guard sy >= 2, sy < height - 2 else { continue }
                                         for x in stride(from: x0, to: x1, by: 4) {
-                                            let sx = min(width - 1, max(0, x + dx))
-                                            let iA = (y * width + x) * 4
-                                            let iB = (sy * width + sx) * 4
-                                            let d = abs(Float(ptrA[iA]) - Float(ptrB[iB]))
-                                                  + abs(Float(ptrA[iA + 1]) - Float(ptrB[iB + 1]))
-                                                  + abs(Float(ptrA[iA + 2]) - Float(ptrB[iB + 2]))
-                                            errSum += min(d, 85.0)
+                                            let sx = x + dx
+                                            guard sx >= 2, sx < width - 2 else { continue }
+                                            let pA = y * width + x
+                                            let pB = sy * width + sx
+                                            guard rawValidB[pB] else { continue }
+                                            if baseLum0[pA] > 0.88 || rawLumB[pB] > 0.88 { continue }
+
+                                            let iA = pA * 4
+                                            let iB = pB * 4
+                                            let cDiff = (abs(Float(ptrA[iA]) - Float(ptrB[iB]))
+                                                       + abs(Float(ptrA[iA + 1]) - Float(ptrB[iB + 1]))
+                                                       + abs(Float(ptrA[iA + 2]) - Float(ptrB[iB + 2]))) / 3.0
+                                            let gxA = (baseLum0[pA + 1] - baseLum0[pA - 1]) * 255.0
+                                            let gyA = (baseLum0[pA + width] - baseLum0[pA - width]) * 255.0
+                                            let gxB = (rawLumB[pB + 1] - rawLumB[pB - 1]) * 255.0
+                                            let gyB = (rawLumB[pB + width] - rawLumB[pB - width]) * 255.0
+                                            let gDiff = abs(gxA - gxB) + abs(gyA - gyB)
+
+                                            errSum += min(80.0, cDiff * 0.40 + gDiff * 0.60)
                                             count += 1
                                         }
                                     }
-                                    if count > 6 {
-                                        let penalty = Float(abs(dx) + abs(dy)) * 0.45
+                                    if count >= 10 {
+                                        let penalty = Float(abs(dx - bestGlobalDx) + abs(dy - bestGlobalDy)) * 0.45
                                         let avgCost = (errSum / Float(count)) + penalty
                                         if avgCost < bestCost {
                                             bestCost = avgCost
@@ -815,8 +1068,9 @@ extension VisionManager {
                 }
             }
 
-            // 透過雙線性內插對齊 Donor 影像
+            // 透過雙線性內插對齊 Donor 影像與其畫面內有效遮罩 warpedValidB
             var warpedB = bufB
+            var warpedValidB = [Bool](repeating: false, count: width * height)
             warpedB.withUnsafeMutableBufferPointer { dstPtr in
                 bufB.withUnsafeBufferPointer { srcPtr in
                     for y in 0..<height {
@@ -844,14 +1098,21 @@ extension VisionManager {
                                    + (1 - wx) * wy * gridShiftY[idx01]
                                    + wx * wy * gridShiftY[idx11]
 
-                            let sx = min(width - 1, max(0, Int((Float(x) + dx).rounded())))
-                            let sy = min(height - 1, max(0, Int((Float(y) + dy).rounded())))
-                            let dstIdx = (y * width + x) * 4
-                            let srcIdx = (sy * width + sx) * 4
-                            dstPtr[dstIdx]     = srcPtr[srcIdx]
-                            dstPtr[dstIdx + 1] = srcPtr[srcIdx + 1]
-                            dstPtr[dstIdx + 2] = srcPtr[srcIdx + 2]
-                            dstPtr[dstIdx + 3] = 255
+                            let sxRaw = Int((Float(x) + dx).rounded())
+                            let syRaw = Int((Float(y) + dy).rounded())
+                            let pDst = y * width + x
+                            let dstIdx = pDst * 4
+                            if sxRaw >= 2 && sxRaw < width - 2 && syRaw >= 2 && syRaw < height - 2 {
+                                let pSrc = syRaw * width + sxRaw
+                                if rawValidB[pSrc] {
+                                    warpedValidB[pDst] = true
+                                    let srcIdx = pSrc * 4
+                                    dstPtr[dstIdx]     = srcPtr[srcIdx]
+                                    dstPtr[dstIdx + 1] = srcPtr[srcIdx + 1]
+                                    dstPtr[dstIdx + 2] = srcPtr[srcIdx + 2]
+                                    dstPtr[dstIdx + 3] = 255
+                                }
+                            }
                         }
                     }
                 }
@@ -867,48 +1128,65 @@ extension VisionManager {
 
             let smoothLumA = smoothWeightMapFast(lumMapA, width: width, height: height, radius: max(3, width / 75))
             let smoothLumB = smoothWeightMapFast(lumMapB, width: width, height: height, radius: max(3, width / 75))
+            let localSurroundA = smoothWeightMapFast(lumMapA, width: width, height: height, radius: max(18, width / 11))
 
-            // 估計兩張照片之間的平滑背景環境光差（排除高光差異區 |A - B| > 0.15）
-            var nonGlareDiff = [Float](repeating: 0, count: width * height)
-            for p in 0..<(width * height) {
-                let d = smoothLumA[p] - smoothLumB[p]
-                if abs(d) < 0.15 {
-                    nonGlareDiff[p] = d
+            // 僅從乾淨的中間調像素 (0.16...0.72 且 |A - B| < 0.06) 估算全域環境曝光差，
+            // 絕不把白襯衫或深色外套上的閃光燈反光斑誤吸納為背景光差！
+            var midToneDiffSum: Float = 0
+            var midToneCount: Int = 0
+            for p in 0..<(width * height) where warpedValidB[p] {
+                let a = smoothLumA[p]
+                let b = smoothLumB[p]
+                if a >= 0.16 && a <= 0.72 && b >= 0.16 && b <= 0.72 && abs(a - b) < 0.06 {
+                    midToneDiffSum += (a - b)
+                    midToneCount += 1
                 }
             }
-            let ambientPass1 = smoothWeightMapFast(nonGlareDiff, width: width, height: height, radius: max(10, width / 15))
-            let ambientDiff = smoothWeightMapFast(ambientPass1, width: width, height: height, radius: max(10, width / 15))
+            let globalAmbientDiff: Float = midToneCount >= 24 ? (midToneDiffSum / Float(midToneCount)) : 0.0
 
             // 2. 偵測真正的「鏡面反光高光峰值種子 (Specular Peak Seeds)」
+            // 同時涵蓋：(a) 白色衣服/亮面上的強光核 (lumA >= 0.89 && diff >= 0.06)、(b) 深色衣服/背景上的強光核、(c) 局部顯著凸起之亮斑
             var rawPeak = [Float](repeating: 0, count: width * height)
-            for p in 0..<(width * height) {
-                let correctedLumB = smoothLumB[p] + ambientDiff[p]
-                let diff = lumMapA[p] - correctedLumB
-                let regDiff = smoothLumA[p] - correctedLumB
-                if (lumMapA[p] >= 0.84 && diff >= 0.17 && regDiff >= 0.13)
-                    || (smoothLumA[p] >= 0.80 && regDiff >= 0.20) {
+            for p in 0..<(width * height) where warpedValidB[p] {
+                let corrSmoothB = smoothLumB[p] + globalAmbientDiff
+                let corrRawB = lumMapB[p] + globalAmbientDiff
+                // 若 Donor B 本身在該處也是過曝強反光 (> 0.92 且不比 A 暗)，不可作為修補種子
+                if lumMapB[p] >= 0.93 && corrSmoothB >= smoothLumA[p] - 0.03 {
+                    continue
+                }
+                let diff = lumMapA[p] - corrRawB
+                let regDiff = smoothLumA[p] - corrSmoothB
+                let localProminence = smoothLumA[p] - localSurroundA[p]
+
+                if (lumMapA[p] >= 0.89 && diff >= 0.060 && regDiff >= 0.042)
+                    || (lumMapA[p] >= 0.54 && diff >= 0.135 && regDiff >= 0.105)
+                    || (lumMapA[p] >= 0.78 && localProminence >= 0.080 && regDiff >= 0.058) {
                     rawPeak[p] = 1.0
                 }
             }
 
-            let peakDensity = smoothWeightMapFast(rawPeak, width: width, height: height, radius: max(4, width / 64))
+            let peakDensity = smoothWeightMapFast(rawPeak, width: width, height: height, radius: max(3, width / 66))
             var peakSeed = [Float](repeating: 0, count: width * height)
             for p in 0..<(width * height) {
-                if rawPeak[p] > 0.5 && peakDensity[p] >= 0.16 {
+                if rawPeak[p] > 0.5 && peakDensity[p] >= 0.12 {
                     peakSeed[p] = 1.0
                 }
             }
 
-            // 3. 測地線光暈向外膨脹 (Geodesic Halo Expansion)：使用 O(1) 二元膨脹濾波器
+            // 3. 有限範圍測地線光暈向外膨脹 (Bounded Geodesic Halo Expansion)
+            // 以 peakSeed 周圍 width/6 為最大光暈半徑，將深色格紋外套/暗部背景上的閃光燈漸層光暈 (regDiff >= 0.024) 100% 納入替換
+            let maxHaloZone = maxFilterFloatFast(peakSeed, width: width, height: height, radius: max(22, width / 6))
             var haloMask = peakSeed
-            let stepRadius = max(5, width / 36)
-            for _ in 0..<3 {
+            let stepRadius = max(6, width / 32)
+            for _ in 0..<5 {
                 let expanded = maxFilterFloatFast(haloMask, width: width, height: height, radius: stepRadius)
-                for p in 0..<(width * height) {
+                for p in 0..<(width * height) where warpedValidB[p] && maxHaloZone[p] > 0.5 {
                     guard expanded[p] > 0.5 else { continue }
-                    let correctedLumB = smoothLumB[p] + ambientDiff[p]
-                    let regDiff = smoothLumA[p] - correctedLumB
-                    if regDiff >= 0.030 {
+                    let corrSmoothB = smoothLumB[p] + globalAmbientDiff
+                    let corrRawB = lumMapB[p] + globalAmbientDiff
+                    let regDiff = smoothLumA[p] - corrSmoothB
+                    let diff = lumMapA[p] - corrRawB
+                    if regDiff >= 0.024 || diff >= 0.034 {
                         haloMask[p] = 1.0
                     }
                 }
@@ -923,12 +1201,18 @@ extension VisionManager {
             // 向外微幅膨脹確保反光斑最外圈漸層邊緣也被 100% 乾淨替換
             let dilatedHalo = maxFilterFloatFast(haloMask, width: width, height: height, radius: max(5, width / 36))
 
-            // 嚴格禁止把 Donor B 本身的反光斑貼進來 (若 B 比 A 更亮則遮罩歸零)
+            // 嚴格禁止把畫面外區域或 Donor B 本身的反光斑貼進來
             var cleanDilated = dilatedHalo
             for p in 0..<(width * height) {
-                let correctedLumB = smoothLumB[p] + ambientDiff[p]
-                if correctedLumB > smoothLumA[p] + 0.025 {
+                if !warpedValidB[p] {
                     cleanDilated[p] = 0.0
+                    haloMask[p] = 0.0
+                    continue
+                }
+                let corrSmoothB = smoothLumB[p] + globalAmbientDiff
+                if corrSmoothB > smoothLumA[p] + 0.015 {
+                    cleanDilated[p] = 0.0
+                    haloMask[p] = 0.0
                 }
             }
 
@@ -936,18 +1220,16 @@ extension VisionManager {
             let feathered1 = smoothWeightMapFast(cleanDilated, width: width, height: height, radius: featherR)
             let feathered2 = smoothWeightMapFast(feathered1, width: width, height: height, radius: featherR)
 
-            // 4. 在反光遮罩內執行 100% 無反光像素替換 (haloMask 內 w = 1.0，徹底消除殘留灰霧！)
-            for p in 0..<(width * height) {
-                let correctedLumB = smoothLumB[p] + ambientDiff[p]
-                if correctedLumB > smoothLumA[p] + 0.025 { continue }
+            // 4. 在反光遮罩內執行 100% 無反光像素替換 (haloMask 內 w = 1.0，徹底消除中央閃光白斑與外圍灰霧！)
+            let delta = globalAmbientDiff * 255.0
+            for p in 0..<(width * height) where warpedValidB[p] {
+                let corrSmoothB = smoothLumB[p] + globalAmbientDiff
+                if corrSmoothB > smoothLumA[p] + 0.015 { continue }
                 let w = min(1.0, max(haloMask[p] > 0.5 ? 1.0 : 0.0, feathered2[p] * 1.45))
                 guard w > 0.01 else { continue }
                 let idx = p * 4
                 let wA = 1.0 - w
 
-                let y = p / width
-                let isBorder = (y < height * 9 / 100) || (y > height * 78 / 100)
-                let delta = isBorder ? (ambientDiff[p] * 255.0) : 0.0
                 let rB = min(255.0, max(0.0, Float(warpedB[idx]) + delta))
                 let gB = min(255.0, max(0.0, Float(warpedB[idx + 1]) + delta))
                 let bB = min(255.0, max(0.0, Float(warpedB[idx + 2]) + delta))

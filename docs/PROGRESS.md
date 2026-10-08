@@ -10,13 +10,16 @@
 * **最後更新時間**：2026-10-09
 * **當前所屬階段**：Phase 6 — 端到端整合與發布準備 (QA & Release)
 * **當前分支**：`main`
-* **當前進行中任務**：已將 `fix/camera-snap-and-antiglare-alignment` 合併至 `main`，並完成 **Task 6.2**（支援深色/淺色模式、動態字級 Dynamic Type 與日文／繁體中文語系切換）：
-  1. **全域深色／淺色模式與 Dynamic Type 動態字級適配 (`LocalizationManager.swift`, `ContentView.swift`, 全視圖與彈出面板)**：
-     - 建立 `AppAppearanceAndLocaleModifier` 與 `.applyAppAppearanceAndLocale()`，於 `ContentView` 及所有 `sheet` / `fullScreenCover`（`SettingsView`、`BatchPairingView`、`ChekiInfoView`、`QuickCreateIdolSheet`、`OnboardingView`、`InAppBacksidePickerSheet`、`SlotFormatAndDateEditorSheet`、`ProLifetimePaywallSheet`）統一注入 `.preferredColorScheme`（跟隨系統 / 深色 / 淺色）與 `.dynamicTypeSize(...DynamicTypeSize.xxxLarge)` 動態字級保護，並為橫向操作按鈕補齊 `.lineLimit(1)` 與 `.minimumScaleFactor(0.8)` 防截斷。
-  2. **追加日文語系（自動匹配 iOS 系統語系 + 設定內自由切換繁中／日文）(`Localizable.xcstrings`, `LocalizationManager.swift`, `SettingsView.swift`, 全視圖)**：
-     - 新增 [`Localizable.xcstrings`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Localizable.xcstrings) String Catalog（涵蓋全 App 共 224 組繁體中文 `zh-Hant` 與日文 `ja` 在地化詞條）與 [`LocalizationManager.swift`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Utilities/LocalizationManager.swift) (`AppLanguageMode` / `L10n`)，並將 Xcode 專案 `knownRegions` 加入 `zh-Hant` 與 `ja`。
-     - 預設為「跟隨系統 (`system`)」：當 iOS 系統首選語言為日文 (`ja`) 時自動匹配顯示日本語介面與日本星期日期格式 (`yyyy年M月d日 EEEE`)，其餘預設顯示繁體中文；使用者亦可隨時於「設定 › 一般與關於 › 語言」手動切換為「跟隨系統」、「繁體中文」或「日本語」，無須重啟 App 即時全畫面生效。
-* **最新穩定 Git Commit**：feat(設定與多語系): 完成 Task 6.2 深淺色模式、Dynamic Type 與日文/繁中語系切換
+* **當前進行中任務**：已完成 **Task 6.2**，並依據實機測試回饋完成單張檢視隱藏底部導覽列與「四角合成防反光」視覺錨點死鎖暨中央反光 100% 消除升級：
+  1. **單張檢視自動隱藏底部相冊與搜尋導覽按鈕 (`LocalizationManager.swift`, `ContentView.swift`, `LibraryView.swift`, `ChekiDetailView.swift`)**：
+     - 進入單張照片檢視 (`ChekiDetailView`) 時，自動同步隱藏 SwiftUI 與底層 `UITabBarController.tabBar`（相冊與搜尋按鈕完全消失），返回相冊時平順恢復；並修正日文模式下單面拍立得翻轉膠囊文字在地化。
+  2. **四角合成防反光：1,2,3,4 移至真正四個角落 + 視覺錨點追蹤使綠框死鎖在實體拍立得上 (`CameraScannerView.swift`)**：
+     - 將 `1, 2, 3, 4` 四個引導點移至拍立得外框真正的四個角落 (`0.08, 0.08` ~ `0.92, 0.92`)，讓移動對準時閃光燈反光斑能真正被推離中央主體區。
+     - 拍下第 1 張鎖定四邊形狀後，停止 `VNDetectRectanglesRequest`（四邊不再跳動變形），改以 `120×160` 視覺拍立得錨點與邊界梯度追蹤 (`updateLockedQuadVisualTracking` + `VNTranslationalImageRegistrationRequest`) 即時鎖定實體拍立得在畫面中的平移量，使綠框與 `1, 2, 3, 4` 在手機水平移動時緊貼實體拍立得位置。
+  3. **四角部分出界對位與第 1 張中央強光白斑 100% 消除 (`VisionManager+AntiGlare.swift`)**：
+     - 解決對準四個角落時拍立得對角移出相機畫面 (`0...1`) 導致的裁切錯位：透過 `estimateDonorNormalizedQuadInRawFrame` 直接比對第 1 張基準圖與四角照片的非反光錨點位移，並建立畫面內有效遮罩 `rawValidB` 排除畫面外延伸區。
+     - 在 `fuseMultiFrameGlareFree` 實作兩階段配準（`±36px × ±48px` 全域粗平移搜尋 + `4×6` 局部網格微調），並改由乾淨中間調 (`0.16...0.72`) 估算全域環境光差（杜絕白襯衫上的反光核被誤吸納進環境光差），將第 1 張中央白襯衫強光核與深色格紋外套上的閃光光暈 100% 替換為四角照片的乾淨像素。
+* **最新穩定 Git Commit**：fix(防反光): 修正四角點位、拍立得視覺錨點鎖定與中央反光100%消除
 * **下一動執行指示**：執行 **Task 6.3**（建立 App 圖示、啟動畫面與 App Store 截圖產生流程）
 
 ---
