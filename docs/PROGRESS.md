@@ -8,10 +8,10 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-08
-* **當前所屬階段**：Phase 5 — 商業化與進階功能 (StoreKit 2 & Polish)
-* **當前進行中任務**：已完成 **Task 5.2** 每日 1 張 4K 高畫質免費無浮水印輸出額度計數器（`UserDefaults` 儲存、跨日自動重置、免費版每日首次分享/輸出自動消耗無浮水印高畫質額度，並於 Pro 解鎖後自動隱藏設定頁頂部買斷卡片）
-* **最新穩定 Git Commit**：feat(StoreKit): 完成 Task 5.2 每日免費無浮水印額度計數器與隱藏已解鎖設定頁頂部卡片
-* **下一動執行指示**：執行 **Task 5.4**（實作 Mode B 雙角度去反光合成管線 — Pro 專屬功能）
+* **當前所屬階段**：Phase 5 — 商業化與進階功能 (StoreKit 2 & Polish) 全數完成 ✅
+* **當前進行中任務**：已完成 **Task 5.4** 實作 Mode B 雙角度去反光合成管線（`VisionManager+AntiGlare.swift` 雙角度透視校正、亞像素影像對位、鏡面反光差異權重遮罩與羽化融合，並整合至 `CameraScannerView` 兩段式防反光連拍與 `ChekiDetailView` 第二角度相簿匯入合成）
+* **最新穩定 Git Commit**：feat(Vision): 完成 Task 5.4 Mode B 雙角度去反光合成管線與相機/檢視頁整合
+* **下一動執行指示**：執行 **Task 6.1**（實機測試與效能調校：記憶體佔用、批次處理速度優化）
 
 ---
 
@@ -260,7 +260,7 @@
 - [x] **Task 5.1**: 封裝 `StoreKitManager.swift`（Non-Consumable NT$120 / ¥600 終身買斷商品、JWS 本機簽章驗證、`Transaction.currentEntitlements` 與 `Transaction.updates` 交易監聽、`AppStore.sync()` 恢復購買）
 - [x] **Task 5.2**: 實作每日 1 張 4K 高畫質免費額度計數器（`UserDefaults` 儲存、跨日自動重置、`0/1 → 1/1` 已使用進度顯示、於系統分享面板實際點擊 `Save Images` / 完成分享時才消耗額度，且額度用完後自動將匯出圖片降為長邊 960px + JPEG 0.72 之 SNS 夠用畫質並加上右下角浮水印）
 - [x] **Task 5.3**: 實作免費版與 Pro 版分級機制（免費版：原生相簿不裁切但可同步相簿分類與時間軸、只能在 App 內加上 `ChekiWatermarkOverlayView` 浮水印查看裁切後照片、分享或輸出時透過 `ChekiWatermarkRenderer` 加上浮水印；Pro 版：原生相簿非破壞性原地裁切、原畫質無損輸出、完全移除浮水印）
-- [ ] **Task 5.4**: 實作 Mode B 雙角度去反光合成管線（Pro 專屬功能）
+- [x] **Task 5.4**: 實作 Mode B 雙角度去反光合成管線（Pro 專屬功能：`VisionManager+AntiGlare.swift` 實作 Mode A 單張高光抑制與 Mode B 雙角度各自透視校正、`VNTranslationalImageRegistrationRequest` 亞像素平移對位、內部相片鏡面反光差異權重遮罩、高斯盒式羽化平滑與白邊/手寫簽名保護融合；整合至 `CameraScannerView` 兩段式防反光連拍與 `ChekiDetailView` 右上選單匯入第二角度照片去反光合成）
 
 ---
 

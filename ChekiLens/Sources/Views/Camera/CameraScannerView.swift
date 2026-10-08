@@ -200,9 +200,15 @@ final class CameraSessionController: NSObject, ObservableObject {
         } catch {}
     }
 
-    func capturePhoto(isBacksideSimulated: Bool = false) async -> UIImage? {
+    func capturePhoto(
+        isBacksideSimulated: Bool = false,
+        simulatedGlareAngleStep: Int = 0
+    ) async -> UIImage? {
         guard isCameraAvailable else {
-            return makeSimulatedCaptureImage(isBackside: isBacksideSimulated)
+            return makeSimulatedCaptureImage(
+                isBackside: isBacksideSimulated,
+                glareAngleStep: simulatedGlareAngleStep
+            )
         }
 
         return await withCheckedContinuation { continuation in
@@ -215,7 +221,10 @@ final class CameraSessionController: NSObject, ObservableObject {
         }
     }
 
-    private func makeSimulatedCaptureImage(isBackside: Bool) -> UIImage? {
+    private func makeSimulatedCaptureImage(
+        isBackside: Bool,
+        glareAngleStep: Int = 0
+    ) -> UIImage? {
         let size = CGSize(width: 540, height: 860)
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
@@ -245,6 +254,34 @@ final class CameraSessionController: NSObject, ObservableObject {
                     options: []
                 )
             }
+
+            // 模擬器下若處於 Mode B 雙角度防反光拍攝（Angle 1 vs Angle 2），在不同位置繪製模擬塑膠套強光白斑，
+            // 驗證 Mode B 雙角度合成後能將兩個角度各自的白斑 100% 互補消除。
+            if !isBackside && (glareAngleStep == 1 || glareAngleStep == 2) {
+                let glareCenter = glareAngleStep == 1
+                    ? CGPoint(x: 345, y: 195) // 角度 1：右上強光白斑
+                    : CGPoint(x: 185, y: 455) // 角度 2：左下強光白斑
+                let glareColors = [
+                    UIColor(white: 1.0, alpha: 0.94).cgColor,
+                    UIColor(white: 1.0, alpha: 0.45).cgColor,
+                    UIColor(white: 1.0, alpha: 0.0).cgColor
+                ] as CFArray
+                if let radial = CGGradient(
+                    colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                    colors: glareColors,
+                    locations: [0.0, 0.45, 1.0]
+                ) {
+                    cg.drawRadialGradient(
+                        radial,
+                        startCenter: glareCenter,
+                        startRadius: 4,
+                        endCenter: glareCenter,
+                        endRadius: 95,
+                        options: []
+                    )
+                }
+            }
+
             cg.restoreGState()
         }
     }
@@ -348,12 +385,17 @@ struct CameraScannerView: View {
     @State private var showCaptureFlash: Bool = false
     @State private var isProcessingCapture: Bool = false
 
+    @AppStorage("isProLifetimeUnlocked") private var isProLifetimeUnlocked: Bool = false
+
     // 正反雙面連續拍攝狀態（先拍正面 -> 提示翻面 -> 再拍背面）
     @State private var pendingFrontImageData: Data? = nil
     @State private var pendingOriginalFrontImageData: Data? = nil
     @State private var pendingFrontPointsJSON: String? = nil
     @State private var pendingFrontOCRDate: Date? = nil
     @State private var pendingFrontFormat: FilmFormat = .mini
+
+    // Task 5.4: Mode B 雙角度去反光連續拍攝狀態（先拍微傾角度 1 -> 再拍微傾角度 2 合成消除反光）
+    @State private var pendingModeBFirstImage: UIImage? = nil
     @State private var statusBannerMessage: String? = nil
 
     // 點擊對焦黃框狀態
@@ -663,12 +705,26 @@ struct CameraScannerView: View {
                 .padding(.vertical, 6)
                 .background(Color.yellow, in: Capsule())
         } else if captureMode == .dualGlare {
-            Text("防反光模式：微調角度避開眩光")
+            if isProLifetimeUnlocked {
+                Text(
+                    pendingModeBFirstImage == nil
+                        ? "Mode B 防反光 (1/2)：請以微傾角度拍攝第 1 張"
+                        : "Mode B 防反光 (2/2)：請換角度避開原白斑拍第 2 張"
+                )
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(.black.opacity(0.55), in: Capsule())
+                .foregroundStyle(.black)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Color.cyan, in: Capsule())
+                .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+            } else {
+                Text("防反光 Mode A：單張高光抑制（Pro 解鎖雙角度合成）")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(.black.opacity(0.65), in: Capsule())
+            }
         } else {
             Text("已鎖定 86×54mm 拍立得邊框")
                 .font(.caption2.weight(.semibold))
@@ -709,7 +765,9 @@ struct CameraScannerView: View {
     // MARK: - 3. Bottom Camera Deck (Apple 原生相機模式轉盤 + 快門 + 縮圖預覽)
 
     private var bottomCameraDeck: some View {
-        VStack(spacing: 18) {
+        let isWaitingSecondStep = (pendingFrontImageData != nil || pendingModeBFirstImage != nil)
+
+        return VStack(spacing: 18) {
             // 橫向黃字模式選擇列（仿照 Apple 原生相機：防反光 / 拍照 / 正反雙面）
             HStack(spacing: 28) {
                 ForEach(ChekiCaptureMode.allCases) { mode in
@@ -719,6 +777,7 @@ struct CameraScannerView: View {
                         withAnimation(.snappy(duration: 0.22)) {
                             captureMode = mode
                             pendingFrontImageData = nil
+                            pendingModeBFirstImage = nil
                             statusBannerMessage = nil
                         }
                     } label: {
@@ -779,13 +838,21 @@ struct CameraScannerView: View {
                             .frame(width: 74, height: 74)
 
                         Circle()
-                            .fill(pendingFrontImageData != nil ? Color.yellow : Color.white)
+                            .fill(
+                                pendingModeBFirstImage != nil
+                                    ? Color.cyan
+                                    : (pendingFrontImageData != nil ? Color.yellow : Color.white)
+                            )
                             .frame(width: 62, height: 62)
                             .scaleEffect(isShutterPressed ? 0.88 : 1.0)
                             .overlay {
                                 if isProcessingCapture {
                                     ProgressView()
                                         .tint(.black)
+                                } else if pendingModeBFirstImage != nil {
+                                    Image(systemName: "sparkles.rectangle.stack.fill")
+                                        .font(.title3.weight(.bold))
+                                        .foregroundStyle(.black)
                                 } else if pendingFrontImageData != nil {
                                     Image(systemName: "rectangle.portrait.rotate")
                                         .font(.title3.weight(.bold))
@@ -800,10 +867,15 @@ struct CameraScannerView: View {
 
                 Spacer()
 
-                // 右下：模式切換 / 重設雙面狀態圓鈕
+                // 右下：模式切換 / 重設雙面或雙角度狀態圓鈕
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    if pendingFrontImageData != nil {
+                    if pendingModeBFirstImage != nil {
+                        withAnimation {
+                            pendingModeBFirstImage = nil
+                            statusBannerMessage = "已重設 Mode B 第 1 張角度，請重新拍攝"
+                        }
+                    } else if pendingFrontImageData != nil {
                         withAnimation {
                             pendingFrontImageData = nil
                             statusBannerMessage = "已取消背面拍攝，重新拍攝正面"
@@ -814,9 +886,9 @@ struct CameraScannerView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: pendingFrontImageData != nil ? "arrow.counterclockwise" : "rectangle.portrait.rotate")
+                    Image(systemName: isWaitingSecondStep ? "arrow.counterclockwise" : "rectangle.portrait.rotate")
                         .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(captureMode == .frontAndBack ? .yellow : .white)
+                        .foregroundStyle((captureMode == .frontAndBack || isWaitingSecondStep) ? .yellow : .white)
                         .frame(width: 48, height: 48)
                         .background(.white.opacity(0.15), in: Circle())
                 }
@@ -860,10 +932,39 @@ struct CameraScannerView: View {
         isProcessingCapture = true
         defer { isProcessingCapture = false }
 
+        // Task 5.4: Pro 專屬 Mode B 雙角度去反光合成流程
+        if captureMode == .dualGlare && isProLifetimeUnlocked {
+            let glareStep = (pendingModeBFirstImage == nil) ? 1 : 2
+            guard let rawImage = await camera.capturePhoto(
+                isBacksideSimulated: false,
+                simulatedGlareAngleStep: glareStep
+            ) else { return }
+
+            if let firstAngleImage = pendingModeBFirstImage {
+                // 第 2 張角度拍攝完成 -> 執行 Mode B 雙角度特徵對位與高光白斑消除合成
+                await completeModeBDualAngleCapture(
+                    firstImage: firstAngleImage,
+                    secondImage: rawImage
+                )
+            } else {
+                // 第 1 張角度拍攝完成 -> 暫存並引導微調傾斜角度拍第 2 張
+                pendingModeBFirstImage = rawImage
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                withAnimation {
+                    statusBannerMessage = "角度 1 已鎖定！請稍微改變傾斜角度避開白斑，再按快門 (2/2)"
+                }
+            }
+            return
+        }
+
         let isCapturingBackside = (captureMode == .frontAndBack && pendingFrontImageData != nil)
         guard let rawImage = await camera.capturePhoto(isBacksideSimulated: isCapturingBackside) else { return }
 
-        let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(rawImage)
+        let useModeAGlareSuppression = (captureMode == .dualGlare)
+        let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(
+            rawImage,
+            applyModeASuppression: useModeAGlareSuppression
+        )
         let now = Date()
 
         if captureMode == .frontAndBack {
@@ -931,12 +1032,106 @@ struct CameraScannerView: View {
 
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation {
-                statusBannerMessage = "已自動正位並存入典藏"
+                statusBannerMessage = useModeAGlareSuppression
+                    ? "已套用 Mode A 單張高光抑制並存入典藏"
+                    : "已自動正位並存入典藏"
             }
         }
     }
 
-    private func processCapturedImage(_ image: UIImage) async -> (Data?, Data?, String?, Date?, FilmFormat) {
+    /// Task 5.4: 執行 Mode B 雙角度去反光合成並存入 SwiftData
+    @MainActor
+    private func completeModeBDualAngleCapture(
+        firstImage: UIImage,
+        secondImage: UIImage
+    ) async {
+        defer { pendingModeBFirstImage = nil }
+
+        let normA = firstImage.normalizedImage
+        let normB = secondImage.normalizedImage
+        let rawJPEGA = normA.jpegData(compressionQuality: 0.92)
+
+        guard let cgA = normA.cgImage,
+              let cgB = normB.cgImage else {
+            return
+        }
+
+        let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
+        let manager = VisionManager()
+        let now = Date()
+
+        do {
+            let result = try await manager.synthesizeModeBDualAngleAntiGlare(
+                primaryImage: cgA,
+                secondaryImage: cgB,
+                borderInsetRatio: defaultInsetRatio,
+                preferredFormat: .auto
+            )
+
+            let fusedJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.94)
+            let imageSizeA = CGSize(width: cgA.width, height: cgA.height)
+            let pointsJSON = ChekiItem.encodeNormalizedCorners(result.primaryDetection.corners, imageSize: imageSizeA)
+
+            var ocrDate = await manager.recognizeDate(from: result.fusedCGImage)?.date
+            if ocrDate == nil {
+                ocrDate = await manager.recognizeDate(from: cgA)?.date
+            }
+            let captureDate = ocrDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
+            let format = result.resolvedFormat.concreteFormat
+
+            let newItem = ChekiItem(
+                frontImageData: fusedJPEG,
+                backImageData: nil,
+                originalFrontImageData: rawJPEGA ?? fusedJPEG,
+                capturedAt: captureDate,
+                ocrDate: ocrDate != nil ? captureDate : nil,
+                filmFormat: format,
+                detectedAspectRatio: format.aspectRatio,
+                perspectivePointsJSON: pointsJSON,
+                processingState: .completed,
+                idolMember: defaultMember
+            )
+            modelContext.insert(newItem)
+            try? modelContext.save()
+
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            withAnimation {
+                statusBannerMessage = "✨ Mode B 雙角度去反光合成完成！已消除強光白斑並存入典藏"
+            }
+        } catch {
+            // 若其中一張角度未能偵測到完整四邊形，自動回退至第 1 張 + Mode A 單張高光抑制
+            let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(
+                firstImage,
+                applyModeASuppression: true
+            )
+            let captureDate = recognizedDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
+            let format = resolvedFormat.concreteFormat
+            let newItem = ChekiItem(
+                frontImageData: processedData,
+                backImageData: nil,
+                originalFrontImageData: originalRawData ?? processedData,
+                capturedAt: captureDate,
+                ocrDate: recognizedDate != nil ? captureDate : nil,
+                filmFormat: format,
+                detectedAspectRatio: format.aspectRatio,
+                perspectivePointsJSON: pointsJSON,
+                processingState: .completed,
+                idolMember: defaultMember
+            )
+            modelContext.insert(newItem)
+            try? modelContext.save()
+
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            withAnimation {
+                statusBannerMessage = "已透過反光抑制正位並存入典藏"
+            }
+        }
+    }
+
+    private func processCapturedImage(
+        _ image: UIImage,
+        applyModeASuppression: Bool = false
+    ) async -> (Data?, Data?, String?, Date?, FilmFormat) {
         let normalized = image.normalizedImage
         let rawJPEG = normalized.jpegData(compressionQuality: 0.92)
         guard let cgImage = normalized.cgImage else {
@@ -963,11 +1158,14 @@ struct CameraScannerView: View {
                 specName: cropResult.filmSpecification?.format.rawValue,
                 outputSize: cropResult.outputSize
             )
-            var ocrDate = await manager.recognizeDate(from: cropResult.cgImage)?.date
+            let finalCGImage = applyModeASuppression
+                ? await manager.applyModeAGlareSuppression(to: cropResult.cgImage)
+                : cropResult.cgImage
+            var ocrDate = await manager.recognizeDate(from: finalCGImage)?.date
             if ocrDate == nil {
                 ocrDate = await manager.recognizeDate(from: cgImage)?.date
             }
-            let jpeg = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92)
+            let jpeg = UIImage(cgImage: finalCGImage).jpegData(compressionQuality: 0.92)
             let pointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imageSize)
             return (jpeg, rawJPEG, pointsJSON, ocrDate, resolvedFormat)
         } catch {

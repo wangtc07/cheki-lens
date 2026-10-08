@@ -49,6 +49,10 @@ struct ChekiDetailView: View {
     @State private var backsidePickerItem: PhotosPickerItem? = nil
     @State private var isShowingBacksidePicker: Bool = false
 
+    /// Task 5.4: Mode B 雙角度去反光合成第二角度照片選擇器 (Pro 專屬)
+    @State private var modeBSecondAnglePickerItem: PhotosPickerItem? = nil
+    @State private var isShowingModeBSecondAnglePicker: Bool = false
+
     /// 同步至系統相簿提示
     @State private var syncStatusToast: String? = nil
 
@@ -158,6 +162,17 @@ struct ChekiDetailView: View {
             guard let newPickerItem else { return }
             backsidePickerItem = nil
             Task { await attachBacksidePhoto(from: newPickerItem) }
+        }
+        .photosPicker(
+            isPresented: $isShowingModeBSecondAnglePicker,
+            selection: $modeBSecondAnglePickerItem,
+            matching: .images,
+            photoLibrary: .shared()
+        )
+        .onChange(of: modeBSecondAnglePickerItem) { _, newPickerItem in
+            guard let newPickerItem else { return }
+            modeBSecondAnglePickerItem = nil
+            Task { await synthesizeModeBSecondAnglePhoto(from: newPickerItem) }
         }
         .sheet(isPresented: $showingInfoSheet) {
             NavigationStack {
@@ -341,6 +356,21 @@ struct ChekiDetailView: View {
                     showingAdjustmentSheet = true
                 } label: {
                     Label("調整邊界與相紙比例", systemImage: "slider.horizontal.3")
+                }
+
+                Button {
+                    if PhotoLibraryManager.isProLifetimeUnlocked {
+                        isShowingModeBSecondAnglePicker = true
+                    } else {
+                        showToast("Mode B 雙角度去反光合成為 Pro 買斷版專屬功能")
+                    }
+                } label: {
+                    Label(
+                        PhotoLibraryManager.isProLifetimeUnlocked
+                            ? "Mode B 雙角度去反光合成"
+                            : "Mode B 雙角度去反光合成 (Pro)",
+                        systemImage: "sparkles.rectangle.stack"
+                    )
                 }
 
                 if currentItem.canRevertToOriginal(backside: isShowingBack && currentItem.hasBothSides) {
@@ -1136,6 +1166,62 @@ struct ChekiDetailView: View {
         isShowingBack = true
         withAnimation(flipAnimation) {
             flipProgress = 1.0
+        }
+    }
+
+    /// Task 5.4: 從相簿選取第 2 張不同傾斜角度的照片，與當前照片進行 Mode B 雙角度去反光合成
+    @MainActor
+    private func synthesizeModeBSecondAnglePhoto(from pickerItem: PhotosPickerItem) async {
+        guard PhotoLibraryManager.isProLifetimeUnlocked else {
+            showToast("Mode B 雙角度去反光合成為 Pro 專屬功能")
+            return
+        }
+        guard let secondData = try? await pickerItem.loadTransferable(type: Data.self),
+              let secondRawUI = UIImage(data: secondData)?.normalizedImage,
+              let secondCG = secondRawUI.cgImage else {
+            showToast("無法讀取第二角度照片")
+            return
+        }
+
+        let editingBack = isShowingBack && currentItem.hasBothSides
+        let primarySourceData = editingBack
+            ? (currentItem.originalBackImageData ?? currentItem.backImageData)
+            : (currentItem.originalFrontImageData ?? currentItem.frontImageData)
+
+        guard let primaryData = primarySourceData,
+              let primaryUI = UIImage(data: primaryData)?.normalizedImage,
+              let primaryCG = primaryUI.cgImage else {
+            showToast("無法讀取主角度照片")
+            return
+        }
+
+        let visionManager = VisionManager()
+        do {
+            let result = try await visionManager.synthesizeModeBDualAngleAntiGlare(
+                primaryImage: primaryCG,
+                secondaryImage: secondCG,
+                borderInsetRatio: currentItem.borderInsetRatio,
+                preferredFormat: currentItem.filmFormat
+            )
+            if let fusedJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.94) {
+                if editingBack {
+                    if currentItem.originalBackImageData == nil {
+                        currentItem.originalBackImageData = currentItem.backImageData
+                    }
+                    currentItem.backImageData = fusedJPEG
+                } else {
+                    if currentItem.originalFrontImageData == nil {
+                        currentItem.originalFrontImageData = currentItem.frontImageData
+                    }
+                    currentItem.frontImageData = fusedJPEG
+                }
+                try? modelContext.save()
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                showToast("✨ 已完成 Mode B 雙角度去反光合成")
+            }
+        } catch {
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            showToast("雙角度對位失敗，請確認兩張皆包含完整拍立得邊框")
         }
     }
 
