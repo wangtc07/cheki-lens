@@ -1542,7 +1542,7 @@ struct CameraScannerView: View {
             : frontSyncDate
 
         let member: IdolMember? = item.idolMember ?? defaultMember
-        let albumName = useGroupMemberAlbums ? (member?.stageName ?? "ChekiLens") : "ChekiLens"
+        let albumName = useGroupMemberAlbums ? (member?.albumTitle ?? "ChekiLens") : "ChekiLens"
         let folderName: String? = useGroupMemberAlbums ? member?.group?.name : nil
 
         // 嘗試取得或建立相簿（即使 album 為 nil，updateOrSaveImage 仍會將照片存入系統相簿「最近項目」）

@@ -553,11 +553,7 @@ struct LibraryView: View {
                                 }
                             }
                         } label: {
-                            if let groupName = member.group?.name {
-                                Text("\(member.stageName)（\(groupName)）")
-                            } else {
-                                Text(member.stageName)
-                            }
+                            Text(member.albumTitle)
                         }
                     }
                 } label: {
@@ -819,8 +815,8 @@ struct AlbumsRootView: View {
             }
             .navigationDestination(for: IdolMember.self) { member in
                 AlbumHeroDetailView(
-                    primaryTitle: member.group?.name ?? member.stageName,
-                    secondaryTitle: member.group != nil ? "(\(member.stageName))" : nil,
+                    primaryTitle: member.albumTitle,
+                    secondaryTitle: nil,
                     items: chekiItems.filter { $0.idolMember?.id == member.id },
                     defaultMember: member
                 )
@@ -980,8 +976,8 @@ struct AlbumsRootView: View {
                 ForEach(allExpandedMembers) { member in
                     NavigationLink(value: member) {
                         ApplePhotoAlbumTile(
-                            primaryTitle: member.group?.name ?? member.stageName,
-                            secondaryTitle: member.group != nil ? "(\(member.stageName))" : nil,
+                            primaryTitle: member.albumTitle,
+                            secondaryTitle: nil,
                             coverImagesData: Self.memberCoverImages(for: member)
                         )
                     }
@@ -1066,7 +1062,8 @@ struct ApplePhotoAlbumTile: View {
                     Text(primaryTitle)
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.88)
 
                     if let secondaryTitle {
                         Text(secondaryTitle)
@@ -1120,8 +1117,8 @@ private struct GroupMembersAlbumView: View {
                     ForEach(group.sortedMembers) { member in
                         NavigationLink(value: member) {
                             ApplePhotoAlbumTile(
-                                primaryTitle: group.name,
-                                secondaryTitle: "(\(member.stageName))",
+                                primaryTitle: member.albumTitle,
+                                secondaryTitle: nil,
                                 coverImagesData: AlbumsRootView.memberCoverImages(for: member)
                             )
                         }
@@ -1216,14 +1213,14 @@ struct AlbumHeroDetailView: View {
 
     private var effectivePrimaryTitle: String {
         if let defaultMember {
-            return defaultMember.group?.name ?? defaultMember.stageName
+            return defaultMember.albumTitle
         }
         return primaryTitle
     }
 
     private var effectiveSecondaryTitle: String? {
-        if let defaultMember {
-            return defaultMember.group != nil ? "(\(defaultMember.stageName))" : nil
+        if defaultMember != nil {
+            return nil
         }
         return secondaryTitle
     }
@@ -1694,10 +1691,7 @@ struct AlbumHeroDetailView: View {
                                 }
                             }
                         } label: {
-                            let labelText = member.group != nil
-                                ? "\(member.stageName)（\(member.group!.name)）"
-                                : member.stageName
-                            Label(labelText, systemImage: item.idolMember?.id == member.id ? "checkmark" : "person")
+                            Label(member.albumTitle, systemImage: item.idolMember?.id == member.id ? "checkmark" : "person")
                         }
                     }
                 }
@@ -1890,8 +1884,8 @@ struct LibrarySearchView: View {
                                     ForEach(idolMembers) { member in
                                         NavigationLink(value: member) {
                                             ApplePhotoAlbumTile(
-                                                primaryTitle: member.group?.name ?? member.stageName,
-                                                secondaryTitle: member.group != nil ? "(\(member.stageName))" : nil,
+                                                primaryTitle: member.albumTitle,
+                                                secondaryTitle: nil,
                                                 coverImagesData: AlbumsRootView.memberCoverImages(for: member)
                                             )
                                         }
@@ -1952,8 +1946,8 @@ struct LibrarySearchView: View {
             }
             .navigationDestination(for: IdolMember.self) { member in
                 AlbumHeroDetailView(
-                    primaryTitle: member.group?.name ?? member.stageName,
-                    secondaryTitle: member.group != nil ? "(\(member.stageName))" : nil,
+                    primaryTitle: member.albumTitle,
+                    secondaryTitle: nil,
                     items: chekiItems.filter { $0.idolMember?.id == member.id },
                     defaultMember: member
                 )

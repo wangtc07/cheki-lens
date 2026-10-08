@@ -181,15 +181,12 @@ struct ChekiInfoView: View {
                                         }
                                     }
                                 } label: {
-                                    let title = member.group != nil
-                                        ? "\(member.stageName)（\(member.group!.name)）"
-                                        : member.stageName
-                                    Label(title, systemImage: item.idolMember?.id == member.id ? "checkmark" : "person")
+                                    Label(member.albumTitle, systemImage: item.idolMember?.id == member.id ? "checkmark" : "person")
                                 }
                             }
                         } label: {
                             HStack(spacing: 4) {
-                                Text(item.idolMember?.stageName ?? "未分類")
+                                Text(item.idolMember?.albumTitle ?? "未分類")
                                     .foregroundStyle(.secondary)
                                 Image(systemName: "chevron.up.chevron.down")
                                     .font(.caption2.weight(.semibold))

@@ -3393,7 +3393,7 @@ struct BatchPairingView: View {
 
                 let membersToSync = effectiveMembers.isEmpty ? [nil as IdolMember?] : effectiveMembers.map { Optional($0) }
                 for (memberIdx, memberOpt) in membersToSync.enumerated() {
-                    let albumName = useGroupMemberAlbums ? (memberOpt?.stageName ?? "ChekiLens") : "ChekiLens"
+                    let albumName = useGroupMemberAlbums ? (memberOpt?.albumTitle ?? "ChekiLens") : "ChekiLens"
                     let folderName = useGroupMemberAlbums ? memberOpt?.group?.name : nil
                     if let album = try? await PhotoLibraryManager.shared.getOrCreateAlbum(
                         albumName: albumName,

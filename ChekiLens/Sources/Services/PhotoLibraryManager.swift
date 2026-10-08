@@ -301,7 +301,7 @@ final class PhotoLibraryManager {
         var syncedCount = 0
 
         for item in items {
-            let albumName = useGroupMemberAlbums ? (item.idolMember?.stageName ?? "ChekiLens") : "ChekiLens"
+            let albumName = useGroupMemberAlbums ? (item.idolMember?.albumTitle ?? "ChekiLens") : "ChekiLens"
             let folderName = useGroupMemberAlbums ? item.idolMember?.group?.name : nil
             let frontSyncDate = overwriteExif ? item.displayDate : item.capturedAt
             let backSyncDate = (timelineStrategy == "plusOneSecond")

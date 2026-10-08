@@ -378,10 +378,7 @@ struct ChekiDetailView: View {
                                 }
                             }
                         } label: {
-                            let title = member.group != nil
-                                ? "\(member.stageName)（\(member.group!.name)）"
-                                : member.stageName
-                            Label(title, systemImage: currentItem.idolMember?.id == member.id ? "checkmark" : "person")
+                            Label(member.albumTitle, systemImage: currentItem.idolMember?.id == member.id ? "checkmark" : "person")
                         }
                     }
                 } label: {
@@ -1468,7 +1465,7 @@ struct ChekiDetailView: View {
               let frontImage = UIImage(data: frontData) else { return }
 
         let syncDate = currentItem.displayDate
-        let albumName = currentItem.idolMember?.stageName ?? "ChekiLens"
+        let albumName = currentItem.idolMember?.albumTitle ?? "ChekiLens"
         let folderName = currentItem.idolMember?.group?.name
 
         do {
@@ -2619,7 +2616,7 @@ private struct ChekiQuadCropEditorView: View {
                 let targetAssetID = editingBackside ? item.backAssetIdentifier : item.frontAssetIdentifier
                 let origData = editingBackside ? item.originalBackImageData : item.originalFrontImageData
                 if targetAssetID != nil || item.isSyncedToPhotoLibrary {
-                    let albumName = item.idolMember?.stageName ?? "ChekiLens"
+                    let albumName = item.idolMember?.albumTitle ?? "ChekiLens"
                     let folderName = item.idolMember?.group?.name
                     if let album = try? await PhotoLibraryManager.shared.getOrCreateAlbum(albumName: albumName, inFolder: folderName),
                        let updatedID = try? await PhotoLibraryManager.shared.updateOrSaveImage(

@@ -26,7 +26,8 @@
      - 自「尚未綁定背面照片」引導卡與右上角「正反雙面管理」選單移除「產生測試手寫簽名背面」功能。
      - 為空背面引導卡綁定 `applyCardTapGestures`，使背面沒有照片時雙擊卡片同樣能平滑 3D 翻轉回正面。
      - 新增 [`InAppBacksidePickerSheet`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Views/Detail/ChekiDetailView.swift#L2846-L3040) 與 [`attachBacksideFromInAppItem`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Views/Detail/ChekiDetailView.swift#L1420-L1462)，支援在空背面卡片與右上選單直接從 App 內現有拍立得項目（可依全部／同相冊／僅單面篩選，並支援自動合併移除原獨立單張項目）選取作為背面。
-* **最新穩定 Git Commit**：feat(Detail): 移除測試手寫背面、支援空背面雙擊翻回正面並新增從 App 內選取背面功能
+  8. **成員相冊名稱格式統一為「人名 (團體)」(`IdolMember.swift`, `LibraryView.swift`, `ChekiDetailView.swift`, `ChekiInfoView.swift`, `PhotoLibraryManager.swift`, `BatchPairingView.swift`, `CameraScannerView.swift`)**：於 `IdolMember` 新增 `albumTitle`（有團體時顯示 `"\(stageName) (\(groupName))"`，無團體時顯示 `stageName`），將「相冊 › 成員相冊」、團體內成員相冊、相冊詳情頁 Hero 標題、搜尋頁成員相冊、成員指派選單及系統相簿同步名稱統一改為「人名 (團體)」。
+* **最新穩定 Git Commit**：feat(Library): 將成員相冊名稱格式調整為「人名 (團體)」
 * **下一動執行指示**：執行 **Task 6.2**（支援深色/淺色模式與動態字級 Dynamic Type）
 
 ---
