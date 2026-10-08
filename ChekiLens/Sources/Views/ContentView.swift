@@ -10,6 +10,8 @@ enum MainLibraryTab: Hashable {
 
 /// App 根視圖 — 根據 onboarding 狀態決定顯示導引或主畫面
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("appAppearanceMode") private var appAppearanceModeRaw: String = AppAppearanceMode.system.rawValue
     @AppStorage("appLanguageMode") private var appLanguageModeRaw: String = AppLanguageMode.system.rawValue
@@ -42,6 +44,16 @@ struct ContentView: View {
         }
         .id(appLanguageModeRaw)
         .applyAppAppearanceAndLocale()
+        .task {
+            guard hasCompletedOnboarding else { return }
+            _ = await PhotoLibraryManager.shared.syncAllExternalEditsFromSystemPhotoLibrary(modelContext: modelContext)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active, hasCompletedOnboarding else { return }
+            Task {
+                _ = await PhotoLibraryManager.shared.syncAllExternalEditsFromSystemPhotoLibrary(modelContext: modelContext)
+            }
+        }
     }
 }
 

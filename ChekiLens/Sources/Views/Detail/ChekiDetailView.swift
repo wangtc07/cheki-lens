@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Photos
 import PhotosUI
 import UIKit
 
@@ -19,6 +20,7 @@ struct ChekiDetailView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var allChekiItems: [ChekiItem]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
     @AppStorage("hasSeenDetailCoachMark") private var hasSeenDetailCoachMark: Bool = false
@@ -59,6 +61,13 @@ struct ChekiDetailView: View {
     @State private var showingInfoSheet: Bool = false
     @State private var showingAdjustmentSheet: Bool = false
     @State private var showDeleteConfirm: Bool = false
+
+    /// Task 6.5.8: 點選白色部分自動校正白平衡（Core Image CITemperatureAndTint 色溫／色調）狀態
+    @State private var isWhiteBalancePickerActive: Bool = false
+    @State private var whiteBalanceTapNormalizedPoint: CGPoint? = nil
+    @State private var whiteBalanceSummaryText: String? = nil
+    @State private var preWhiteBalanceFrontDataByItemID: [UUID: Data] = [:]
+    @State private var preWhiteBalanceBackDataByItemID: [UUID: Data] = [:]
 
     /// 補上/替換背面照片的 PhotosPicker 與 App 內選擇器
     @State private var backsidePickerItem: PhotosPickerItem? = nil
@@ -157,7 +166,12 @@ struct ChekiDetailView: View {
 
                         Spacer(minLength: 0)
 
-                        if !hasSeenDetailCoachMark && !isLandscape {
+                        if isWhiteBalancePickerActive {
+                            whiteBalanceInstructionBanner
+                                .padding(.bottom, 8)
+                                .opacity(isChromeHidden ? 0.0 : 1.0)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        } else if !hasSeenDetailCoachMark && !isLandscape {
                             detailCoachMarkBanner
                                 .padding(.bottom, 6)
                                 .opacity(isChromeHidden ? 0.0 : 1.0)
@@ -174,7 +188,26 @@ struct ChekiDetailView: View {
                 Color.clear
                     .frame(width: 0, height: 0)
                     .task(id: activeItem.id) {
+                        let didSyncExternal = await PhotoLibraryManager.shared.syncExternalEditsFromSystemPhotoLibrary(
+                            for: activeItem,
+                            modelContext: modelContext
+                        )
+                        if didSyncExternal {
+                            showToast(L10n.tr("已同步系統相簿最新調色修改", "「写真」アプリの最新の色調整を同期しました"))
+                        }
                         await ensureCoverDateAndFormatNormalized(for: activeItem)
+                    }
+                    .onChange(of: scenePhase) { _, newPhase in
+                        guard newPhase == .active else { return }
+                        Task {
+                            let didSync = await PhotoLibraryManager.shared.syncExternalEditsFromSystemPhotoLibrary(
+                                for: activeItem,
+                                modelContext: modelContext
+                            )
+                            if didSync {
+                                showToast(L10n.tr("已同步系統相簿最新調色修改", "「写真」アプリの最新の色調整を同期しました"))
+                            }
+                        }
                     }
             }
 
@@ -417,6 +450,25 @@ struct ChekiDetailView: View {
                 }
 
                 Button {
+                    toggleWhiteBalancePickerMode()
+                } label: {
+                    Label(
+                        isWhiteBalancePickerActive ? "結束白平衡取樣" : "點選白色部分校正白平衡",
+                        systemImage: "eyedropper.halffull"
+                    )
+                }
+
+                if hasActiveWhiteBalanceBackup(for: currentItem, backside: isShowingBack && currentItem.hasBothSides) {
+                    Button {
+                        Task {
+                            await resetWhiteBalanceForCurrentSide()
+                        }
+                    } label: {
+                        Label("重置白平衡", systemImage: "arrow.counterclockwise")
+                    }
+                }
+
+                Button {
                     if PhotoLibraryManager.isProLifetimeUnlocked {
                         isShowingModeBSecondAnglePicker = true
                     } else {
@@ -642,11 +694,18 @@ struct ChekiDetailView: View {
         .allowsHitTesting(shouldShow)
     }
 
-    /// 卡片本體的單擊（沉浸模式切換）與雙擊（3D 翻轉 / 重置縮放）手勢，綁定在底圖上以避免干擾右上角翻轉按鈕
-    private func applyCardTapGestures<V: View>(to view: V) -> some View {
+    /// 卡片本體的單擊（沉浸模式切換 / 白平衡點選取樣）與雙擊（3D 翻轉 / 重置縮放）手勢，綁定在底圖上以避免干擾右上角翻轉按鈕
+    private func applyCardTapGestures<V: View>(
+        to view: V,
+        cardSize: CGSize? = nil,
+        insetScale: CGFloat = 1.0,
+        isCurrent: Bool = false,
+        isBackside: Bool = false
+    ) -> some View {
         view
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
+                guard !isWhiteBalancePickerActive else { return }
                 if isImageZoomed {
                     withAnimation(pageAndZoomAnimation) {
                         let returnToFullScreen = isZoomedFromFullScreen
@@ -661,11 +720,55 @@ struct ChekiDetailView: View {
                     trigger3DFlip()
                 }
             }
-            .onTapGesture(count: 1) {
-                withAnimation(pageAndZoomAnimation) {
-                    isChromeHidden.toggle()
-                }
+            .simultaneousGesture(
+                SpatialTapGesture(count: 1, coordinateSpace: .local)
+                    .onEnded { value in
+                        if isCurrent, isWhiteBalancePickerActive, let cardSize, cardSize.width > 10, cardSize.height > 10 {
+                            let safeScale = max(0.5, insetScale)
+                            let rawNormX = (value.location.x - cardSize.width * 0.5) / (cardSize.width * safeScale) + 0.5
+                            let rawNormY = (value.location.y - cardSize.height * 0.5) / (cardSize.height * safeScale) + 0.5
+                            let clampedPoint = CGPoint(
+                                x: min(max(rawNormX, 0.0), 1.0),
+                                y: min(max(rawNormY, 0.0), 1.0)
+                            )
+                            handleWhiteBalanceTap(at: clampedPoint, isBackside: isBackside)
+                        } else {
+                            withAnimation(pageAndZoomAnimation) {
+                                isChromeHidden.toggle()
+                            }
+                        }
+                    }
+            )
+    }
+
+    @ViewBuilder
+    private func whiteBalanceTargetMarkerOverlay(
+        cardSize: CGSize,
+        isCurrent: Bool,
+        isBackside: Bool
+    ) -> some View {
+        if isCurrent,
+           isWhiteBalancePickerActive,
+           isShowingBack == isBackside,
+           let tapPt = whiteBalanceTapNormalizedPoint {
+            let markerX = tapPt.x * cardSize.width
+            let markerY = tapPt.y * cardSize.height
+            ZStack {
+                Circle()
+                    .strokeBorder(Color.black.opacity(0.65), lineWidth: 3.0)
+                    .frame(width: 34, height: 34)
+                Circle()
+                    .strokeBorder(Color.white, lineWidth: 2.0)
+                    .frame(width: 32, height: 32)
+                Image(systemName: "eyedropper.halffull")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.75), radius: 2, x: 0, y: 1)
             }
+            .position(x: markerX, y: markerY)
+            .allowsHitTesting(false)
+            .transition(.scale.combined(with: .opacity))
+        }
     }
 
     private func fittedCardSize(for imageSize: CGSize, in availableSize: CGSize) -> CGSize {
@@ -700,7 +803,18 @@ struct ChekiDetailView: View {
                         ChekiWatermarkOverlayView(compact: false)
                             .allowsHitTesting(false)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay {
+                        whiteBalanceTargetMarkerOverlay(
+                            cardSize: cardSize,
+                            isCurrent: isCurrent,
+                            isBackside: false
+                        )
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous)),
+                cardSize: cardSize,
+                insetScale: insetScale,
+                isCurrent: isCurrent,
+                isBackside: false
             )
             .overlay(alignment: .topTrailing) {
                 cardTopRightFlipButton(
@@ -748,7 +862,18 @@ struct ChekiDetailView: View {
                         ChekiWatermarkOverlayView(compact: false)
                             .allowsHitTesting(false)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay {
+                        whiteBalanceTargetMarkerOverlay(
+                            cardSize: cardSize,
+                            isCurrent: isCurrent,
+                            isBackside: true
+                        )
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous)),
+                cardSize: cardSize,
+                insetScale: 1.0,
+                isCurrent: isCurrent,
+                isBackside: true
             )
             .overlay(alignment: .topTrailing) {
                 cardTopRightFlipButton(
@@ -842,7 +967,73 @@ struct ChekiDetailView: View {
         .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    // MARK: - 3. 初次檢視亮點提示 (Spotlight Coach Mark)
+    // MARK: - 3. 初次檢視亮點提示 (Spotlight Coach Mark) & 點選白色部分白平衡導引橫幅
+
+    private var whiteBalanceInstructionBanner: some View {
+        let isBack = isShowingBack && currentItem.hasBothSides
+        let canReset = hasActiveWhiteBalanceBackup(for: currentItem, backside: isBack)
+
+        return HStack(spacing: 10) {
+            Image(systemName: "eyedropper.halffull")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.white)
+
+            VStack(alignment: .leading, spacing: 1.5) {
+                Text("請點選拍立得「白色邊框」自動校正白平衡")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                if let summary = whiteBalanceSummaryText {
+                    Text(summary)
+                        .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.78))
+                } else {
+                    Text("自動計算色溫 (K) 與色調，並同步記錄至系統相簿")
+                        .font(.system(size: 10.5, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+            }
+
+            if canReset {
+                Button {
+                    Task {
+                        await resetWhiteBalanceForCurrentSide()
+                    }
+                } label: {
+                    Text("重置")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4.5)
+                        .background(Color.white.opacity(0.18), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    isWhiteBalancePickerActive = false
+                }
+            } label: {
+                Text("完成")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4.5)
+                    .background(Color.white, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.7)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
+        .padding(.horizontal, 12)
+        .environment(\.colorScheme, .dark)
+    }
 
     private var detailCoachMarkBanner: some View {
         HStack(spacing: 8) {
@@ -878,7 +1069,7 @@ struct ChekiDetailView: View {
             // 底部縮圖膠卷 (Filmstrip Scrubber)
             filmstripScrubberBar(isLandscape: isLandscape, containerWidth: containerWidth)
 
-            // Apple Photos 標準 5 大工具列按鈕（左圓分享、中三合一膠囊、右圓刪除）
+            // Apple Photos 標準 5 大工具列按鈕（左圓分享、中膠囊、右圓刪除）
             standardFiveIconToolbar(isLandscape: isLandscape)
         }
         .padding(.top, isLandscape ? 2 : 8)
@@ -969,7 +1160,7 @@ struct ChekiDetailView: View {
         let iconFontSize: CGFloat = isLandscape ? 14 : 18
         let pillHeight: CGFloat = isLandscape ? 34 : 44
         let centerButtonWidth: CGFloat = isLandscape ? 38 : 44
-        let outerPillSpacing: CGFloat = isLandscape ? 18 : 28
+        let outerPillSpacing: CGFloat = isLandscape ? 18 : 24
 
         return HStack(alignment: .center, spacing: outerPillSpacing) {
             // 左側獨立圓形膠囊：1. 分享 (Share)
@@ -990,7 +1181,7 @@ struct ChekiDetailView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("分享拍立得")
 
-            // 中央三合一膠囊：2. 愛心 (Favorite) + 3. 資訊 (Info) + 4. 調整 (Adjust)
+            // 中央膠囊：2. 愛心 (Favorite) + 3. 資訊 (Info) + 4. 點選白邊白平衡 (Eyedropper WB) + 5. 調整邊界 (Adjust)
             HStack(spacing: isLandscape ? 2 : 2) {
                 // 2. 愛心 / 最愛 (Favorite)
                 Button {
@@ -1029,7 +1220,25 @@ struct ChekiDetailView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("檢視資訊與特典會備忘")
 
-                // 4. 調整 (Adjust Border Inset & Format)
+                // 4. 點選白色部分校正白平衡 (Auto White Balance Eyedropper)
+                Button {
+                    toggleWhiteBalancePickerMode()
+                } label: {
+                    Image(systemName: "eyedropper.halffull")
+                        .font(.system(size: iconFontSize, weight: .medium))
+                        .foregroundStyle(isWhiteBalancePickerActive ? .black : .white)
+                        .frame(width: centerButtonWidth - 4, height: pillHeight - 8)
+                        .background(
+                            isWhiteBalancePickerActive ? Color.white : Color.clear,
+                            in: Capsule()
+                        )
+                        .frame(width: centerButtonWidth, height: pillHeight)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("點選白色部分自動校正白平衡")
+
+                // 5. 調整邊界與比例 (Adjust Border Inset & Format)
                 Button {
                     showingAdjustmentSheet = true
                 } label: {
@@ -1249,7 +1458,163 @@ struct ChekiDetailView: View {
             zoomPanOffset = .zero
             activeZoomPanDelta = .zero
             isZoomedFromFullScreen = false
+            whiteBalanceTapNormalizedPoint = nil
+            whiteBalanceSummaryText = nil
         }
+    }
+
+    // MARK: - Task 6.5.8: 點選白色部分自動白平衡動作 (Tap-on-White Auto White Balance)
+
+    private func toggleWhiteBalancePickerMode() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        hasSeenDetailCoachMark = true
+        withAnimation(.snappy(duration: 0.22)) {
+            isWhiteBalancePickerActive.toggle()
+            if isWhiteBalancePickerActive {
+                isChromeHidden = false
+            } else {
+                whiteBalanceTapNormalizedPoint = nil
+            }
+        }
+    }
+
+    private func hasActiveWhiteBalanceBackup(for item: ChekiItem, backside: Bool) -> Bool {
+        if backside {
+            return preWhiteBalanceBackDataByItemID[item.id] != nil
+        } else {
+            return preWhiteBalanceFrontDataByItemID[item.id] != nil
+        }
+    }
+
+    @MainActor
+    private func handleWhiteBalanceTap(at normalizedPoint: CGPoint, isBackside: Bool) {
+        guard let target = currentItemOpt, !target.isDeleted, target.modelContext != nil else { return }
+        let editingBack = isBackside && target.hasBothSides
+
+        // 1. 取得尚未套用白平衡前的基準卡片影像（確保連續點選白邊不同位置時不會重複疊加色溫偏移）
+        let baseData: Data? = {
+            if editingBack {
+                if let cached = preWhiteBalanceBackDataByItemID[target.id] {
+                    return cached
+                }
+                if let current = target.backImageData {
+                    preWhiteBalanceBackDataByItemID[target.id] = current
+                    return current
+                }
+                return nil
+            } else {
+                if let cached = preWhiteBalanceFrontDataByItemID[target.id] {
+                    return cached
+                }
+                if let current = target.frontImageData {
+                    preWhiteBalanceFrontDataByItemID[target.id] = current
+                    return current
+                }
+                return nil
+            }
+        }()
+
+        guard let sourceData = baseData,
+              let sourceImage = UIImage(data: sourceData) else {
+            showToast(L10n.tr("無法讀取拍立得影像進行白平衡校正", "ホワイトバランス補正用の画像を読み込めませんでした"))
+            return
+        }
+
+        withAnimation(.snappy(duration: 0.18)) {
+            whiteBalanceTapNormalizedPoint = normalizedPoint
+        }
+
+        switch PhotoLibraryManager.applyAutoWhiteBalance(to: sourceImage, normalizedTapPoint: normalizedPoint) {
+        case .failure(let err):
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            showToast(err.localizedDescription)
+
+        case .success(let outcome):
+            if editingBack {
+                target.backImageData = outcome.calibratedJPEGData
+            } else {
+                target.frontImageData = outcome.calibratedJPEGData
+            }
+            try? modelContext.save()
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+            let tempSign = outcome.deltaTemperatureKelvin >= 0 ? "+" : ""
+            let tintSign = outcome.deltaTint >= 0 ? "+" : ""
+            let summary = L10n.tr(
+                "色溫 \(tempSign)\(outcome.deltaTemperatureKelvin)K · 色調 \(tintSign)\(outcome.deltaTint)",
+                "色温度 \(tempSign)\(outcome.deltaTemperatureKelvin)K · 色合い \(tintSign)\(outcome.deltaTint)"
+            )
+            withAnimation(.snappy(duration: 0.2)) {
+                whiteBalanceSummaryText = summary
+            }
+
+            Task { @MainActor in
+                let didSyncSystem = await PhotoLibraryManager.shared.syncWhiteBalanceEditToSystemPhotoLibrary(
+                    for: target,
+                    backside: editingBack,
+                    outcome: outcome,
+                    normalizedTapPoint: normalizedPoint
+                )
+                if didSyncSystem {
+                    showToast(
+                        L10n.tr(
+                            "已校正白平衡（\(summary)）並記錄至系統相簿",
+                            "ホワイトバランスを補正（\(summary)）し「写真」に記録しました"
+                        )
+                    )
+                } else {
+                    showToast(
+                        L10n.tr(
+                            "已校正白平衡（\(summary)）",
+                            "ホワイトバランスを補正しました（\(summary)）"
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func resetWhiteBalanceForCurrentSide() async {
+        guard let target = currentItemOpt, !target.isDeleted, target.modelContext != nil else { return }
+        let editingBack = isShowingBack && target.hasBothSides
+
+        if editingBack {
+            guard let backup = preWhiteBalanceBackDataByItemID[target.id],
+                  let backupUI = UIImage(data: backup) else { return }
+            target.backImageData = backup
+            preWhiteBalanceBackDataByItemID.removeValue(forKey: target.id)
+            try? modelContext.save()
+            if let backID = target.backAssetIdentifier,
+               !backID.isEmpty,
+               let asset = PHAsset.fetchAssets(withLocalIdentifiers: [backID], options: nil).firstObject {
+                try? await PhotoLibraryManager.shared.modifyAssetInPlace(
+                    asset: asset,
+                    croppedImage: backupUI
+                )
+            }
+        } else {
+            guard let backup = preWhiteBalanceFrontDataByItemID[target.id],
+                  let backupUI = UIImage(data: backup) else { return }
+            target.frontImageData = backup
+            preWhiteBalanceFrontDataByItemID.removeValue(forKey: target.id)
+            try? modelContext.save()
+            if let frontID = target.frontAssetIdentifier,
+               !frontID.isEmpty,
+               let asset = PHAsset.fetchAssets(withLocalIdentifiers: [frontID], options: nil).firstObject {
+                try? await PhotoLibraryManager.shared.modifyAssetInPlace(
+                    asset: asset,
+                    croppedImage: backupUI
+                )
+            }
+        }
+
+        withAnimation(.snappy(duration: 0.2)) {
+            whiteBalanceTapNormalizedPoint = nil
+            whiteBalanceSummaryText = nil
+        }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        showToast(L10n.tr("已還原白平衡校正前狀態", "ホワイトバランス補正前の状態に戻しました"))
     }
 
     private func navigateFilmstrip(offset: Int) {
