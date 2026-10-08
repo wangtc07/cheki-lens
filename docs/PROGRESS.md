@@ -8,10 +8,10 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-08
-* **當前所屬階段**：Phase 4 — UI 介面開發 (SwiftUI Views - iOS 18 HIG) 全部完成
-* **當前進行中任務**：已完成 **Task 4.7**「07. 設定與 Pro 買斷 (`SettingsView.swift`)」（Apple 原生系統設定風格 5 大圓角卡片群組、頂部 ChekiLens Pro 終身買斷尊爵橫幅與購買面板、相簿雙向同步與時間軸策略、匯入與 OCR 手寫日期辨識偏好、照片儲存與輸出格式、掃描與影像處理偏好、外觀模式與恢復購買）
-* **最新穩定 Git Commit**：feat(Settings): 完成 Task 4.7 設定與 Pro 買斷介面實作
-* **下一動執行指示**：進入 Phase 5 執行 **Task 5.1** 封裝 `StoreKitManager.swift`（Non-Consumable NT$120 終身買斷商品）
+* **當前所屬階段**：Phase 4 全部完成 & Phase 5 商業化浮水印與相簿同步分級完成
+* **當前進行中任務**：已完成 **Task 4.7** 與 **免費版 / Pro 版原生相簿同步與浮水印機制 (`Task 5.3`)**（免費版：原生相簿不裁切但可同步相簿分類與時間軸、App 內查看裁切後照片顯示浮水印、分享或輸出時亦加上浮水印；Pro 版：原生相簿非破壞性原地裁切、原畫質無損輸出、完全移除浮水印）
+* **最新穩定 Git Commit**：feat(Pro): 實作免費版原生相簿保留原圖同步與 App 內檢視/分享浮水印機制
+* **下一動執行指示**：執行 **Task 5.1** 封裝 `StoreKitManager.swift`（Non-Consumable NT$120 終身買斷商品）
 
 ---
 
@@ -259,7 +259,7 @@
 ### 階段 5：商業化與進階功能 (Phase 5: StoreKit 2 & Polish)
 - [ ] **Task 5.1**: 封裝 `StoreKitManager.swift`（Non-Consumable NT$120 終身買斷商品）
 - [ ] **Task 5.2**: 實作每日 1 張 4K 高畫質免費額度計數器（UserDefaults 儲存）
-- [ ] **Task 5.3**: 實作免費版浮水印疊加與低解析度輸出限制
+- [x] **Task 5.3**: 實作免費版與 Pro 版分級機制（免費版：原生相簿不裁切但可同步相簿分類與時間軸、只能在 App 內加上 `ChekiWatermarkOverlayView` 浮水印查看裁切後照片、分享或輸出時透過 `ChekiWatermarkRenderer` 加上浮水印；Pro 版：原生相簿非破壞性原地裁切、原畫質無損輸出、完全移除浮水印）
 - [ ] **Task 5.4**: 實作 Mode B 雙角度去反光合成管線（Pro 專屬功能）
 
 ---

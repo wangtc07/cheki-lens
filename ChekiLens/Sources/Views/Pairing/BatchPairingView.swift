@@ -1780,6 +1780,9 @@ struct BatchPairingView: View {
                             .resizable()
                             .interpolation(.high)
                             .scaledToFit()
+                            .overlay {
+                                ChekiWatermarkOverlayView(compact: false)
+                            }
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)

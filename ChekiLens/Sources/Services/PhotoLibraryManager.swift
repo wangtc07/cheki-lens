@@ -1,6 +1,7 @@
 import Foundation
 import Photos
 import UIKit
+import SwiftUI
 import OSLog
 
 @Observable
@@ -9,6 +10,11 @@ final class PhotoLibraryManager {
     
     var authorizationStatus: PHAuthorizationStatus = .notDetermined
     private let logger = Logger(subsystem: "com.chekilens.app", category: "PhotoLibrary")
+    
+    /// 是否已解鎖 ChekiLens Pro 終身買斷版
+    static var isProLifetimeUnlocked: Bool {
+        UserDefaults.standard.bool(forKey: "isProLifetimeUnlocked")
+    }
     
     // MARK: - Authorization
     
@@ -118,13 +124,9 @@ final class PhotoLibraryManager {
     
     // MARK: - Save & Non-Destructive In-Place Edit Image
     
-    /// 直接修改現有系統相簿原圖（不新增重複照片，保留原始圖片可復原）；若尚未存在於系統相簿則以原圖建立並套用非破壞性裁切編輯
-    /// - Parameters:
-    ///   - image: 裁切後的拍立得影像
-    ///   - originalImageData: 原始未裁切圖片資料（首次寫入相簿時作為底層原圖保留，供日後復原）
-    ///   - existingAssetIdentifier: 原生相簿既有的 `PHAsset.localIdentifier`（若提供則直接原地修改該張照片，絕不新建照片）
-    ///   - creationDate: 拍攝時間（含手寫日期 OCR 時間軸）
-    ///   - album: 目標相簿（可為 nil）
+    /// 同步照片至 iOS 系統相簿（依免費版 / Pro 版區分裁切寫入行為）：
+    /// - **免費版 (`isProLifetimeUnlocked == false`)**：原生相簿**不裁切**（保留未裁切原圖），但依然可同步歸檔至 `ChekiLens › 團體 › 成員` 相簿階層並寫入 OCR 拍攝時間軸；裁切後的照片僅在 App 內（加上浮水印）查看，分享或輸出時亦加上浮水印。
+    /// - **Pro 終身買斷版 (`isProLifetimeUnlocked == true`)**：直接以 `PHContentEditingOutput` 非破壞性原地修改系統相簿原圖為裁切後拍立得（不新增重複照片，且保留原始底圖供隨時復原）。
     /// - Returns: 該張照片在系統相簿中的 `PHAsset.localIdentifier`
     func updateOrSaveImage(
         _ image: UIImage,
@@ -137,20 +139,35 @@ final class PhotoLibraryManager {
             throw NSError(domain: "PhotoLibraryManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "無相簿權限"])
         }
         
-        // 1. 若已有現存 PHAsset，直接以 PHContentEditingOutput 非破壞性修改原圖（不新增照片，且保留原始底圖可復原）
+        let isPro = Self.isProLifetimeUnlocked
+        
+        // 1. 若已有現存 PHAsset
         if let existingId = existingAssetIdentifier,
            !existingId.isEmpty,
            let existingAsset = PHAsset.fetchAssets(withLocalIdentifiers: [existingId], options: nil).firstObject {
-            try await modifyAssetInPlace(
-                asset: existingAsset,
-                croppedImage: image,
-                creationDate: creationDate,
-                album: album
-            )
+            if isPro {
+                // Pro 版：直接以 PHContentEditingOutput 非破壞性修改原圖為裁切後拍立得（不新增照片，且保留原始底圖可復原）
+                try await modifyAssetInPlace(
+                    asset: existingAsset,
+                    croppedImage: image,
+                    creationDate: creationDate,
+                    album: album
+                )
+            } else {
+                // 免費版：原生相簿不裁切（維持未裁切原圖），但同步寫入拍攝時間軸與相簿分類
+                try await PHPhotoLibrary.shared().performChanges {
+                    let changeRequest = PHAssetChangeRequest(for: existingAsset)
+                    changeRequest.creationDate = creationDate
+                    if let album {
+                        let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
+                        albumChangeRequest?.addAssets([existingAsset] as NSArray)
+                    }
+                }
+            }
             return existingAsset.localIdentifier
         }
         
-        // 2. 若尚未存在於系統相簿：先以「原始未裁切圖片」建立 PHAsset，若 image 為已裁切圖則立即套用非破壞性編輯
+        // 2. 若尚未存在於系統相簿：先以「原始未裁切圖片」建立 PHAsset
         guard let croppedJPEG = image.jpegData(compressionQuality: 0.92) else {
             throw NSError(domain: "PhotoLibraryManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "影像編碼失敗"])
         }
@@ -173,8 +190,9 @@ final class PhotoLibraryManager {
             throw NSError(domain: "PhotoLibraryManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "儲存照片失敗"])
         }
         
-        // 若提供了原始未裁切底圖且與裁切後圖片不同，將裁切結果透過 PHContentEditingOutput 覆蓋於同一張 PHAsset 上（保留原圖可復原）
-        if let origData = originalImageData,
+        // 僅在 Pro 版且提供了原始未裁切底圖時，將裁切結果透過 PHContentEditingOutput 覆蓋於同一張 PHAsset 上（免費版於原生相簿保留未裁切原圖）
+        if isPro,
+           let origData = originalImageData,
            origData != croppedJPEG,
            let createdAsset = PHAsset.fetchAssets(withLocalIdentifiers: [createdId], options: nil).firstObject {
             try? await modifyAssetInPlace(
@@ -436,4 +454,141 @@ final class PhotoLibraryManager {
         }
     }
 }
+
+// MARK: - 免費版浮水印渲染器與視圖疊加元件 (Free Tier Watermark Overlay & Export Renderer)
+
+/// 負責在「免費版 (`isProLifetimeUnlocked == false`)」分享或匯出裁切後拍立得時，動態將 `ChekiLens` 浮水印繪製至輸出圖片上；
+/// 若已解鎖 Pro 終身買斷版，則 100% 原圖無損直出、完全不加任何浮水印。
+enum ChekiWatermarkRenderer {
+    static func applyWatermarkIfNeeded(to image: UIImage) -> UIImage {
+        guard !PhotoLibraryManager.isProLifetimeUnlocked else {
+            return image
+        }
+
+        let size = image.size
+        guard size.width > 10, size.height > 10 else { return image }
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = image.scale
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+
+        return renderer.image { ctx in
+            image.draw(in: CGRect(origin: .zero, size: size))
+            let cg = ctx.cgContext
+            let shortSide = min(size.width, size.height)
+
+            // 1. 中央斜向半透明浮水印 ("ChekiLens")
+            cg.saveGState()
+            cg.translateBy(x: size.width * 0.5, y: size.height * 0.44)
+            cg.rotate(by: -26.0 * .pi / 180.0)
+
+            let centerFontSize = max(18, shortSide * 0.095)
+            let centerShadow = NSShadow()
+            centerShadow.shadowColor = UIColor.black.withAlphaComponent(0.28)
+            centerShadow.shadowBlurRadius = max(2, shortSide * 0.008)
+            centerShadow.shadowOffset = CGSize(width: 0, height: 1)
+
+            let centerAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: centerFontSize, weight: .heavy),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.32),
+                .kern: centerFontSize * 0.08,
+                .shadow: centerShadow
+            ]
+            let centerText = NSAttributedString(string: "ChekiLens", attributes: centerAttrs)
+            let centerSize = centerText.size()
+            centerText.draw(at: CGPoint(x: -centerSize.width / 2, y: -centerSize.height / 2))
+            cg.restoreGState()
+
+            // 2. 右下角拍立得白邊品牌浮水印章 ("ChekiLens")
+            let badgeFontSize = max(12, shortSide * 0.038)
+            let badgeText = "ChekiLens"
+            let badgeAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: badgeFontSize, weight: .bold),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.92),
+                .kern: 0.6
+            ]
+            let attributedBadge = NSAttributedString(string: badgeText, attributes: badgeAttrs)
+            let textSize = attributedBadge.size()
+            let padX = badgeFontSize * 0.65
+            let padY = badgeFontSize * 0.34
+            let margin = max(10, shortSide * 0.036)
+
+            let pillRect = CGRect(
+                x: size.width - textSize.width - padX * 2 - margin,
+                y: size.height - textSize.height - padY * 2 - margin,
+                width: textSize.width + padX * 2,
+                height: textSize.height + padY * 2
+            )
+
+            let pillPath = UIBezierPath(roundedRect: pillRect, cornerRadius: pillRect.height / 2)
+            UIColor.black.withAlphaComponent(0.42).setFill()
+            pillPath.fill()
+
+            UIColor.white.withAlphaComponent(0.28).setStroke()
+            pillPath.lineWidth = max(1.0, shortSide * 0.0025)
+            pillPath.stroke()
+
+            attributedBadge.draw(
+                at: CGPoint(
+                    x: pillRect.minX + padX,
+                    y: pillRect.minY + padY
+                )
+            )
+        }
+    }
+}
+
+/// App 內檢視裁切後拍立得時的非破壞性浮水印疊加層：
+/// - 免費版 (`isProLifetimeUnlocked == false`)：在 App 內查看裁切後的拍立得照片時顯示浮水印。
+/// - Pro 終身買斷版 (`isProLifetimeUnlocked == true`)：自動完全隱藏浮水印。
+struct ChekiWatermarkOverlayView: View {
+    @AppStorage("isProLifetimeUnlocked") private var isProLifetimeUnlocked: Bool = false
+
+    /// 是否為網格縮圖緊湊模式
+    var compact: Bool = false
+
+    var body: some View {
+        let fontSize: CGFloat = compact ? 8.5 : 11.5
+        let hPad: CGFloat = compact ? 5.5 : 8.5
+        let vPad: CGFloat = compact ? 2.0 : 3.5
+        let outerPad: CGFloat = compact ? 5.0 : 10.0
+
+        ZStack {
+            if !isProLifetimeUnlocked {
+                if !compact {
+                    // 中央斜向半透明浮水印
+                    Text("ChekiLens")
+                        .font(.system(size: 24, weight: .heavy, design: .rounded))
+                        .tracking(2.0)
+                        .foregroundStyle(Color.white.opacity(0.28))
+                        .shadow(color: Color.black.opacity(0.25), radius: 2, x: 0, y: 1)
+                        .rotationEffect(.degrees(-25))
+                        .offset(y: -14)
+                }
+
+                // 右下角品牌浮水印標記
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Text("ChekiLens")
+                            .font(.system(size: fontSize, weight: .bold, design: .rounded))
+                            .tracking(0.4)
+                            .foregroundStyle(Color.white.opacity(0.90))
+                            .padding(.horizontal, hPad)
+                            .padding(.vertical, vPad)
+                            .background(Color.black.opacity(0.42), in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Color.white.opacity(0.24), lineWidth: 0.5)
+                            )
+                            .padding(outerPad)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 

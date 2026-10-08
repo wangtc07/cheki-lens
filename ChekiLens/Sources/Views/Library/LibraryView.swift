@@ -630,6 +630,9 @@ private struct AppleLibraryPhotoCell: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFit()
+                    .overlay {
+                        ChekiWatermarkOverlayView(compact: true)
+                    }
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                     .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
             } else {
@@ -1533,6 +1536,9 @@ private struct AlbumSquareThumbnailCell: View {
                         .fill(Color(.systemGray5))
                         .frame(width: size, height: size)
                 }
+
+                ChekiWatermarkOverlayView(compact: true)
+                    .frame(width: size, height: size)
 
                 if item.hasBothSides {
                     Image(systemName: "rectangle.portrait.on.rectangle.portrait.fill")

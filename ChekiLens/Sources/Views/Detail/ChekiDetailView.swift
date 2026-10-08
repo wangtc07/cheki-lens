@@ -508,6 +508,9 @@ struct ChekiDetailView: View {
                 .scaledToFill()
                 .scaleEffect(insetScale)
                 .frame(width: cardSize.width, height: cardSize.height)
+                .overlay {
+                    ChekiWatermarkOverlayView(compact: false)
+                }
                 .clipShape(RoundedRectangle(cornerRadius: isChromeHidden ? 6 : 10, style: .continuous))
         } else {
             placeholderCardFace(
@@ -527,6 +530,9 @@ struct ChekiDetailView: View {
                 .resizable()
                 .scaledToFill()
                 .frame(width: cardSize.width, height: cardSize.height)
+                .overlay {
+                    ChekiWatermarkOverlayView(compact: false)
+                }
                 .clipShape(RoundedRectangle(cornerRadius: isChromeHidden ? 6 : 10, style: .continuous))
         } else {
             // 若此張拍立得尚無背面，提供原生引導卡直接補上背面或產生測試手寫背面
@@ -1087,7 +1093,11 @@ struct ChekiDetailView: View {
             currentItem.isSyncedToPhotoLibrary = true
             currentItem.isDateWrittenToAlbum = (currentItem.ocrDate != nil)
             try? modelContext.save()
-            showToast("已原地更新系統相簿原圖（\(albumName)）")
+            if PhotoLibraryManager.isProLifetimeUnlocked {
+                showToast("已原地更新系統相簿裁切圖（\(albumName)）")
+            } else {
+                showToast("已同步至系統相簿（免費版保留未裁切原圖）")
+            }
         } catch {
             showToast("相簿同步需要開啟照片存取權限")
         }
@@ -1110,11 +1120,11 @@ struct ChekiDetailView: View {
         var shareItems: [Any] = []
         if let frontData = currentItem.frontImageData,
            let frontUI = UIImage(data: frontData) {
-            shareItems.append(frontUI)
+            shareItems.append(ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: frontUI))
         }
         if let backData = currentItem.backImageData,
            let backUI = UIImage(data: backData) {
-            shareItems.append(backUI)
+            shareItems.append(ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: backUI))
         }
         guard !shareItems.isEmpty else { return }
 
@@ -2170,7 +2180,11 @@ private struct ChekiQuadCropEditorView: View {
                 }
 
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
-                onAppliedToast("已原地修改裁切並保留原始圖片")
+                if PhotoLibraryManager.isProLifetimeUnlocked {
+                    onAppliedToast("已原地修改裁切並保留原始圖片")
+                } else {
+                    onAppliedToast("已更新 App 內裁切預覽（免費版原生相簿保留原圖）")
+                }
                 dismiss()
             }
         } else {

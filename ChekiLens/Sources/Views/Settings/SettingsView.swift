@@ -205,7 +205,9 @@ struct SettingsView: View {
                     Toggle(isOn: $autoSyncToPhotos) {
                         SettingsRowLabel(
                             title: "同步至 iOS 系統相簿",
-                            subtitle: "歸檔與裁切時直接於系統相簿原地更新原圖",
+                            subtitle: isProLifetimeUnlocked
+                                ? "Pro：直接於系統相簿非破壞性原地裁切原圖"
+                                : "免費版：同步相簿與時間軸（原生相簿保留未裁切原圖）",
                             systemImage: "photo.on.rectangle.angled",
                             iconColor: .blue
                         )
@@ -254,7 +256,11 @@ struct SettingsView: View {
                 } header: {
                     Text("iOS 相簿雙向同步與時間軸")
                 } footer: {
-                    Text("裁切照片時採用非破壞性原地修改（In-place Edit），不新增重複照片並保留原始未裁切底圖供隨時復原。")
+                    Text(
+                        isProLifetimeUnlocked
+                            ? "Pro 版已啟用：系統相簿採用非破壞性原地修改（In-place Edit），不新增重複照片並保留原始未裁切底圖供隨時復原。"
+                            : "免費版：原生相簿不裁切（保留未裁切原圖），但可同步相簿分類與拍攝時間軸；裁切後照片僅在 App 內（加上浮水印）查看，分享或輸出時亦加上浮水印。"
+                    )
                 }
 
                 // 2. 第 2 組：匯入與 OCR 手寫日期辨識偏好 (Import & Recognition)
@@ -694,9 +700,9 @@ private struct ProLifetimePaywallSheet: View {
     @State private var isPurchasing: Bool = false
 
     private let features: [(icon: String, color: Color, title: String, desc: String)] = [
-        ("4k.tv.fill", .indigo, "原畫質無損輸出", "解除每日免費張數限制，批次匯入與導出拍立得皆以最高原始畫質無損保存"),
+        ("4k.tv.fill", .indigo, "原畫質無損輸出 · 原生相簿原地裁切", "免費版於系統相簿保留未裁切原圖；升級 Pro 可直接在 iOS 原生相簿非破壞性原地裁切（不新增重複照片、保留原圖可復原）並無損輸出"),
         ("sun.max.trianglebadge.exclamationmark.fill", .pink, "雙角度去反光合成", "透過 Mode B 兩張微傾角度自動消除塑膠保護套強光反射"),
-        ("sparkles.rectangle.stack.fill", .orange, "完全移除浮水印 · 終身買斷", "一次付費永久解鎖所有 Pro 權益，絕無月費或年費訂閱")
+        ("sparkles.rectangle.stack.fill", .orange, "完全移除浮水印 · 終身買斷", "移除 App 內裁切檢視與分享輸出時的 ChekiLens 浮水印，一次付費永久解鎖")
     ]
 
     var body: some View {
