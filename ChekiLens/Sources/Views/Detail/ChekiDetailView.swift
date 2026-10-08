@@ -49,9 +49,10 @@ struct ChekiDetailView: View {
     @State private var showingAdjustmentSheet: Bool = false
     @State private var showDeleteConfirm: Bool = false
 
-    /// 補上/替換背面照片的 PhotosPicker
+    /// 補上/替換背面照片的 PhotosPicker 與 App 內選擇器
     @State private var backsidePickerItem: PhotosPickerItem? = nil
     @State private var isShowingBacksidePicker: Bool = false
+    @State private var showingInAppBacksidePicker: Bool = false
 
     /// Task 5.4: Mode B 雙角度去反光合成第二角度照片選擇器 (Pro 專屬)
     @State private var modeBSecondAnglePickerItem: PhotosPickerItem? = nil
@@ -190,6 +191,17 @@ struct ChekiDetailView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showingInAppBacksidePicker) {
+            InAppBacksidePickerSheet(
+                targetItem: currentItem,
+                candidates: allChekiItems.filter { $0.id != currentItem.id },
+                onSelectItem: { selectedSource, mergeAndRemoveSource in
+                    attachBacksideFromInAppItem(selectedSource, mergeAndRemoveSource: mergeAndRemoveSource)
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
         .task(id: currentItem.id) {
             await ensureCoverDateAndFormatNormalized(for: currentItem)
         }
@@ -292,21 +304,26 @@ struct ChekiDetailView: View {
 
                 Menu {
                     Button {
-                        isShowingBacksidePicker = true
+                        showingInAppBacksidePicker = true
                     } label: {
                         Label(
-                            currentItem.hasBothSides ? "替換背面照片" : "從相簿補上背面照片",
-                            systemImage: "photo.badge.plus"
+                            currentItem.hasBothSides ? "從 App 內替換背面照片" : "從 App 內選取背面照片",
+                            systemImage: "square.grid.2x2"
                         )
                     }
 
                     Button {
-                        generateSampleBacksideForCurrentItem()
+                        isShowingBacksidePicker = true
                     } label: {
-                        Label("產生測試手寫簽名背面", systemImage: "scribble.variable")
+                        Label(
+                            currentItem.hasBothSides ? "從系統相簿替換背面照片" : "從系統相簿選取背面照片",
+                            systemImage: "photo.badge.plus"
+                        )
                     }
 
                     if currentItem.hasBothSides {
+                        Divider()
+
                         Button {
                             swapCurrentItemSides()
                         } label: {
@@ -728,56 +745,58 @@ struct ChekiDetailView: View {
                 )
             }
         } else {
-            // 若此張拍立得尚無背面，提供原生引導卡直接補上背面或產生測試手寫背面
-            VStack(spacing: 14) {
-                Image(systemName: "rectangle.portrait.on.rectangle.portrait.angled")
-                    .font(.system(size: 36, weight: .light))
-                    .foregroundStyle(.white.opacity(0.75))
+            // 若此張拍立得尚無背面，提供原生引導卡直接從 App 內選取或從系統相簿補上背面，且支援雙擊卡片翻回正面
+            applyCardTapGestures(
+                to: VStack(spacing: 14) {
+                    Image(systemName: "rectangle.portrait.on.rectangle.portrait.angled")
+                        .font(.system(size: 36, weight: .light))
+                        .foregroundStyle(.white.opacity(0.75))
 
-                VStack(spacing: 5) {
-                    Text("尚未綁定背面手寫照片")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                    VStack(spacing: 5) {
+                        Text("尚未綁定背面照片")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
 
-                    Text("可從系統相簿選取背面照片，或一鍵產生測試手寫簽名背面。")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.68))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
-                }
-
-                VStack(spacing: 8) {
-                    Button {
-                        isShowingBacksidePicker = true
-                    } label: {
-                        Label("從相簿選取背面照片", systemImage: "photo.badge.plus")
-                            .font(.caption.weight(.semibold))
-                            .frame(maxWidth: .infinity)
+                        Text("可從 App 內選取現有拍立得作為背面，或從系統相簿匯入背面照片。\n（雙擊卡片可翻回正面）")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.68))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
 
-                    Button {
-                        generateSampleBacksideForCurrentItem()
-                    } label: {
-                        Label("產生測試手寫簽名背面", systemImage: "scribble.variable")
-                            .font(.caption.weight(.medium))
-                            .frame(maxWidth: .infinity)
+                    VStack(spacing: 8) {
+                        Button {
+                            showingInAppBacksidePicker = true
+                        } label: {
+                            Label("從 App 內選取背面照片", systemImage: "square.grid.2x2")
+                                .font(.caption.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+
+                        Button {
+                            isShowingBacksidePicker = true
+                        } label: {
+                            Label("從系統相簿選取背面照片", systemImage: "photo.badge.plus")
+                                .font(.caption.weight(.medium))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(.white)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(.white)
+                    .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
-            }
-            .frame(
-                width: min(availableSize.width, min(availableSize.height * 0.65, 290)),
-                height: min(availableSize.height, 440)
-            )
-            .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                .frame(
+                    width: min(availableSize.width, min(availableSize.height * 0.65, 290)),
+                    height: min(availableSize.height, 440)
+                )
+                .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                )
             )
             .overlay(alignment: .topTrailing) {
                 cardTopRightFlipButton(
@@ -1396,31 +1415,49 @@ struct ChekiDetailView: View {
         }
     }
 
-    private func generateSampleBacksideForCurrentItem() {
-        let memberName = currentItem.idolMember?.stageName ?? "推しメン"
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy.MM.dd"
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        let dateString = dateFormatter.string(from: currentItem.displayDate)
+    /// 從 App 內現有的拍立得項目 (`sourceItem`) 選取照片綁定為當前項目的背面
+    @MainActor
+    private func attachBacksideFromInAppItem(_ sourceItem: ChekiItem, mergeAndRemoveSource: Bool) {
+        let target = currentItem
+        guard sourceItem.id != target.id,
+              let sourceImageData = sourceItem.frontImageData else { return }
 
-        if let sampleBack = PreviewData.makePolaroidImageData(
-            width: 360,
-            height: 572,
-            topRGB: (99, 102, 241),
-            bottomRGB: (236, 72, 153),
-            isBackside: true,
-            signatureText: "\(memberName) 直筆サイン ♡",
-            dateText: dateString,
-            backMessage: "いつも応援ありがとう！♡\n今日もたくさん話せて嬉しかったよ☆\nまた次のイベントで会おうね！"
-        ) {
-            currentItem.backImageData = sampleBack
-            currentItem.originalBackImageData = sampleBack
-            currentItem.backPerspectivePointsJSON = nil
-            try? modelContext.save()
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            isShowingBack = true
-            withAnimation(flipAnimation) {
-                flipProgress = 1.0
+        target.backImageData = sourceImageData
+        target.originalBackImageData = sourceItem.originalFrontImageData ?? sourceImageData
+        target.backPerspectivePointsJSON = sourceItem.perspectivePointsJSON
+        target.backAssetIdentifier = sourceItem.frontAssetIdentifier
+
+        if mergeAndRemoveSource {
+            if let sourceBackData = sourceItem.backImageData {
+                // 若原項目本身已有背面，將其背面升格為正面保留，不遺失照片
+                sourceItem.frontImageData = sourceBackData
+                sourceItem.originalFrontImageData = sourceItem.originalBackImageData ?? sourceBackData
+                sourceItem.perspectivePointsJSON = sourceItem.backPerspectivePointsJSON
+                sourceItem.frontAssetIdentifier = sourceItem.backAssetIdentifier
+                sourceItem.backImageData = nil
+                sourceItem.originalBackImageData = nil
+                sourceItem.backPerspectivePointsJSON = nil
+                sourceItem.backAssetIdentifier = nil
+            } else {
+                modelContext.delete(sourceItem)
+            }
+        }
+
+        try? modelContext.save()
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        isShowingBack = true
+        withAnimation(flipAnimation) {
+            flipProgress = 1.0
+        }
+        showToast("已從 App 內選取並綁定背面照片")
+
+        if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
+            Task {
+                await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                    [target],
+                    modelContext: modelContext,
+                    onlyAlbumAndDateIfAlreadySynced: false
+                )
             }
         }
     }
@@ -2801,6 +2838,204 @@ private struct Cheki3DFlipContainer<Front: View, Back: View>: View, Animatable {
         .scaleEffect(zLiftScale)
         .offset(y: upwardLiftOffset)
         .shadow(color: .black.opacity(0.76), radius: shadowRadius, x: 0, y: shadowY)
+    }
+}
+
+// MARK: - 從 App 內選取背面照片選擇器 (InAppBacksidePickerSheet)
+
+private struct InAppBacksidePickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let targetItem: ChekiItem
+    let candidates: [ChekiItem]
+    let onSelectItem: (ChekiItem, Bool) -> Void
+
+    enum FilterScope: String, CaseIterable, Identifiable {
+        case all = "全部照片"
+        case sameAlbum = "同相冊"
+        case singleOnly = "僅單面"
+
+        var id: String { rawValue }
+    }
+
+    @State private var filterScope: FilterScope = .all
+    @State private var selectedCandidateID: UUID? = nil
+    @State private var mergeAndRemoveSource: Bool = true
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
+    ]
+
+    private var availableScopes: [FilterScope] {
+        if targetItem.idolMember != nil {
+            return [.all, .sameAlbum, .singleOnly]
+        }
+        return [.all, .singleOnly]
+    }
+
+    private var filteredCandidates: [ChekiItem] {
+        let base = candidates.filter { $0.frontImageData != nil }
+        switch filterScope {
+        case .all:
+            return base
+        case .sameAlbum:
+            guard let targetMemberID = targetItem.idolMember?.id else {
+                return base.filter { $0.idolMember == nil }
+            }
+            return base.filter { $0.idolMember?.id == targetMemberID }
+        case .singleOnly:
+            return base.filter { !$0.hasBothSides }
+        }
+    }
+
+    private var selectedCandidate: ChekiItem? {
+        guard let id = selectedCandidateID else { return nil }
+        return filteredCandidates.first(where: { $0.id == id }) ?? candidates.first(where: { $0.id == id })
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy.MM.dd"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        return fmt
+    }()
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if availableScopes.count > 1 {
+                        Picker("篩選範圍", selection: $filterScope.animation(.snappy(duration: 0.2))) {
+                            ForEach(availableScopes) { scope in
+                                if scope == .sameAlbum, let name = targetItem.idolMember?.stageName {
+                                    Text("同相冊 (\(name))").tag(scope)
+                                } else {
+                                    Text(scope.rawValue).tag(scope)
+                                }
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    Toggle(isOn: $mergeAndRemoveSource) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("合併並移除原獨立項目")
+                                .font(.subheadline.weight(.medium))
+                            Text("設為背面後自動移除原本多出的單張項目，避免相簿重複")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .tint(.blue)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color(.secondarySystemGroupedBackground))
+
+                Divider()
+
+                if filteredCandidates.isEmpty {
+                    ContentUnavailableView {
+                        Label("無可選取的 App 內照片", systemImage: "photo.on.rectangle.angled")
+                    } description: {
+                        Text("目前篩選條件下沒有其他可作為背面的拍立得照片。")
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 10) {
+                            ForEach(filteredCandidates) { candidate in
+                                candidateCell(for: candidate)
+                            }
+                        }
+                        .padding(14)
+                    }
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("從 App 內選取背面")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("設為背面") {
+                        if let chosen = selectedCandidate {
+                            onSelectItem(chosen, mergeAndRemoveSource)
+                            dismiss()
+                        }
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(selectedCandidate == nil)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func candidateCell(for candidate: ChekiItem) -> some View {
+        let isSelected = (selectedCandidateID == candidate.id)
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.snappy(duration: 0.18)) {
+                if selectedCandidateID == candidate.id {
+                    onSelectItem(candidate, mergeAndRemoveSource)
+                    dismiss()
+                } else {
+                    selectedCandidateID = candidate.id
+                }
+            }
+        } label: {
+            VStack(spacing: 4) {
+                ZStack(alignment: .topTrailing) {
+                    if let data = candidate.frontImageData,
+                       let uiImage = UIImage(data: data) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .aspectRatio(0.72, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    } else {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(.tertiarySystemFill))
+                            .aspectRatio(0.72, contentMode: .fit)
+                    }
+
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(
+                            isSelected ? .white : .white.opacity(0.85),
+                            isSelected ? .blue : .black.opacity(0.35)
+                        )
+                        .padding(6)
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(isSelected ? Color.blue : Color.clear, lineWidth: 2.5)
+                )
+
+                HStack(spacing: 4) {
+                    Text(Self.dateFormatter.string(from: candidate.displayDate))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    if let memberName = candidate.idolMember?.stageName {
+                        Text(memberName)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.blue)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 

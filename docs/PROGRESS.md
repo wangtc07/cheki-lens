@@ -22,7 +22,11 @@
      - 修復 `BatchPairingView` 初始化與 `appendPickerItems` / `collectAllPhotosInOrder` 會遺失 `defaultMember`（目前所在相簿）或漏掉工作台二次追加照片的問題，確保在某個成員相冊內追加匯入照片時自動套用該成員相冊。
      - 將 `AlbumHeroDetailView` 改為以 `@Query` 動態計算 `liveItems`，使從相簿追加照片或變更成員後立即更新目前所在的相簿畫面與張數。
      - 新增 `PhotoLibraryManager.syncItemsToSystemPhotoLibrary` 批次同步機制：當使用者先從相簿追加匯入照片、事後再打開「同步至 iOS 系統相簿 (`autoSyncToPhotosLibrary`)」，或於相冊／詳情頁變更所屬成員時，立即更新目前所在的相簿並同步寫入 iOS 原生相簿 (`ChekiLens › 團體 › 成員`)。
-* **最新穩定 Git Commit**：feat(Library): 支援從相簿追加後即時更新目前所在相簿並於開啟相簿同步時自動同步
+  7. **單張檢視背面體驗強化：移除測試手寫背面、空背面支援雙擊翻回正面、新增「從 App 內選取背面照片」(`ChekiDetailView.swift`)**：
+     - 自「尚未綁定背面照片」引導卡與右上角「正反雙面管理」選單移除「產生測試手寫簽名背面」功能。
+     - 為空背面引導卡綁定 `applyCardTapGestures`，使背面沒有照片時雙擊卡片同樣能平滑 3D 翻轉回正面。
+     - 新增 [`InAppBacksidePickerSheet`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Views/Detail/ChekiDetailView.swift#L2846-L3040) 與 [`attachBacksideFromInAppItem`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Views/Detail/ChekiDetailView.swift#L1420-L1462)，支援在空背面卡片與右上選單直接從 App 內現有拍立得項目（可依全部／同相冊／僅單面篩選，並支援自動合併移除原獨立單張項目）選取作為背面。
+* **最新穩定 Git Commit**：feat(Detail): 移除測試手寫背面、支援空背面雙擊翻回正面並新增從 App 內選取背面功能
 * **下一動執行指示**：執行 **Task 6.2**（支援深色/淺色模式與動態字級 Dynamic Type）
 
 ---
