@@ -196,9 +196,6 @@ struct ChekiInfoView: View {
                         }
                     }
                 }
-
-                // 處理狀態
-                LabeledContent("處理狀態", value: item.processingState.displayName)
             }
 
             // MARK: 2. 備忘（預設空白，點擊直接輸入並即時儲存）
