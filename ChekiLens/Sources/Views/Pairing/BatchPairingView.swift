@@ -262,6 +262,7 @@ struct BatchPairingView: View {
     @State private var previewingSide: PreviewPhotoSide = .front
     @State private var previewZoomScale: CGFloat = 1.0
     @State private var previewPinchScale: CGFloat = 1.0
+    @State private var previewDragOffset: CGFloat = 0
 
     /// 在放大預覽中點選「手動調整」開啟四頂點手動邊界裁切編輯器的目標 Photo ID
     @State private var manualCropEditingPhotoID: UUID? = nil
@@ -479,14 +480,6 @@ struct BatchPairingView: View {
             ) {
                 formatAndDateEditorSheetContent
             }
-            .fullScreenCover(
-                isPresented: Binding(
-                    get: { manualCropEditingPhotoID != nil },
-                    set: { if !$0 { manualCropEditingPhotoID = nil } }
-                )
-            ) {
-                manualCropEditorFullScreenContent
-            }
             .onChange(of: idolMembers.count) { oldCount, newCount in
                 // 當使用者透過「新增成員」建立新成員後，自動將最新建立的成員加入上方多選目標中
                 if newCount > oldCount, let newestMember = idolMembers.last {
@@ -546,8 +539,12 @@ struct BatchPairingView: View {
             }
         }
         .overlay {
-            magnifiedPreviewOverlayContent
+            ZStack {
+                magnifiedPreviewOverlayContent
+                manualCropEditorFullScreenContent
+            }
         }
+        .interactiveDismissDisabled()
     }
 
     @ViewBuilder
@@ -599,12 +596,14 @@ struct BatchPairingView: View {
                         rotatedOriginalImage: rotatedOriginalImage
                     )
                 },
-                onRevertToOriginal: {
+                onClose: {
                     withAnimation(.snappy(duration: 0.22)) {
-                        setPhotoRevertedToOriginal(photoID: targetPhotoID, isReverted: true)
+                        manualCropEditingPhotoID = nil
                     }
                 }
             )
+            .transition(.opacity)
+            .zIndex(100)
         }
     }
 
@@ -1612,6 +1611,7 @@ struct BatchPairingView: View {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         previewZoomScale = 1.0
         previewPinchScale = 1.0
+        previewDragOffset = 0
         withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
             previewingSide = side
             previewingSlotID = slotID
@@ -1624,6 +1624,7 @@ struct BatchPairingView: View {
             previewingSlotID = nil
             previewZoomScale = 1.0
             previewPinchScale = 1.0
+            previewDragOffset = 0
         }
     }
 
@@ -1638,12 +1639,13 @@ struct BatchPairingView: View {
                 return slot.frontPhoto
             }()
             let effectiveScale = max(1.0, min(3.8, previewZoomScale * previewPinchScale))
+            let dragProgress = min(1.0, max(0.0, previewDragOffset / 220.0))
 
             ZStack {
-                // 1. 模糊背景遮罩（再點一下背景即取消預覽）
+                // 1. 模糊背景遮罩（再點一下背景或往下拉即取消預覽回到導入頁面）
                 Rectangle()
                     .fill(.ultraThinMaterial)
-                    .overlay(Color.black.opacity(0.38))
+                    .overlay(Color.black.opacity(0.38 * (1.0 - dragProgress * 0.5)))
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -1652,8 +1654,8 @@ struct BatchPairingView: View {
 
                 // 2. 預覽主體內容（頂部資訊列 ＋ 中央放大拍立得 ＋ 底部手動調整按鈕列）
                 VStack(spacing: 14) {
-                    // 頂部：左側序號与正反面切換、右側相紙規格與判斷日期按鈕
-                    HStack(spacing: 10) {
+                    // 頂部：左側序號與正反面切換、右側相紙規格與判斷日期按鈕 ＋ 關閉按鈕
+                    HStack(spacing: 8) {
                         HStack(spacing: 6) {
                             Text("#\(activePhoto.sequenceNumber)")
                                 .font(.subheadline.weight(.bold).monospacedDigit())
@@ -1716,7 +1718,7 @@ struct BatchPairingView: View {
 
                         Spacer()
 
-                        // 右上角：點選可直接修改相紙規格與拍攝日期
+                        // 點選可直接修改相紙規格與拍攝日期
                         Button {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             editingSlotForFormatAndDateID = slot.id
@@ -1749,114 +1751,135 @@ struct BatchPairingView: View {
                             .background(Color.black.opacity(0.50), in: Capsule())
                         }
                         .buttonStyle(.plain)
+
+                        // 右上角關閉預覽按鈕（回到導入頁面）
+                        Button {
+                            dismissMagnifiedPreview()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(Color.black.opacity(0.50), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("關閉預覽回到導入頁面")
                     }
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 16)
                     .padding(.top, 12)
 
-                    Spacer(minLength: 0)
+                    // 中央：放大拍立得本體（再點一下拍立得或背景、或往下拉即可回到導入頁面）
+                    ZStack {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                dismissMagnifiedPreview()
+                            }
 
-                    // 中央：放大拍立得本體（確認邊界與手寫日期，再點一下拍立得本體即取消預覽，支援雙指縮放）
-                    Image(uiImage: activePhoto.displayUIImage)
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.45), lineWidth: 1.0)
-                        )
-                        .shadow(color: .black.opacity(0.45), radius: 22, x: 0, y: 10)
-                        .padding(.horizontal, 24)
-                        .scaleEffect(effectiveScale)
-                        .gesture(
-                            MagnifyGesture()
-                                .onChanged { value in
-                                    previewPinchScale = value.magnification
-                                }
-                                .onEnded { value in
-                                    let nextScale = max(1.0, min(3.8, previewZoomScale * value.magnification))
-                                    previewPinchScale = 1.0
-                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
-                                        previewZoomScale = nextScale <= 1.05 ? 1.0 : nextScale
+                        Image(uiImage: activePhoto.displayUIImage)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.45), lineWidth: 1.0)
+                            )
+                            .shadow(color: .black.opacity(0.45), radius: 22, x: 0, y: 10)
+                            .padding(.horizontal, 24)
+                            .scaleEffect(effectiveScale * (1.0 - dragProgress * 0.12))
+                            .offset(y: previewDragOffset)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                dismissMagnifiedPreview()
+                            }
+                            .simultaneousGesture(
+                                MagnifyGesture()
+                                    .onChanged { value in
+                                        previewPinchScale = value.magnification
                                     }
-                                }
-                        )
+                                    .onEnded { value in
+                                        let nextScale = max(1.0, min(3.8, previewZoomScale * value.magnification))
+                                        previewPinchScale = 1.0
+                                        withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                            previewZoomScale = nextScale <= 1.05 ? 1.0 : nextScale
+                                        }
+                                    }
+                            )
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    // 提示文字：再點一下或往下拉即可取消預覽回到導入頁面
+                    Text("再點一下畫面或往下拉即可回到導入頁面 · 雙指可縮放檢視")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
                         .onTapGesture {
                             dismissMagnifiedPreview()
                         }
 
-                    Spacer(minLength: 0)
-
-                    // 提示文字：再點一下畫面取消預覽
-                    Text("再點一下拍立得或背景即可關閉預覽 · 雙指可縮放檢視")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.75))
-
-                    // 底部操作列：追加「手動調整」按鈕 ＋「規格與日期」按鈕 ＋「復原原圖」切換
-                    HStack(spacing: 10) {
-                        // 1. 手動調整邊界按鈕（主要操作）
+                    // 底部操作列：手動調整邊界（僅留 Icon）＋「規格與日期」按鈕
+                    HStack(spacing: 12) {
+                        // 1. 手動調整邊界按鈕（只留 Icon）
                         Button {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            manualCropEditingPhotoID = activePhoto.id
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "crop")
-                                    .font(.system(size: 14, weight: .bold))
-                                Text("手動調整邊界")
-                                    .font(.subheadline.weight(.bold))
+                            withAnimation(.snappy(duration: 0.22)) {
+                                manualCropEditingPhotoID = activePhoto.id
                             }
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 11)
-                            .background(Color.yellow, in: Capsule())
-                            .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
+                        } label: {
+                            Image(systemName: "crop")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(.black)
+                                .frame(width: 44, height: 44)
+                                .background(Color.yellow, in: Circle())
+                                .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("手動調整邊界")
 
                         // 2. 修改規格與日期按鈕
                         Button {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             editingSlotForFormatAndDateID = slot.id
                         } label: {
-                            HStack(spacing: 5) {
+                            HStack(spacing: 6) {
                                 Image(systemName: "calendar")
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .font(.system(size: 14, weight: .semibold))
                                 Text("規格與日期")
                                     .font(.subheadline.weight(.semibold))
                             }
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 15)
+                            .padding(.horizontal, 18)
                             .padding(.vertical, 11)
                             .background(Color.white.opacity(0.18), in: Capsule())
                         }
                         .buttonStyle(.plain)
-
-                        // 3. 若已有預裁切結果，可快速切換原圖／裁切圖比對邊界
-                        if activePhoto.croppedImageData != nil {
-                            Button {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                withAnimation(.snappy(duration: 0.2)) {
-                                    togglePhotoRevertToOriginal(photoID: activePhoto.id)
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: activePhoto.isRevertedToOriginal ? "crop" : "arrow.uturn.backward")
-                                        .font(.system(size: 12, weight: .bold))
-                                    Text(activePhoto.isRevertedToOriginal ? "套用裁切" : "看原圖")
-                                        .font(.caption.weight(.semibold))
-                                }
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 11)
-                                .background(Color.white.opacity(0.14), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 18)
                 }
             }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 14)
+                    .onChanged { value in
+                        guard effectiveScale <= 1.05 else { return }
+                        if value.translation.height > 0 && abs(value.translation.height) > abs(value.translation.width) {
+                            previewDragOffset = value.translation.height
+                        }
+                    }
+                    .onEnded { value in
+                        guard effectiveScale <= 1.05 else {
+                            previewDragOffset = 0
+                            return
+                        }
+                        if value.translation.height > 55 || value.predictedEndTranslation.height > 120 {
+                            dismissMagnifiedPreview()
+                        } else {
+                            withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+                                previewDragOffset = 0
+                            }
+                        }
+                    }
+            )
             .transition(.opacity.combined(with: .scale(scale: 0.96)))
             .zIndex(50)
         }
@@ -3607,9 +3630,8 @@ private struct SlotFormatAndDateEditorSheet: View {
 private struct StagingPhotoQuadCropEditorView: View {
     let photo: StagingChekiPhoto
     let onApplyManualCrop: (Data, UIImage, String, Date?, FilmFormat, UIImage?) -> Void
-    let onRevertToOriginal: () -> Void
+    let onClose: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @AppStorage("defaultBorderInsetPercentage") private var defaultBorderInsetPercentage: Double = 0.0
 
     @State private var sourceUIImage: UIImage
@@ -3633,28 +3655,17 @@ private struct StagingPhotoQuadCropEditorView: View {
     init(
         photo: StagingChekiPhoto,
         onApplyManualCrop: @escaping (Data, UIImage, String, Date?, FilmFormat, UIImage?) -> Void,
-        onRevertToOriginal: @escaping () -> Void
+        onClose: @escaping () -> Void
     ) {
         self.photo = photo
         self.onApplyManualCrop = onApplyManualCrop
-        self.onRevertToOriginal = onRevertToOriginal
+        self.onClose = onClose
         _sourceUIImage = State(initialValue: photo.uiImage)
         _selectedFormat = State(initialValue: photo.resolvedFilmFormat.concreteFormat)
     }
 
     private var effectiveZoom: CGFloat {
         max(1.0, min(4.5, zoomScale * activePinchScale))
-    }
-
-    private var hasUnsavedChanges: Bool {
-        guard initialCornersSnapshot.count == 4, normalizedCorners.count == 4 else { return true }
-        for i in 0..<4 {
-            if hypot(normalizedCorners[i].x - initialCornersSnapshot[i].x,
-                     normalizedCorners[i].y - initialCornersSnapshot[i].y) > 0.002 {
-                return true
-            }
-        }
-        return didRotateSourceImage || selectedFormat != photo.resolvedFilmFormat.concreteFormat
     }
 
     var body: some View {
@@ -3703,7 +3714,7 @@ private struct StagingPhotoQuadCropEditorView: View {
     private var topNavigationToolbar: some View {
         HStack(spacing: 10) {
             Button {
-                dismiss()
+                onClose()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .semibold))
@@ -3712,49 +3723,6 @@ private struct StagingPhotoQuadCropEditorView: View {
                     .background(Color.white.opacity(0.14), in: Circle())
             }
             .accessibilityLabel("取消裁切")
-
-            Button {
-                withAnimation(.snappy(duration: 0.24)) {
-                    if initialCornersSnapshot.count == 4 {
-                        normalizedCorners = initialCornersSnapshot
-                    }
-                    resetZoomAndPan()
-                }
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            } label: {
-                Text("還原")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(hasUnsavedChanges || effectiveZoom > 1.01 ? Color.yellow : Color.white.opacity(0.38))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.10), in: Capsule())
-            }
-            .disabled(!hasUnsavedChanges && effectiveZoom <= 1.01)
-
-            if photo.croppedImageData != nil {
-                Button {
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    onRevertToOriginal()
-                    dismiss()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("復原原圖")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.16), in: Capsule())
-                }
-            }
-
-            Spacer()
-
-            Text("#\(photo.sequenceNumber) 手動邊界調整")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.9))
 
             Spacer()
 
@@ -4318,7 +4286,7 @@ private struct StagingPhotoQuadCropEditorView: View {
     @MainActor
     private func applyManualQuadCrop() async {
         guard let cgImage = sourceUIImage.cgImage else {
-            dismiss()
+            onClose()
             return
         }
 
@@ -4376,7 +4344,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                     resolvedFormat,
                     didRotateSourceImage ? sourceUIImage : nil
                 )
-                dismiss()
+                onClose()
             }
         } else {
             showBanner("裁切範圍無效，請確認四個頂點未交錯")

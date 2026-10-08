@@ -1342,7 +1342,7 @@ private struct ChekiQuadCropEditorView: View {
         }
     }
 
-    // MARK: - 1. 頂部工具列 (Apple Photos 裁切頂部列：取消 / 還原 / 正反切換 / 完成)
+    // MARK: - 1. 頂部工具列 (取消 / 正反切換 / 完成)
 
     private var topNavigationToolbar: some View {
         HStack(spacing: 12) {
@@ -1358,46 +1358,9 @@ private struct ChekiQuadCropEditorView: View {
             }
             .accessibilityLabel("取消裁切")
 
-            // 還原按鈕
-            Button {
-                withAnimation(.snappy(duration: 0.24)) {
-                    resetCornersToInitial()
-                    resetZoomAndPan()
-                }
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            } label: {
-                Text("還原")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(hasUnsavedChanges || effectiveZoom > 1.01 ? Color.yellow : Color.white.opacity(0.38))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.10), in: Capsule())
-            }
-            .disabled(!hasUnsavedChanges && effectiveZoom <= 1.01)
-
-            // 復原原始未裁切圖片按鈕
-            if item.canRevertToOriginal(backside: editingBackside) {
-                Button {
-                    Task {
-                        await revertToOriginalAndDismiss()
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("復原原圖")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.16), in: Capsule())
-                }
-            }
-
             Spacer()
 
-            // 中央：正反面切換或標題膠囊
+            // 中央：若有正反雙面可切換
             if item.hasBothSides {
                 HStack(spacing: 2) {
                     Button {
@@ -1423,13 +1386,9 @@ private struct ChekiQuadCropEditorView: View {
                 }
                 .padding(3)
                 .background(Color.white.opacity(0.14), in: Capsule())
-            } else {
-                Text("手動四頂點裁切")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-            }
 
-            Spacer()
+                Spacer()
+            }
 
             // 縮放倍率重置標籤（當雙指放大時顯示）
             if effectiveZoom > 1.02 {
