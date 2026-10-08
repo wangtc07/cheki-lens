@@ -1975,9 +1975,9 @@ struct QuickCreateIdolSheet: View {
         NavigationStack {
             Form {
                 Section("推角成員資訊") {
-                    TextField("成員姓名 / 藝名（如：河田陽菜）", text: $stageName)
-                    TextField("所屬團體（如：日向坂46，可留空）", text: $groupName)
-                    TextField("標籤（以空白分隔，如：主推 二期生）", text: $tagsText)
+                    TextField("姓名", text: $stageName)
+                    TextField("團體", text: $groupName)
+                    TextField("標籤", text: $tagsText)
                 }
 
                 if !groups.isEmpty {
