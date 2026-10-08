@@ -102,6 +102,7 @@ final class CameraSessionController: NSObject, ObservableObject {
     }
 
     func stop() {
+        setTorch(enabled: false)
         guard isSessionRunning else { return }
         let captureSession = session
         DispatchQueue.global(qos: .userInitiated).async {
@@ -110,6 +111,21 @@ final class CameraSessionController: NSObject, ObservableObject {
             }
         }
         isSessionRunning = false
+    }
+
+    /// Google フォトスキャン 模式：自動開啟或關閉 iPhone 背面常亮補光燈 (LED Torch) 與閃光燈
+    func setTorch(enabled: Bool) {
+        flashSetting = enabled ? .on : .off
+        guard let device = videoDevice, device.hasTorch else { return }
+        do {
+            try device.lockForConfiguration()
+            if enabled && device.isTorchModeSupported(.on) {
+                try device.setTorchModeOn(level: 0.85)
+            } else if device.isTorchModeSupported(.off) {
+                device.torchMode = .off
+            }
+            device.unlockForConfiguration()
+        } catch {}
     }
 
     private func configureSessionIfNeeded() {
@@ -216,7 +232,12 @@ final class CameraSessionController: NSObject, ObservableObject {
         return await withCheckedContinuation { continuation in
             self.photoContinuation = continuation
             let settings = AVCapturePhotoSettings()
-            if photoOutput.supportedFlashModes.contains(flashSetting.avFlashMode) {
+            // 若常亮 Torch 已開啟則無需再重複觸發瞬間閃燈，否則依 flashSetting 觸發
+            if let device = videoDevice, device.hasTorch, device.torchMode == .on {
+                if photoOutput.supportedFlashModes.contains(.off) {
+                    settings.flashMode = .off
+                }
+            } else if photoOutput.supportedFlashModes.contains(flashSetting.avFlashMode) {
                 settings.flashMode = flashSetting.avFlashMode
             }
             photoOutput.capturePhoto(with: settings, delegate: self)
@@ -257,15 +278,19 @@ final class CameraSessionController: NSObject, ObservableObject {
                 )
             }
 
-            // 模擬器下若處於 Mode B 雙角度防反光拍攝（Angle 1 vs Angle 2），在不同位置繪製模擬塑膠套強光白斑，
-            // 驗證 Mode B 雙角度合成後能將兩個角度各自的白斑 100% 互補消除。
-            if !isBackside && (glareAngleStep == 1 || glareAngleStep == 2) {
-                let glareCenter = glareAngleStep == 1
-                    ? CGPoint(x: 345, y: 195) // 角度 1：右上強光白斑
-                    : CGPoint(x: 185, y: 455) // 角度 2：左下強光白斑
+            // 模擬器下若處於 Google フォトスキャン 四邊閃光拍攝（Step 1~4），在四個不同角落繪製模擬閃光燈強光白斑，
+            // 驗證多視角合成後能將四個角落各自的白斑 100% 互補消除。
+            if !isBackside && glareAngleStep >= 1 {
+                let glareCenter: CGPoint
+                switch (glareAngleStep - 1) % 4 {
+                case 0: glareCenter = CGPoint(x: 175, y: 185) // 左上強光白斑
+                case 1: glareCenter = CGPoint(x: 365, y: 185) // 右上強光白斑
+                case 2: glareCenter = CGPoint(x: 365, y: 475) // 右下強光白斑
+                default: glareCenter = CGPoint(x: 175, y: 475) // 左下強光白斑
+                }
                 let glareColors = [
-                    UIColor(white: 1.0, alpha: 0.94).cgColor,
-                    UIColor(white: 1.0, alpha: 0.45).cgColor,
+                    UIColor(white: 1.0, alpha: 0.96).cgColor,
+                    UIColor(white: 1.0, alpha: 0.48).cgColor,
                     UIColor(white: 1.0, alpha: 0.0).cgColor
                 ] as CFArray
                 if let radial = CGGradient(
@@ -312,19 +337,19 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        // 當正在處理快門影像合成時暫停即時追蹤，避免與 Mode B / Vision 搶佔 Neural Engine
+        // 當正在處理快門影像合成時暫停即時追蹤，避免與 Vision 搶佔 Neural Engine
         guard !isPausedForProcessing else { return }
         sampleFrameCounter &+= 1
-        guard sampleFrameCounter % 6 == 0 else { return }
+        guard sampleFrameCounter % 3 == 0 else { return }
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         let request = VNDetectRectanglesRequest()
         request.minimumAspectRatio = 0.45
         request.maximumAspectRatio = 0.95
-        request.minimumSize = 0.20
+        request.minimumSize = 0.18
         request.maximumObservations = 1
-        request.minimumConfidence = 0.65
+        request.minimumConfidence = 0.60
 
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .right, options: [:])
         try? handler.perform([request])
@@ -339,13 +364,13 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
                 CGPoint(x: rect.bottomLeft.x, y: 1.0 - rect.bottomLeft.y)
             ]
             Task { @MainActor in
-                withAnimation(.interpolatingSpring(stiffness: 180, damping: 22)) {
+                withAnimation(.interpolatingSpring(stiffness: 200, damping: 24)) {
                     self.trackedQuadPoints = points
                 }
             }
         } else {
             missedQuadFrameCount &+= 1
-            if missedQuadFrameCount >= 4 {
+            if missedQuadFrameCount >= 8 {
                 Task { @MainActor in
                     withAnimation(.easeOut(duration: 0.2)) {
                         self.trackedQuadPoints = nil
@@ -412,17 +437,28 @@ struct CameraScannerView: View {
     @State private var pendingFrontOCRDate: Date? = nil
     @State private var pendingFrontFormat: FilmFormat = .mini
 
-    // Task 5.4 & 6.1: Mode B 雙角度去反光連續拍攝狀態（拍下角度 1 後立即於背景預處理四角偵測與正位）
-    @State private var pendingModeBFirstImage: UIImage? = nil
+    // Task 5.4 & 6.1: Google フォトスキャン (PhotoScan) 四邊閃光對準去反光連續拍攝狀態
+    @State private var isPhotoScanSessionActive: Bool = false
+    @State private var photoScanCapturedImages: [UIImage] = []
+    @State private var photoScanCapturedQuads: [[CGPoint]?] = []
+    @State private var photoScanCornerCompleted: [Bool] = [false, false, false, false]
+    @State private var photoScanDwellCornerIndex: Int? = nil
+    @State private var photoScanDwellProgress: CGFloat = 0.0
     @State private var pendingModeBFirstRawJPEG: Data? = nil
     @State private var pendingModeBPreparedTask: Task<VisionManager.ModeBPreparedFirstAngle?, Never>? = nil
     @State private var statusBannerMessage: String? = nil
+
+    private let photoScanDwellTimer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
 
     // 點擊對焦黃框狀態
     @State private var focusIndicatorPoint: CGPoint? = nil
     @State private var showingLatestDetail: Bool = false
 
     private let zoomPresets: [CGFloat] = [0.5, 1.0, 2.0]
+
+    private var completedCornerCount: Int {
+        photoScanCornerCompleted.filter { $0 }.count
+    }
 
     var body: some View {
         ZStack {
@@ -453,9 +489,15 @@ struct CameraScannerView: View {
         .statusBarHidden(true)
         .task {
             await camera.start()
+            if captureMode == .dualGlare {
+                camera.setTorch(enabled: true)
+            }
         }
         .onDisappear {
             camera.stop()
+        }
+        .onReceive(photoScanDwellTimer) { _ in
+            handlePhotoScanAlignmentTick()
         }
         .sheet(isPresented: $showingLatestDetail) {
             if let latest = chekiItems.first {
@@ -477,10 +519,16 @@ struct CameraScannerView: View {
 
     private var topCameraControlBar: some View {
         HStack(spacing: 18) {
-            // 左側：閃光燈切換
+            // 左側：閃光燈 / 常亮補光燈切換
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                camera.flashSetting = camera.flashSetting.next()
+                let nextFlash = camera.flashSetting.next()
+                camera.flashSetting = nextFlash
+                if captureMode == .dualGlare {
+                    camera.setTorch(enabled: nextFlash != .off)
+                } else if nextFlash == .off {
+                    camera.setTorch(enabled: false)
+                }
             } label: {
                 Image(systemName: camera.flashSetting.symbolName)
                     .font(.system(size: 17, weight: .semibold))
@@ -542,6 +590,7 @@ struct CameraScannerView: View {
 
             // 右側：關閉相機返回
             Button {
+                camera.setTorch(enabled: false)
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
@@ -590,7 +639,7 @@ struct CameraScannerView: View {
         .background(Color.white.opacity(0.08))
     }
 
-    // MARK: - 2. Center 4:3 Viewfinder (3×3 九宮格 + 拍立得追蹤框 + 點擊對焦框 + 倍率切換圈)
+    // MARK: - 2. Center 4:3 Viewfinder (3×3 九宮格 + 拍立得追蹤框 + Google フォトスキャン 四角圓點導引 + 倍率切換圈)
 
     private var viewfinderContainer: some View {
         GeometryReader { geo in
@@ -615,6 +664,20 @@ struct CameraScannerView: View {
                     ChekiQuadTrackingOverlay(normalizedPoints: quad)
                 }
 
+                // Google フォトスキャン (PhotoScan) 風格：四邊角點圓圈對準與中央進度環導引
+                if captureMode == .dualGlare && isPhotoScanSessionActive {
+                    PhotoScanFourCornerOverlay(
+                        quadPoints: camera.trackedQuadPoints ?? Self.defaultPreviewQuad,
+                        cornerCompleted: photoScanCornerCompleted,
+                        activeTargetIndex: nextUncapturedCornerIndex,
+                        dwellCornerIndex: photoScanDwellCornerIndex,
+                        dwellProgress: photoScanDwellProgress,
+                        onTapCorner: { cornerIdx in
+                            Task { await capturePhotoScanCorner(index: cornerIdx) }
+                        }
+                    )
+                }
+
                 // 點擊對焦黃色方框 + 太陽圖示（Apple 原生相機對焦指示）
                 if let focusPoint = focusIndicatorPoint {
                     AppleFocusBoxIndicator()
@@ -622,12 +685,32 @@ struct CameraScannerView: View {
                         .transition(.scale(scale: 1.25).combined(with: .opacity))
                 }
 
-                // 頂部拍攝狀態提示膠囊（例如正反雙面模式下提示「步驟 1/2：請拍攝正面」）
+                // 頂部拍攝狀態提示膠囊 & 底部提前合成按鈕 / 倍率切換圈
                 VStack {
                     statusPillBanner
                         .padding(.top, 14)
 
                     Spacer()
+
+                    if captureMode == .dualGlare && isPhotoScanSessionActive && completedCornerCount >= 1 {
+                        Button {
+                            Task { await completePhotoScanMultiFrameCapture() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "sparkles")
+                                Text("立即合成無反光照片 (\(completedCornerCount)/4 角點)")
+                            }
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Color.cyan, in: Capsule())
+                            .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 3)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isProcessingCapture)
+                        .padding(.bottom, 8)
+                    }
 
                     // 取景窗底部：Apple 原生相機倍率切換圓鈕 (`0.5` / `1×` / `2`)
                     zoomDialBar
@@ -657,6 +740,17 @@ struct CameraScannerView: View {
             )
         }
         .aspectRatio(3.0 / 4.0, contentMode: .fit)
+    }
+
+    private static let defaultPreviewQuad: [CGPoint] = [
+        CGPoint(x: 0.23, y: 0.14),
+        CGPoint(x: 0.77, y: 0.14),
+        CGPoint(x: 0.79, y: 0.86),
+        CGPoint(x: 0.21, y: 0.86)
+    ]
+
+    private var nextUncapturedCornerIndex: Int? {
+        photoScanCornerCompleted.firstIndex(of: false)
     }
 
     private func simulatedViewfinderBackground(size: CGSize) -> some View {
@@ -715,7 +809,7 @@ struct CameraScannerView: View {
                 .foregroundStyle(.black)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(Color.yellow, in: Capsule())
+                .background((captureMode == .dualGlare ? Color.cyan : Color.yellow), in: Capsule())
                 .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
         } else if captureMode == .frontAndBack {
             Text(pendingFrontImageData == nil ? "正反雙面 (1/2)：請對準拍立得【正面】" : "正反雙面 (2/2)：請翻面拍攝【背面手寫】")
@@ -725,26 +819,17 @@ struct CameraScannerView: View {
                 .padding(.vertical, 6)
                 .background(Color.yellow, in: Capsule())
         } else if captureMode == .dualGlare {
-            if isProLifetimeUnlocked {
-                Text(
-                    pendingModeBFirstImage == nil
-                        ? "Mode B 防反光 (1/2)：請以微傾角度拍攝第 1 張"
-                        : "Mode B 防反光 (2/2)：請換角度避開原白斑拍第 2 張"
-                )
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.black)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(Color.cyan, in: Capsule())
-                .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
-            } else {
-                Text("防反光 Mode A：單張高光抑制（Pro 解鎖雙角度合成）")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(.black.opacity(0.65), in: Capsule())
-            }
+            Text(
+                isPhotoScanSessionActive
+                    ? "⚡️ 請移動手機將中央圓環對準四邊白點 (\(completedCornerCount)/4) 或按快門"
+                    : "⚡️ フォトスキャン防反光：閃光燈已開啟，請按快門開始四邊對準"
+            )
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.black)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(Color.cyan, in: Capsule())
+            .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
         } else {
             Text("已鎖定 86×54mm 拍立得邊框")
                 .font(.caption2.weight(.semibold))
@@ -785,7 +870,7 @@ struct CameraScannerView: View {
     // MARK: - 3. Bottom Camera Deck (Apple 原生相機模式轉盤 + 快門 + 縮圖預覽)
 
     private var bottomCameraDeck: some View {
-        let isWaitingSecondStep = (pendingFrontImageData != nil || pendingModeBFirstImage != nil)
+        let isWaitingSecondStep = (pendingFrontImageData != nil || isPhotoScanSessionActive)
 
         return VStack(spacing: 18) {
             // 橫向黃字模式選擇列（仿照 Apple 原生相機：防反光 / 拍照 / 正反雙面）
@@ -794,15 +879,14 @@ struct CameraScannerView: View {
                     let isSelected = (captureMode == mode)
                     Button {
                         UISelectionFeedbackGenerator().selectionChanged()
-                        pendingModeBPreparedTask?.cancel()
-                        pendingModeBPreparedTask = nil
-                        pendingModeBFirstRawJPEG = nil
+                        resetPhotoScanState()
                         withAnimation(.snappy(duration: 0.22)) {
                             captureMode = mode
                             pendingFrontImageData = nil
-                            pendingModeBFirstImage = nil
                             statusBannerMessage = nil
                         }
+                        // 切換至「防反光」時比照 Google フォトスキャン 自動開啟常亮補光燈與閃燈；離開時關閉
+                        camera.setTorch(enabled: mode == .dualGlare)
                     } label: {
                         Text(mode.rawValue)
                             .font(.system(size: 13, weight: isSelected ? .bold : .medium))
@@ -862,7 +946,7 @@ struct CameraScannerView: View {
 
                         Circle()
                             .fill(
-                                pendingModeBFirstImage != nil
+                                isPhotoScanSessionActive
                                     ? Color.cyan
                                     : (pendingFrontImageData != nil ? Color.yellow : Color.white)
                             )
@@ -872,10 +956,14 @@ struct CameraScannerView: View {
                                 if isProcessingCapture {
                                     ProgressView()
                                         .tint(.black)
-                                } else if pendingModeBFirstImage != nil {
-                                    Image(systemName: "sparkles.rectangle.stack.fill")
-                                        .font(.title3.weight(.bold))
-                                        .foregroundStyle(.black)
+                                } else if isPhotoScanSessionActive {
+                                    VStack(spacing: 1) {
+                                        Image(systemName: "viewfinder.circle.fill")
+                                            .font(.system(size: 18, weight: .bold))
+                                        Text("\(completedCornerCount)/4")
+                                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                    }
+                                    .foregroundStyle(.black)
                                 } else if pendingFrontImageData != nil {
                                     Image(systemName: "rectangle.portrait.rotate")
                                         .font(.title3.weight(.bold))
@@ -890,16 +978,13 @@ struct CameraScannerView: View {
 
                 Spacer()
 
-                // 右下：模式切換 / 重設雙面或雙角度狀態圓鈕
+                // 右下：模式切換 / 重設雙面或四邊掃描狀態圓鈕
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    if pendingModeBFirstImage != nil {
-                        pendingModeBPreparedTask?.cancel()
-                        pendingModeBPreparedTask = nil
-                        pendingModeBFirstRawJPEG = nil
+                    if isPhotoScanSessionActive {
+                        resetPhotoScanState()
                         withAnimation {
-                            pendingModeBFirstImage = nil
-                            statusBannerMessage = "已重設 Mode B 第 1 張角度，請重新拍攝"
+                            statusBannerMessage = "已重設四邊防反光掃描，請重新按快門開始"
                         }
                     } else if pendingFrontImageData != nil {
                         withAnimation {
@@ -907,9 +992,11 @@ struct CameraScannerView: View {
                             statusBannerMessage = "已取消背面拍攝，重新拍攝正面"
                         }
                     } else {
+                        let nextMode: ChekiCaptureMode = (captureMode == .single) ? .frontAndBack : .single
                         withAnimation(.snappy(duration: 0.22)) {
-                            captureMode = (captureMode == .single) ? .frontAndBack : .single
+                            captureMode = nextMode
                         }
+                        camera.setTorch(enabled: nextMode == .dualGlare)
                     }
                 } label: {
                     Image(systemName: isWaitingSecondStep ? "arrow.counterclockwise" : "rectangle.portrait.rotate")
@@ -919,10 +1006,96 @@ struct CameraScannerView: View {
                         .background(.white.opacity(0.15), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("切換正反雙面拍攝模式")
+                .accessibilityLabel("切換正反雙面拍攝模式或重設")
             }
             .padding(.horizontal, 32)
             .padding(.bottom, 22)
+        }
+    }
+
+    // MARK: - Google フォトスキャン 四邊圓點對準與自動快門邏輯
+
+    private func resetPhotoScanState() {
+        pendingModeBPreparedTask?.cancel()
+        pendingModeBPreparedTask = nil
+        pendingModeBFirstRawJPEG = nil
+        isPhotoScanSessionActive = false
+        photoScanCapturedImages.removeAll()
+        photoScanCapturedQuads.removeAll()
+        photoScanCornerCompleted = [false, false, false, false]
+        photoScanDwellCornerIndex = nil
+        photoScanDwellProgress = 0.0
+    }
+
+    /// 每 0.05 秒檢查取景器中央圓環 `(0.5, 0.5)` 是否已對準拍立得四邊任一尚未拍攝的目標圓點
+    @MainActor
+    private func handlePhotoScanAlignmentTick() {
+        guard captureMode == .dualGlare,
+              isPhotoScanSessionActive,
+              !isProcessingCapture,
+              let quad = camera.trackedQuadPoints,
+              quad.count == 4 else {
+            photoScanDwellCornerIndex = nil
+            photoScanDwellProgress = 0.0
+            return
+        }
+
+        let targetPoints = Self.computeFourCornerTargetPoints(from: quad)
+        let center = CGPoint(x: 0.5, y: 0.5)
+
+        // 找出距離中央對準環最近且尚未拍攝的角點圓點
+        var matchedCorner: Int? = nil
+        var minDistance: CGFloat = .greatestFiniteMagnitude
+
+        for idx in 0..<4 where !photoScanCornerCompleted[idx] {
+            let pt = targetPoints[idx]
+            let dist = hypot(pt.x - center.x, pt.y - center.y)
+            if dist < minDistance {
+                minDistance = dist
+                matchedCorner = idx
+            }
+        }
+
+        // 當中央圓環套入目標圓點 (正規化距離 <= 0.135) 時，累積進度環；約 0.35 秒填滿自動觸發拍攝！
+        if let cornerIdx = matchedCorner, minDistance <= 0.135 {
+            if photoScanDwellCornerIndex == cornerIdx {
+                photoScanDwellProgress = min(1.0, photoScanDwellProgress + 0.15)
+                if photoScanDwellProgress >= 1.0 {
+                    photoScanDwellProgress = 0.0
+                    photoScanDwellCornerIndex = nil
+                    Task {
+                        await capturePhotoScanCorner(index: cornerIdx)
+                    }
+                }
+            } else {
+                photoScanDwellCornerIndex = cornerIdx
+                photoScanDwellProgress = 0.15
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+        } else {
+            photoScanDwellCornerIndex = nil
+            photoScanDwellProgress = max(0.0, photoScanDwellProgress - 0.20)
+        }
+    }
+
+    /// 根據拍立得外框四角 `[TL, TR, BR, BL]` 雙線性內插出四個象限目標圓點位置 `(左上, 右上, 右下, 左下)`
+    static func computeFourCornerTargetPoints(from quad: [CGPoint]) -> [CGPoint] {
+        guard quad.count == 4 else { return defaultPreviewQuad }
+        let uvCoords: [(CGFloat, CGFloat)] = [
+            (0.25, 0.24), // 0: 左上
+            (0.75, 0.24), // 1: 右上
+            (0.75, 0.76), // 2: 右下
+            (0.25, 0.76)  // 3: 左下
+        ]
+        return uvCoords.map { (u, v) in
+            let topX = quad[0].x + (quad[1].x - quad[0].x) * u
+            let topY = quad[0].y + (quad[1].y - quad[0].y) * u
+            let botX = quad[3].x + (quad[2].x - quad[3].x) * u
+            let botY = quad[3].y + (quad[2].y - quad[3].y) * u
+            return CGPoint(
+                x: topX + (botX - topX) * v,
+                y: topY + (botY - topY) * v
+            )
         }
     }
 
@@ -944,6 +1117,18 @@ struct CameraScannerView: View {
 
     @MainActor
     private func handleShutterTap() async {
+        // Google フォトスキャン (PhotoScan) 防反光模式：開啟閃光燈 + 對準四邊角點合成
+        if captureMode == .dualGlare {
+            if !isPhotoScanSessionActive {
+                await startPhotoScanSession()
+            } else if let nextCorner = nextUncapturedCornerIndex {
+                await capturePhotoScanCorner(index: nextCorner)
+            } else {
+                await completePhotoScanMultiFrameCapture()
+            }
+            return
+        }
+
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         withAnimation(.easeInOut(duration: 0.08)) {
             isShutterPressed = true
@@ -963,62 +1148,12 @@ struct CameraScannerView: View {
             camera.isPausedForProcessing = false
         }
 
-        // Task 5.4 & 6.1: Pro 專屬 Mode B 雙角度去反光合成流程（第 1 張拍下後立即於背景預處理）
-        if captureMode == .dualGlare && isProLifetimeUnlocked {
-            let glareStep = (pendingModeBFirstImage == nil) ? 1 : 2
-            guard let rawImage = await camera.capturePhoto(
-                isBacksideSimulated: false,
-                simulatedGlareAngleStep: glareStep
-            ) else { return }
-
-            if let firstAngleImage = pendingModeBFirstImage {
-                // 第 2 張角度拍攝完成 -> 直接銜接背景已完成（或進行中）之第 1 張正位結果，極速執行零重影去反光合成
-                await completeModeBDualAngleCapture(
-                    firstImage: firstAngleImage,
-                    secondImage: rawImage,
-                    secondaryPriorNormalizedCorners: lockedPreviewQuad
-                )
-            } else {
-                // 第 1 張角度拍攝完成 -> 立即啟動背景預處理（趁使用者微調手機角度準備拍第 2 張的空檔先算完第 1 張）
-                pendingModeBFirstImage = rawImage
-                let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
-                let rawCG = rawImage.cgImage
-                pendingModeBFirstRawJPEG = nil
-
-                Task.detached(priority: .utility) {
-                    let jpeg = rawImage.jpegData(compressionQuality: 0.90)
-                    await MainActor.run {
-                        self.pendingModeBFirstRawJPEG = jpeg
-                    }
-                }
-
-                pendingModeBPreparedTask?.cancel()
-                pendingModeBPreparedTask = Task.detached(priority: .userInitiated) {
-                    guard let cgA = rawCG else { return nil }
-                    let manager = VisionManager()
-                    return try? await manager.prepareModeBFirstAngle(
-                        primaryImage: cgA,
-                        borderInsetRatio: defaultInsetRatio,
-                        preferredFormat: .auto,
-                        priorNormalizedCorners: lockedPreviewQuad
-                    )
-                }
-
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                withAnimation {
-                    statusBannerMessage = "角度 1 已鎖定！請稍微改變傾斜角度避開白斑，再按快門 (2/2)"
-                }
-            }
-            return
-        }
-
         let isCapturingBackside = (captureMode == .frontAndBack && pendingFrontImageData != nil)
         guard let rawImage = await camera.capturePhoto(isBacksideSimulated: isCapturingBackside) else { return }
 
-        let useModeAGlareSuppression = (captureMode == .dualGlare)
         let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(
             rawImage,
-            applyModeASuppression: useModeAGlareSuppression,
+            applyModeASuppression: false,
             isKnownFrontPhoto: !isCapturingBackside,
             priorNormalizedCorners: lockedPreviewQuad
         )
@@ -1097,40 +1232,152 @@ struct CameraScannerView: View {
 
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation {
-                statusBannerMessage = useModeAGlareSuppression
-                    ? "已套用 Mode A 單張高光抑制並存入系統相簿"
-                    : "已自動正位並存入系統相簿"
+                statusBannerMessage = "已自動正位並存入系統相簿"
             }
         }
     }
 
-    /// Task 5.4 & 6.1: 執行 Mode B 雙角度去反光極速合成，並存入 SwiftData 與 iOS 原生相簿
+    /// 啟動 Google フォトスキャン 四邊閃光掃描：先開啟閃光補光燈並拍下基準框，隨即浮現四個角點圓圈引導
     @MainActor
-    private func completeModeBDualAngleCapture(
-        firstImage: UIImage,
-        secondImage: UIImage,
-        secondaryPriorNormalizedCorners: [CGPoint]? = nil
-    ) async {
-        let preparedTask = pendingModeBPreparedTask
-        let cachedRawJPEGA = pendingModeBFirstRawJPEG
-        defer {
-            pendingModeBFirstImage = nil
-            pendingModeBPreparedTask = nil
-            pendingModeBFirstRawJPEG = nil
+    private func startPhotoScanSession() async {
+        if camera.flashSetting == .off {
+            camera.setTorch(enabled: true)
+        }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        withAnimation(.easeInOut(duration: 0.08)) {
+            isShutterPressed = true
+            showCaptureFlash = true
+        }
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        withAnimation(.easeInOut(duration: 0.12)) {
+            isShutterPressed = false
+            showCaptureFlash = false
         }
 
-        guard let cgA = firstImage.cgImage,
-              let cgB = secondImage.cgImage else {
+        isProcessingCapture = true
+        let lockedQuad = camera.trackedQuadPoints
+        guard let baseImage = await camera.capturePhoto(
+            isBacksideSimulated: false,
+            simulatedGlareAngleStep: 1
+        ) else {
+            isProcessingCapture = false
+            return
+        }
+        isProcessingCapture = false
+
+        photoScanCapturedImages = [baseImage]
+        photoScanCapturedQuads = [lockedQuad]
+        photoScanCornerCompleted = [false, false, false, false]
+        photoScanDwellCornerIndex = nil
+        photoScanDwellProgress = 0.0
+
+        let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
+        let rawCG = baseImage.cgImage
+        pendingModeBFirstRawJPEG = nil
+
+        Task.detached(priority: .utility) {
+            let jpeg = baseImage.jpegData(compressionQuality: 0.90)
+            await MainActor.run {
+                self.pendingModeBFirstRawJPEG = jpeg
+            }
+        }
+
+        pendingModeBPreparedTask?.cancel()
+        pendingModeBPreparedTask = Task.detached(priority: .userInitiated) {
+            guard let cgA = rawCG else { return nil }
+            let manager = VisionManager()
+            return try? await manager.prepareModeBFirstAngle(
+                primaryImage: cgA,
+                borderInsetRatio: defaultInsetRatio,
+                preferredFormat: .auto,
+                priorNormalizedCorners: lockedQuad
+            )
+        }
+
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            isPhotoScanSessionActive = true
+            statusBannerMessage = "⚡️ 請移動手機將中央圓環對準 4 個角點圓圈 (0/4)"
+        }
+    }
+
+    /// 拍攝 Google フォトスキャン 指定的第 `index` 個角落 (0:左上, 1:右上, 2:右下, 3:左下)
+    @MainActor
+    private func capturePhotoScanCorner(index: Int) async {
+        guard isPhotoScanSessionActive,
+              index >= 0, index < 4,
+              !photoScanCornerCompleted[index],
+              !isProcessingCapture else { return }
+
+        isProcessingCapture = true
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        withAnimation(.easeInOut(duration: 0.06)) {
+            showCaptureFlash = true
+        }
+        try? await Task.sleep(nanoseconds: 60_000_000)
+        withAnimation(.easeInOut(duration: 0.10)) {
+            showCaptureFlash = false
+        }
+
+        let lockedQuad = camera.trackedQuadPoints
+        guard let cornerImage = await camera.capturePhoto(
+            isBacksideSimulated: false,
+            simulatedGlareAngleStep: index + 2
+        ) else {
+            isProcessingCapture = false
             return
         }
 
+        photoScanCapturedImages.append(cornerImage)
+        photoScanCapturedQuads.append(lockedQuad)
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+            photoScanCornerCompleted[index] = true
+        }
+        isProcessingCapture = false
+
+        let doneCount = completedCornerCount
+        if doneCount >= 4 {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            withAnimation {
+                statusBannerMessage = "✨ 四邊角點 (4/4) 掃描完成！正在執行無反光合成..."
+            }
+            await completePhotoScanMultiFrameCapture()
+        } else {
+            let cornerNames = ["左上", "右上", "右下", "左下"]
+            let nextIdx = nextUncapturedCornerIndex ?? 0
+            withAnimation {
+                statusBannerMessage = "已鎖定\(cornerNames[index]) (\(doneCount)/4)！請對準【\(cornerNames[nextIdx])】圓點"
+            }
+        }
+    }
+
+    /// 執行 Google フォトスキャン 多視角無反光合成，並存入 SwiftData 與 iOS 原生相簿
+    @MainActor
+    private func completePhotoScanMultiFrameCapture() async {
+        let capturedImages = photoScanCapturedImages
+        let capturedQuads = photoScanCapturedQuads
+        let preparedTask = pendingModeBPreparedTask
+        let cachedRawJPEGA = pendingModeBFirstRawJPEG
+
+        guard let firstImage = capturedImages.first else {
+            resetPhotoScanState()
+            return
+        }
+
+        isProcessingCapture = true
+        camera.isPausedForProcessing = true
+        defer {
+            isProcessingCapture = false
+            camera.isPausedForProcessing = false
+            resetPhotoScanState()
+        }
+
+        let cgImages = capturedImages.compactMap(\.cgImage)
+        guard cgImages.count >= 2 else { return }
+
         let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
         let now = Date()
-
-        // 取出第 1 張拍完時已在背景算好的四角與正位結果（若使用者秒按第 2 張則等待其完成）
         let preparedFirstAngle = await preparedTask?.value
 
-        // 在背景高優先級執行緒執行第 2 張正位與零重影去反光融合，不阻塞主執行緒
         let synthesisOutcome: (
             fusedJPEG: Data?,
             rawJPEGA: Data?,
@@ -1140,17 +1387,16 @@ struct CameraScannerView: View {
         )? = await Task.detached(priority: .userInitiated) {
             let manager = VisionManager()
             do {
-                let result = try await manager.synthesizeModeBDualAngleAntiGlare(
-                    primaryImage: cgA,
-                    secondaryImage: cgB,
+                let result = try await manager.synthesizePhotoScanMultiFrameAntiGlare(
+                    rawImages: cgImages,
+                    priorNormalizedQuads: capturedQuads,
                     borderInsetRatio: defaultInsetRatio,
                     preferredFormat: .auto,
-                    preparedFirstAngle: preparedFirstAngle,
-                    secondaryPriorNormalizedCorners: secondaryPriorNormalizedCorners
+                    preparedFirstAngle: preparedFirstAngle
                 )
                 let fusedJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.92)
                 let rawJPEGA = cachedRawJPEGA ?? firstImage.jpegData(compressionQuality: 0.90)
-                let imageSizeA = CGSize(width: cgA.width, height: cgA.height)
+                let imageSizeA = CGSize(width: cgImages[0].width, height: cgImages[0].height)
                 let pointsJSON = ChekiItem.encodeNormalizedCorners(result.primaryDetection.corners, imageSize: imageSizeA)
 
                 let ocrDate: Date?
@@ -1189,15 +1435,14 @@ struct CameraScannerView: View {
 
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation {
-                statusBannerMessage = "✨ Mode B 雙角度去反光合成完成！已同步至系統相簿"
+                statusBannerMessage = "✨ フォトスキャン四邊去反光合成完成！已同步至系統相簿"
             }
         } else {
-            // 若其中一張角度未能偵測到完整四邊形，自動回退至第 1 張 + Mode A 單張高光抑制
             let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(
                 firstImage,
                 applyModeASuppression: true,
                 isKnownFrontPhoto: true,
-                priorNormalizedCorners: nil
+                priorNormalizedCorners: capturedQuads.first ?? nil
             )
             let captureDate = recognizedDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
             let format = resolvedFormat.concreteFormat
@@ -1334,6 +1579,100 @@ struct CameraScannerView: View {
         }
 
         try? modelContext.save()
+    }
+}
+
+// MARK: - Google フォトスキャン 四邊角點圓圈對準與中央進度環 (PhotoScanFourCornerOverlay)
+
+private struct PhotoScanFourCornerOverlay: View {
+    let quadPoints: [CGPoint]
+    let cornerCompleted: [Bool]
+    let activeTargetIndex: Int?
+    let dwellCornerIndex: Int?
+    let dwellProgress: CGFloat
+    let onTapCorner: (Int) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let normalizedTargets = CameraScannerView.computeFourCornerTargetPoints(from: quadPoints)
+            let screenTargets = normalizedTargets.map { CGPoint(x: $0.x * w, y: $0.y * h) }
+            let centerPoint = CGPoint(x: w * 0.5, y: h * 0.5)
+
+            ZStack {
+                // 1. 中央對準目標方向虛線（由畫面中央指向下一個待拍攝的角點圓圈）
+                if let activeIdx = activeTargetIndex, activeIdx < screenTargets.count {
+                    let targetPt = screenTargets[activeIdx]
+                    Path { path in
+                        path.move(to: centerPoint)
+                        path.addLine(to: targetPt)
+                    }
+                    .stroke(
+                        Color.cyan.opacity(0.75),
+                        style: StrokeStyle(lineWidth: 2.2, lineCap: .round, dash: [6, 6])
+                    )
+                }
+
+                // 2. 四個角落目標圓點（仿照 Google フォトスキャン 白色實心圓點 -> 完成後變為綠色打勾圓點；也支援直接點擊觸發該角拍攝）
+                ForEach(0..<min(4, screenTargets.count), id: \.self) { idx in
+                    let isDone = cornerCompleted[idx]
+                    let isCurrentTarget = (activeTargetIndex == idx)
+                    let isDwelling = (dwellCornerIndex == idx)
+
+                    Button {
+                        if !isDone {
+                            onTapCorner(idx)
+                        }
+                    } label: {
+                        ZStack {
+                            if isCurrentTarget && !isDone {
+                                Circle()
+                                    .strokeBorder(Color.cyan.opacity(0.85), lineWidth: 2.5)
+                                    .frame(width: 44, height: 44)
+                            }
+
+                            Circle()
+                                .fill(isDone ? Color.green : (isDwelling ? Color.cyan : Color.white))
+                                .frame(width: 28, height: 28)
+                                .shadow(color: .black.opacity(0.45), radius: 5, x: 0, y: 2)
+
+                            if isDone {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 13, weight: .heavy))
+                                    .foregroundStyle(.white)
+                            } else {
+                                Text("\(idx + 1)")
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.black.opacity(0.75))
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .position(screenTargets[idx])
+                }
+
+                // 3. 取景器正中央 Google フォトスキャン 空心對準圓環 + 自動快門進度弧
+                ZStack {
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.65), lineWidth: 3.0)
+                        .frame(width: 58, height: 58)
+
+                    if dwellProgress > 0.01 {
+                        Circle()
+                            .trim(from: 0, to: dwellProgress)
+                            .stroke(
+                                Color.cyan,
+                                style: StrokeStyle(lineWidth: 4.5, lineCap: .round)
+                            )
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: 58, height: 58)
+                    }
+                }
+                .position(centerPoint)
+                .allowsHitTesting(false)
+            }
+        }
     }
 }
 
