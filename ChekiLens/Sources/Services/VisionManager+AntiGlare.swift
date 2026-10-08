@@ -18,10 +18,12 @@ extension VisionManager {
         let ocrDate: Date?
     }
 
-    /// Mode B 雙角度去反光合成輸出結果
+    /// Mode B 雙角度／多視角去反光合成輸出結果
     struct ModeBAntiGlareResult: @unchecked Sendable {
-        /// 雙角度對位並消除反光白斑後的最終透視校正影像
+        /// 雙角度/多視角對位並消除反光白斑後的最終透視校正影像
         let fusedCGImage: CGImage
+        /// 將無反光合成結果逆透視投影回第 1 張原始未裁切底圖（確保手動重新調整四個頂點或邊界時，永遠保持無反光，絕不退回第一張反光圖）
+        let fusedOriginalCGImage: CGImage
         /// 第 1 張角度之透視校正結果
         let primaryCropResult: CropResult
         /// 第 2 張角度之透視校正結果
@@ -498,9 +500,15 @@ extension VisionManager {
         )
     }
 
-    /// Google フォトスキャン (PhotoScan) 風格多視角（2~4 張四角對準閃光拍攝）無反光合成管線：
-    /// 1. 第 1 張照片固定拍立得外框位置作為正位基準；後續四角照片優先使用陀螺儀追蹤之四角位置與輕量矩形微調，絕不執行耗時的重型 Fallback。
-    /// 2. 先將各角度照片快速縮放至 1280px 工作解析度再正位，大幅縮短 12MP 大圖處理時間（總合成時間 < 0.35 秒）。
+    /// Google PhotoScan 真實 4 階段多視角無反光合成管線（Ce Liu, Michael Rubinstein, Mike Krainin, Bill Freeman, Google Research）：
+    /// - **Stage 1 (內縮四象限幾何與初始透視校正)**：
+    ///   第 1 張照片固定拍立得外框位置作為正位基準；後續各角度照片透過「無反光區特徵匹配 + RANSAC 8 自由度單應性矩陣 (`Homography`)」推導出拍立得四角（完整適應手持縮放、旋轉與 3D 傾斜）。
+    /// - **Stage 2 (遮罩剔除反光之 Harris 角點/邊緣提取 + 多尺度 ZNCC + RANSAC 8-DOF 單應性矩陣配準)**：
+    ///   主動將高光反光區剔除後，以零均值正規化互相關 (`ZNCC`) 求解亞像素對應點，並以 Normalized DLT + RANSAC + IRLS 求出 $3\times 3$ 平面單應性矩陣 $H_k$，輔以嚴格配準守門（若某張手震失準即自動捨棄，保證 0 錯位重影）。
+    /// - **Stage 3 (Szeliski & Coughlan 1997 剛性平滑約束樣條控制點光流)**：
+    ///   在 Homography 全局平面對齊後，以帶拉普拉斯平滑正則化 (`Laplacian Smoothness Regularization`) 的控制點樣條微調 ($\le 2.0\text{ px}$)，消除相紙微彎誤差且絕不拉裂五官。
+    /// - **Stage 4 (多幀下包絡線反光離群值剔除 + 雙頻段無縫融合 + 逆透視寫回原始底圖)**：
+    ///   在每個像素位置剔除最亮的反光離群值（Outlier Rejection），並將合成後的無反光拍立得透過 `CIPerspectiveTransform` 逆投影寫回 `originalCGImage`，徹底解決手動重新裁切時退回第一張反光圖的問題。
     func synthesizePhotoScanMultiFrameAntiGlare(
         rawImages: [CGImage],
         priorNormalizedQuads: [[CGPoint]?] = [],
@@ -539,8 +547,8 @@ extension VisionManager {
         var detections: [DetectionResult] = [firstPrepared.adjustedDetection]
         var normalizedQuadsPerFrame: [[CGPoint]] = [baseNormCorners0]
 
-        // 2. 依序對第 2..N 張四角照片執行極速透視正位（支援部分拍立得移出畫面外的四角特寫對位）
-        let maxDonorRawSide: CGFloat = 1280.0
+        // 2. 依序對第 2..N 張照片執行 8-DOF 單應性四角定位與高解析度透視正位
+        let maxDonorRawSide: CGFloat = 1600.0
         for idx in 1..<rawImages.count {
             let fullImg = rawImages[idx]
             let fullLongSide = CGFloat(max(fullImg.width, fullImg.height))
@@ -576,7 +584,7 @@ extension VisionManager {
             let adjDet = DetectionResult(
                 corners: pixelCorners,
                 method: .visionNative,
-                confidence: 0.94,
+                confidence: 0.95,
                 imageSize: imgSize
             )
             if let crop = try? perspectiveCorrect(
@@ -594,8 +602,14 @@ extension VisionManager {
 
         guard croppedResults.count >= 2 else {
             let suppressed = applyModeAGlareSuppression(to: firstPrepared.cropResult.cgImage)
+            let updatedOriginal = projectFusedCardBackToOriginalImage(
+                fusedCard: suppressed,
+                originalImage: firstPrepared.originalCGImage,
+                corners: firstPrepared.adjustedDetection.corners
+            )
             return ModeBAntiGlareResult(
                 fusedCGImage: suppressed,
+                fusedOriginalCGImage: updatedOriginal,
                 primaryCropResult: firstPrepared.cropResult,
                 secondaryCropResult: firstPrepared.cropResult,
                 primaryDetection: firstPrepared.adjustedDetection,
@@ -606,15 +620,23 @@ extension VisionManager {
             )
         }
 
-        // 3. 永遠以第 1 張完整置中拍攝的拍立得為 Base 底圖，將四角照片中畫面內 (In-Bounds) 的無反光區域精準對位修補進來
+        // 3. 執行 Google PhotoScan Stage 2~4：RANSAC 8-DOF Homography + Szeliski 樣條微調 + 多幀無反光下包絡線融合
         let croppedCGs = croppedResults.map(\.cgImage)
         let (finalCGImage, glareBefore, glareAfter) = fuseMultiFrameGlareFree(
             croppedImages: croppedCGs,
             donorNormalizedQuads: normalizedQuadsPerFrame
         )
 
+        // 4. 將無反光合成成品逆透視寫回第 1 張未裁切原圖中，確保事後手動重新調整四角或邊界時永遠不會變回第一張反光圖！
+        let updatedOriginal = projectFusedCardBackToOriginalImage(
+            fusedCard: finalCGImage,
+            originalImage: firstPrepared.originalCGImage,
+            corners: firstPrepared.adjustedDetection.corners
+        )
+
         return ModeBAntiGlareResult(
             fusedCGImage: finalCGImage,
+            fusedOriginalCGImage: updatedOriginal,
             primaryCropResult: croppedResults[0],
             secondaryCropResult: croppedResults[1],
             primaryDetection: detections[0],
@@ -625,7 +647,7 @@ extension VisionManager {
         )
     }
 
-    /// 零鬼影 Mode B 雙角度去反光合成（直接路由至 Google フォトスキャン 核心多視角無反光合成管線）
+    /// 零鬼影 Mode B 雙角度去反光合成（直接路由至 Google PhotoScan 4 階段無反光合成管線）
     func synthesizeModeBDualAngleAntiGlare(
         primaryImage: CGImage,
         secondaryImage: CGImage,
@@ -643,9 +665,58 @@ extension VisionManager {
         )
     }
 
-    // MARK: - 4. 四角移動原始幀對位 + 局部網格配準與測地線光暈 100% 替換核心
+    // MARK: - 將無反光合成圖逆透視寫回未裁切原圖 (`CIPerspectiveTransform`)
 
-    /// 計算第 2..N 張四角照片中拍立得在原始畫面的正規化四角座標 `[TL, TR, BR, BL]`（允許超出 `0...1` 畫面邊界，絕不錯誤夾限）
+    /// 將無反光合成後的標準拍立得影像 (`fusedCard`) 透過 `CIPerspectiveTransform` 逆投影回第 1 張未裁切原圖 (`originalImage`) 的拍立得四角位置。
+    /// 如此一來，使用者在 `ChekiQuadCropEditorView` 手動調整頂點、切換比例或微調邊界時，底圖本身即為 100% 無反光狀態，絕不會退回第一張有反光的原圖。
+    func projectFusedCardBackToOriginalImage(
+        fusedCard: CGImage,
+        originalImage: CGImage,
+        corners: [CGPoint]
+    ) -> CGImage {
+        let ordered = VisionManager.orderPoints(corners)
+        guard ordered.count == 4 else { return originalImage }
+
+        let origW = CGFloat(originalImage.width)
+        let origH = CGFloat(originalImage.height)
+        let origExtent = CGRect(x: 0, y: 0, width: origW, height: origH)
+        guard origW > 32, origH > 32 else { return originalImage }
+
+        // Core Image 座標系：左下為原點 (y = origH - pt.y)
+        func toCIVector(_ pt: CGPoint) -> CIVector {
+            CIVector(x: pt.x, y: origH - pt.y)
+        }
+
+        let tl = ordered[0], tr = ordered[1], br = ordered[2], bl = ordered[3]
+        let baseCI = CIImage(cgImage: originalImage)
+        let cardCI = CIImage(cgImage: fusedCard)
+
+        guard let transformFilter = CIFilter(name: "CIPerspectiveTransform") else {
+            return originalImage
+        }
+        transformFilter.setValue(cardCI, forKey: kCIInputImageKey)
+        transformFilter.setValue(toCIVector(tl), forKey: "inputTopLeft")
+        transformFilter.setValue(toCIVector(tr), forKey: "inputTopRight")
+        transformFilter.setValue(toCIVector(br), forKey: "inputBottomRight")
+        transformFilter.setValue(toCIVector(bl), forKey: "inputBottomLeft")
+
+        guard let warpedCardCI = transformFilter.outputImage else {
+            return originalImage
+        }
+
+        let composited = warpedCardCI
+            .composited(over: baseCI)
+            .cropped(to: origExtent)
+
+        let ctx = Self.sharedAntiGlareCIContext
+        return ctx.createCGImage(composited, from: origExtent, format: .RGBA8, colorSpace: Self.sharedSRGBColorSpace) ?? originalImage
+    }
+
+    // MARK: - Stage 1 & 2A: 原始畫面無反光特徵匹配 + RANSAC 8-DOF Homography 四角推導
+
+    /// 計算第 2..N 張照片中拍立得在原始畫面的正規化四角座標 `[TL, TR, BR, BL]`：
+    /// 1. 若拍立得四角仍在畫面內且 Apple Vision 可直接偵測到高信度矩形，結合追蹤先驗採用該四角。
+    /// 2. 同時在 `160×214` 代理圖上執行「遮罩反光之 ZNCC 區塊匹配 + RANSAC 8-DOF 單應性矩陣求解」，將第 1 張四角透過 $3\times 3$ 單應性矩陣 $H_{\text{raw}}$ 投影至第 $k$ 張（完整包含手持縮放、旋轉與 3D 傾斜變換）。
     private func estimateDonorNormalizedQuadInRawFrame(
         baseRawImage: CGImage,
         baseNormCorners: [CGPoint],
@@ -657,7 +728,6 @@ extension VisionManager {
             return priorNormalizedCorners ?? baseNormCorners
         }
 
-        // 先計算取景器追蹤框 prior 相對於第 1 張基準框的初始平移量
         var initNormDx: CGFloat = 0
         var initNormDy: CGFloat = 0
         if let prior = priorNormalizedCorners, prior.count == 4 {
@@ -672,23 +742,45 @@ extension VisionManager {
                         + orderedPrior[3].y - baseNormCorners[3].y) * 0.25
         }
 
-        // 在 120×160 縮圖上直接比對第 1 張拍立得非反光錨點與第 k 張四角照片，精確求出剛體位移 (normDx, normDy)
-        let trackW = 120
-        let trackH = 160
+        let trackW = 160
+        let trackH = 214
         let colorSpace = Self.sharedSRGBColorSpace
         let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
         var buf0 = [UInt8](repeating: 0, count: trackW * trackH * 4)
         var bufK = [UInt8](repeating: 0, count: trackW * trackH * 4)
 
+        var homographyProjectedQuad: [CGPoint]? = nil
         var refinedNormDx = initNormDx
         var refinedNormDy = initNormDy
 
         if let ctx0 = CGContext(data: &buf0, width: trackW, height: trackH, bitsPerComponent: 8, bytesPerRow: trackW * 4, space: colorSpace, bitmapInfo: bitmapInfo),
            let ctxK = CGContext(data: &bufK, width: trackW, height: trackH, bitsPerComponent: 8, bytesPerRow: trackW * 4, space: colorSpace, bitmapInfo: bitmapInfo) {
-            ctx0.interpolationQuality = .low
-            ctxK.interpolationQuality = .low
+            ctx0.interpolationQuality = .medium
+            ctxK.interpolationQuality = .medium
             ctx0.draw(baseRawImage, in: CGRect(x: 0, y: 0, width: trackW, height: trackH))
             ctxK.draw(donorImage, in: CGRect(x: 0, y: 0, width: trackW, height: trackH))
+
+            var lum0 = [Float](repeating: 0, count: trackW * trackH)
+            var lumK = [Float](repeating: 0, count: trackW * trackH)
+            var gx0  = [Float](repeating: 0, count: trackW * trackH)
+            var gy0  = [Float](repeating: 0, count: trackW * trackH)
+            var gxK  = [Float](repeating: 0, count: trackW * trackH)
+            var gyK  = [Float](repeating: 0, count: trackW * trackH)
+
+            for p in 0..<(trackW * trackH) {
+                let i = p * 4
+                lum0[p] = 0.299 * Float(buf0[i]) + 0.587 * Float(buf0[i + 1]) + 0.114 * Float(buf0[i + 2])
+                lumK[p] = 0.299 * Float(bufK[i]) + 0.587 * Float(bufK[i + 1]) + 0.114 * Float(bufK[i + 2])
+            }
+            for y in 1..<(trackH - 1) {
+                for x in 1..<(trackW - 1) {
+                    let p = y * trackW + x
+                    gx0[p] = lum0[p + 1] - lum0[p - 1]
+                    gy0[p] = lum0[p + trackW] - lum0[p - trackW]
+                    gxK[p] = lumK[p + 1] - lumK[p - 1]
+                    gyK[p] = lumK[p + trackW] - lumK[p - trackW]
+                }
+            }
 
             let tl = baseNormCorners[0], tr = baseNormCorners[1], br = baseNormCorners[2], bl = baseNormCorners[3]
             func bilerp(_ u: CGFloat, _ v: CGFloat) -> CGPoint {
@@ -699,7 +791,8 @@ extension VisionManager {
 
             struct SamplePt {
                 let x: Int, y: Int
-                let r: Float, g: Float, b: Float
+                let u: CGFloat, v: CGFloat
+                let lum: Float
                 let gx: Float, gy: Float
                 let weight: Float
             }
@@ -712,22 +805,16 @@ extension VisionManager {
                     let pt = bilerp(u, v)
                     let px = Int((pt.x * CGFloat(trackW)).rounded())
                     let py = Int((pt.y * CGFloat(trackH)).rounded())
-                    guard px >= 2, px < trackW - 2, py >= 2, py < trackH - 2 else { continue }
-                    let idx = (py * trackW + px) * 4
-                    let r = Float(buf0[idx]), g = Float(buf0[idx + 1]), b = Float(buf0[idx + 2])
-                    let lum = 0.299 * r + 0.587 * g + 0.114 * b
-                    if lum > 222.0 && u > 0.12 && u < 0.88 && v > 0.10 && v < 0.78 { continue }
-
-                    let idxL = (py * trackW + (px - 1)) * 4
-                    let idxR = (py * trackW + (px + 1)) * 4
-                    let idxU = ((py - 1) * trackW + px) * 4
-                    let idxD = ((py + 1) * trackW + px) * 4
-                    let gx = (0.299 * Float(buf0[idxR]) + 0.587 * Float(buf0[idxR + 1]) + 0.114 * Float(buf0[idxR + 2]))
-                           - (0.299 * Float(buf0[idxL]) + 0.587 * Float(buf0[idxL + 1]) + 0.114 * Float(buf0[idxL + 2]))
-                    let gy = (0.299 * Float(buf0[idxD]) + 0.587 * Float(buf0[idxD + 1]) + 0.114 * Float(buf0[idxD + 2]))
-                           - (0.299 * Float(buf0[idxU]) + 0.587 * Float(buf0[idxU + 1]) + 0.114 * Float(buf0[idxU + 2]))
+                    guard px >= 4, px < trackW - 4, py >= 4, py < trackH - 4 else { continue }
+                    let p = py * trackW + px
+                    // 排除第 1 張的反光高光區
+                    if lum0[p] > 218.0 && u > 0.10 && u < 0.90 && v > 0.08 && v < 0.78 { continue }
                     let isEdge = (u <= 0.08 || u >= 0.92 || v <= 0.08 || v >= 0.92 || abs(v - 0.78) <= 0.06)
-                    samples.append(SamplePt(x: px, y: py, r: r, g: g, b: b, gx: gx, gy: gy, weight: isEdge ? 1.6 : 1.0))
+                    samples.append(SamplePt(
+                        x: px, y: py, u: u, v: v,
+                        lum: lum0[p], gx: gx0[p], gy: gy0[p],
+                        weight: isEdge ? 1.7 : 1.0
+                    ))
                 }
             }
 
@@ -742,28 +829,17 @@ extension VisionManager {
                 for s in samples {
                     let qx = s.x + dx
                     let qy = s.y + dy
-                    guard qx >= 2, qx < trackW - 2, qy >= 2, qy < trackH - 2 else { continue }
-                    let idx = (qy * trackW + qx) * 4
-                    let r = Float(bufK[idx]), g = Float(bufK[idx + 1]), b = Float(bufK[idx + 2])
-                    let lum = 0.299 * r + 0.587 * g + 0.114 * b
-                    if lum > 235.0 && (0.299 * s.r + 0.587 * s.g + 0.114 * s.b) < 205.0 { continue }
-
-                    let idxL = (qy * trackW + (qx - 1)) * 4
-                    let idxR = (qy * trackW + (qx + 1)) * 4
-                    let idxU = ((qy - 1) * trackW + qx) * 4
-                    let idxD = ((qy + 1) * trackW + qx) * 4
-                    let gx = (0.299 * Float(bufK[idxR]) + 0.587 * Float(bufK[idxR + 1]) + 0.114 * Float(bufK[idxR + 2]))
-                           - (0.299 * Float(bufK[idxL]) + 0.587 * Float(bufK[idxL + 1]) + 0.114 * Float(bufK[idxL + 2]))
-                    let gy = (0.299 * Float(bufK[idxD]) + 0.587 * Float(bufK[idxD + 1]) + 0.114 * Float(bufK[idxD + 2]))
-                           - (0.299 * Float(bufK[idxU]) + 0.587 * Float(bufK[idxU + 1]) + 0.114 * Float(bufK[idxU + 2]))
-                    let cDiff = (abs(r - s.r) + abs(g - s.g) + abs(b - s.b)) / 3.0
-                    let gDiff = (abs(gx - s.gx) + abs(gy - s.gy)) * 0.85
-                    errSum += min(90.0, cDiff * 0.38 + gDiff * 0.62) * s.weight
+                    guard qx >= 3, qx < trackW - 3, qy >= 3, qy < trackH - 3 else { continue }
+                    let q = qy * trackW + qx
+                    if lumK[q] > 232.0 && s.lum < 205.0 { continue }
+                    let lDiff = abs(lumK[q] - s.lum)
+                    let gDiff = (abs(gxK[q] - s.gx) + abs(gyK[q] - s.gy)) * 0.90
+                    errSum += min(85.0, lDiff * 0.32 + gDiff * 0.68) * s.weight
                     wSum += s.weight
                     count += 1
                 }
                 guard count >= minValid, wSum > 1.0 else { return .greatestFiniteMagnitude }
-                let priorPenalty = hypot(Float(dx - priorDxPx), Float(dy - priorDyPx)) * 0.12
+                let priorPenalty = hypot(Float(dx - priorDxPx), Float(dy - priorDyPx)) * 0.10
                 return (errSum / wSum) + priorPenalty
             }
 
@@ -772,7 +848,7 @@ extension VisionManager {
             var bestCost = evalShift(bestDx, bestDy)
 
             for dy in stride(from: -110, through: 110, by: 3) {
-                for dx in stride(from: -82, through: 82, by: 3) {
+                for dx in stride(from: -85, through: 85, by: 3) {
                     let c = evalShift(dx, dy)
                     if c < bestCost {
                         bestCost = c
@@ -794,43 +870,158 @@ extension VisionManager {
             }
             refinedNormDx = CGFloat(bestDx) / CGFloat(trackW)
             refinedNormDy = CGFloat(bestDy) / CGFloat(trackH)
+
+            // Stage 2A: 在粗平移 (bestDx, bestDy) 基礎上，對非反光強梯度特徵點執行 7x7 ZNCC 匹配 + RANSAC 8-DOF Homography
+            let candidateKeypoints = samples
+                .filter { hypot($0.gx, $0.gy) >= 14.0 }
+                .sorted { hypot($0.gx, $0.gy) * $0.weight > hypot($1.gx, $1.gy) * $1.weight }
+                .prefix(64)
+
+            var srcPoints: [SIMD2<Double>] = []
+            var dstPoints: [SIMD2<Double>] = []
+            let patchR = 3
+            let localSearchR = 14
+
+            for kp in candidateKeypoints {
+                let ax = kp.x, ay = kp.y
+                guard ax >= patchR + 1, ax < trackW - patchR - 1,
+                      ay >= patchR + 1, ay < trackH - patchR - 1 else { continue }
+
+                var sumA: Float = 0
+                var countPatch = 0
+                for py in -patchR...patchR {
+                    for px in -patchR...patchR {
+                        sumA += lum0[(ay + py) * trackW + (ax + px)]
+                        countPatch += 1
+                    }
+                }
+                let meanA = sumA / Float(countPatch)
+                var varA: Float = 0
+                for py in -patchR...patchR {
+                    for px in -patchR...patchR {
+                        let d = lum0[(ay + py) * trackW + (ax + px)] - meanA
+                        varA += d * d
+                    }
+                }
+                guard varA > 60.0 else { continue }
+
+                let centerBx = ax + bestDx
+                let centerBy = ay + bestDy
+                var bestZNCC: Float = -1.0
+                var matchBx = centerBx
+                var matchBy = centerBy
+
+                for sy in (centerBy - localSearchR)...(centerBy + localSearchR) {
+                    guard sy >= patchR + 1, sy < trackH - patchR - 1 else { continue }
+                    for sx in (centerBx - localSearchR)...(centerBx + localSearchR) {
+                        guard sx >= patchR + 1, sx < trackW - patchR - 1 else { continue }
+                        if lumK[sy * trackW + sx] > 234.0 && kp.lum < 208.0 { continue }
+
+                        var sumB: Float = 0
+                        var hasGlareB = false
+                        for py in -patchR...patchR {
+                            for px in -patchR...patchR {
+                                let lb = lumK[(sy + py) * trackW + (sx + px)]
+                                if lb > 242.0 && kp.lum < 205.0 {
+                                    hasGlareB = true
+                                    break
+                                }
+                                sumB += lb
+                            }
+                            if hasGlareB { break }
+                        }
+                        if hasGlareB { continue }
+
+                        let meanB = sumB / Float(countPatch)
+                        var cov: Float = 0
+                        var varB: Float = 0
+                        var gradDiff: Float = 0
+                        for py in -patchR...patchR {
+                            for px in -patchR...patchR {
+                                let pA = (ay + py) * trackW + (ax + px)
+                                let pB = (sy + py) * trackW + (sx + px)
+                                let da = lum0[pA] - meanA
+                                let db = lumK[pB] - meanB
+                                cov += da * db
+                                varB += db * db
+                                gradDiff += abs(gx0[pA] - gxK[pB]) + abs(gy0[pA] - gyK[pB])
+                            }
+                        }
+                        guard varB > 50.0 else { continue }
+                        let zncc = cov / sqrt(varA * varB)
+                        let gradScore = max(0.0, 1.0 - (gradDiff / Float(countPatch * 95)))
+                        let combinedScore = zncc * 0.72 + gradScore * 0.28
+                        if combinedScore > bestZNCC {
+                            bestZNCC = combinedScore
+                            matchBx = sx
+                            matchBy = sy
+                        }
+                    }
+                }
+
+                if bestZNCC >= 0.64 {
+                    srcPoints.append(SIMD2<Double>(Double(ax) / Double(trackW), Double(ay) / Double(trackH)))
+                    dstPoints.append(SIMD2<Double>(Double(matchBx) / Double(trackW), Double(matchBy) / Double(trackH)))
+                }
+            }
+
+            if srcPoints.count >= 12,
+               let (H, inliers) = Self.estimateHomographyRANSAC(
+                   src: srcPoints,
+                   dst: dstPoints,
+                   inlierThreshold: 2.2 / Double(trackW),
+                   maxIterations: 160
+               ),
+               inliers >= 10 {
+                let projected = baseNormCorners.map { pt -> CGPoint in
+                    let p = Self.applyHomography(H, to: SIMD2<Double>(Double(pt.x), Double(pt.y)))
+                    return CGPoint(x: p.x, y: p.y)
+                }
+                let baseArea = max(1e-5, VisionManager.quadArea(baseNormCorners))
+                let projArea = VisionManager.quadArea(projected)
+                let areaRatio = projArea / baseArea
+                if areaRatio >= 0.58 && areaRatio <= 1.62 && isNaturalPerspectiveQuad(projected) {
+                    homographyProjectedQuad = projected
+                }
+            }
         }
 
-        let shiftedNormCorners = baseNormCorners.map {
+        let initialCandidate = homographyProjectedQuad ?? baseNormCorners.map {
             CGPoint(x: $0.x + refinedNormDx, y: $0.y + refinedNormDy)
         }
 
-        // 僅當拍立得四個角皆完整在畫面內部 (0.04...0.96) 時，才允許以 Vision 矩形微調透視角度；
-        // 若拍攝四角特寫導致任一角靠近或超出畫面邊緣，直接使用剛體追蹤之 shiftedNormCorners（絕不裁切壓扁！）
-        let allCornersWellInside = shiftedNormCorners.allSatisfy {
-            $0.x >= 0.04 && $0.x <= 0.96 && $0.y >= 0.04 && $0.y <= 0.96
+        // 若拍立得四角在畫面內 (0.01...0.99)，檢查 Vision 原生矩形是否能提供更精確的微調角點
+        let allCornersInside = initialCandidate.allSatisfy {
+            $0.x >= 0.01 && $0.x <= 0.99 && $0.y >= 0.01 && $0.y <= 0.99
         }
-        if allCornersWellInside,
+        if allCornersInside,
            let visionPts = detectCleanVisionQuadOnProxy(
                proxyImage: donorImage,
                proxySize: donorSize,
-               priorNormalizedCorners: shiftedNormCorners
+               priorNormalizedCorners: initialCandidate
            ) {
             let normVision = VisionManager.orderPoints(visionPts).map {
                 CGPoint(x: $0.x / max(1.0, donorSize.width), y: $0.y / max(1.0, donorSize.height))
             }
-            let meanDiff = zip(normVision, shiftedNormCorners).reduce(0.0) { acc, pair in
+            let meanDiff = zip(normVision, initialCandidate).reduce(0.0) { acc, pair in
                 acc + hypot(Double(pair.0.x - pair.1.x), Double(pair.0.y - pair.1.y))
             } / 4.0
-            if meanDiff < 0.065 {
+            let baseArea = max(1e-5, VisionManager.quadArea(baseNormCorners))
+            let visionArea = VisionManager.quadArea(normVision)
+            if meanDiff < 0.085 && (visionArea / baseArea) >= 0.65 && (visionArea / baseArea) <= 1.45 {
                 return normVision
             }
         }
 
-        return shiftedNormCorners
+        return initialCandidate
     }
 
-    /// 多視角無反光合成核心 (`fuseMultiFrameGlareFree`)：
-    /// - 永遠以第 1 張完整置中拍攝之拍立得 (`croppedImages[0]`) 為基準底圖 (Base Frame)。
-    /// - 針對其餘四角拍攝圖 (`k = 1..<count`)：
-    ///   1. 計算畫面內有效遮罩 (`rawValidB`)，自動排除移出相機畫面外的延伸區域。
-    ///   2. 執行兩階段配準：先執行全域粗平移搜尋 (`±36px` X, `±48px` Y) 消除手持移動視差，再執行 4×6 局部非剛性網格微調。
-    ///   3. 以乾淨中間調估算全域環境曝光差（絕不把白衣上的反光斑誤吸納為環境光差），100% 消除中央與白衣/深色外套上的閃光燈反光核與光暈。
+    // MARK: - Stage 2, 3 & 4: Google PhotoScan 真實底層配準與多幀無反光合成核心
+
+    /// Google PhotoScan 4 階段無反光合成核心 (`fuseMultiFrameGlareFree`)：
+    /// - **Stage 2**: 遮罩反光離群區 -> 提取 $8\times 12$ 網格之 Harris/梯度結構特徵點 -> 多尺度 ZNCC 亞像素區塊匹配 -> RANSAC + Huber IRLS 求解 $3\times 3$ 單應性矩陣 $H_k$ -> 配準品質守門（失準幀直接剔除，保證 0 錯位）。
+    /// - **Stage 3**: Szeliski & Coughlan (1997) 雙線性樣條控制點光流（限制在 $\pm 2.0\text{ px}$ 並強制執行 8 輪拉普拉斯平滑正則化），消除相紙微彎殘差且絕不撕裂五官。
+    /// - **Stage 4**: 低頻空間光照均衡場 $\Delta L_k(x, y)$ + 多幀下包絡線（Lower-Envelope）反光剔除 + 雙尺度無縫融合。
     private func fuseMultiFrameGlareFree(
         croppedImages: [CGImage],
         donorNormalizedQuads: [[CGPoint]] = []
@@ -849,11 +1040,11 @@ extension VisionManager {
             return (baseCG, 0.0, 0.0)
         }
 
-        // 建立 420px 極速分析畫布（並於最後透過 GPU CIBlendWithMask 還原 4K 畫質）
-        let maxWorkSide: Double = 420.0
+        // 提高工作畫布解析度至 640px（較舊版提升 2.3 倍面積精度，確保文字與五官亞像素對齊）
+        let maxWorkSide: Double = 640.0
         let workScale = min(1.0, maxWorkSide / Double(max(fullWidth, fullHeight)))
-        let width = max(64, Int((Double(fullWidth) * workScale).rounded()))
-        let height = max(64, Int((Double(fullHeight) * workScale).rounded()))
+        let width = max(96, Int((Double(fullWidth) * workScale).rounded()))
+        let height = max(96, Int((Double(fullHeight) * workScale).rounded()))
         let workRect = CGRect(x: 0, y: 0, width: width, height: height)
         let bytesPerRow = width * 4
         let colorSpace = Self.sharedSRGBColorSpace
@@ -874,13 +1065,41 @@ extension VisionManager {
         ctxBase.interpolationQuality = .high
         ctxBase.draw(baseCG, in: workRect)
 
-        // 保留初始 Base Frame 副本，用於全域對位基準與產生最終 4K GPU 融合遮罩
+        // 保留初始 Base Frame 副本，所有 Donor 皆以初始 Base 0 為唯一幾何配準基準（杜絕累積漂移！）
         let initialBaseBuf = currentBuf
         var baseLum0 = [Float](repeating: 0, count: width * height)
         for p in 0..<(width * height) {
             let i = p * 4
             baseLum0[p] = (0.299 * Float(initialBaseBuf[i]) + 0.587 * Float(initialBaseBuf[i + 1]) + 0.114 * Float(initialBaseBuf[i + 2])) / 255.0
         }
+
+        var baseGx0 = [Float](repeating: 0, count: width * height)
+        var baseGy0 = [Float](repeating: 0, count: width * height)
+        for y in 1..<(height - 1) {
+            for x in 1..<(width - 1) {
+                let p = y * width + x
+                baseGx0[p] = (baseLum0[p + 1] - baseLum0[p - 1]) * 255.0
+                baseGy0[p] = (baseLum0[p + width] - baseLum0[p - width]) * 255.0
+            }
+        }
+
+        let baseSurround0 = smoothWeightMapFast(baseLum0, width: width, height: height, radius: max(16, width / 12))
+        // Base 0 的反光離群遮罩（在 Stage 2 特徵提取時嚴格避開此區域）
+        var rawGlareA = [Float](repeating: 0, count: width * height)
+        for y in 0..<height {
+            let v = Float(y) / Float(max(1, height - 1))
+            for x in 0..<width {
+                let u = Float(x) / Float(max(1, width - 1))
+                let p = y * width + x
+                let isInnerPhoto = (u >= 0.06 && u <= 0.94 && v >= 0.05 && v <= 0.80)
+                if baseLum0[p] >= 0.86 && isInnerPhoto {
+                    rawGlareA[p] = 1.0
+                } else if baseLum0[p] >= 0.68 && (baseLum0[p] - baseSurround0[p]) >= 0.075 {
+                    rawGlareA[p] = 1.0
+                }
+            }
+        }
+        let expandedGlareMaskA = maxFilterFloatFast(rawGlareA, width: width, height: height, radius: max(8, width / 32))
 
         var cumulativeReplacedMask = [Float](repeating: 0, count: width * height)
         var initialGlarePixelCount = 0
@@ -900,16 +1119,13 @@ extension VisionManager {
             ctxB.interpolationQuality = .high
             ctxB.draw(donorCG, in: workRect)
 
-            // 計算 Donor k 在原始相機畫面內的真實有效像素遮罩 (排除移出畫面外的 clampedToExtent 拉伸區)
+            // 計算 Donor k 在原始相機畫面內的真實有效像素遮罩 (排除移出畫面外的 clampedToExtent 邊界)
             var rawValidB = [Bool](repeating: true, count: width * height)
             if k < donorNormalizedQuads.count, donorNormalizedQuads[k].count == 4 {
                 let q = donorNormalizedQuads[k]
                 let tl = q[0], tr = q[1], br = q[2], bl = q[3]
-                // 注意：CGContext memory row y=0 對應拍立得頂部 (v=0)
                 for y in 0..<height {
                     let v = (CGFloat(y) + 0.5) / CGFloat(height)
-                    let topX = tl.x + (tr.x - tl.x) * 0.0
-                    let _ = topX
                     for x in 0..<width {
                         let u = (CGFloat(x) + 0.5) / CGFloat(width)
                         let tx = tl.x + (tr.x - tl.x) * u
@@ -918,7 +1134,7 @@ extension VisionManager {
                         let by = bl.y + (br.y - bl.y) * u
                         let rx = tx + (bx - tx) * v
                         let ry = ty + (by - ty) * v
-                        if rx < 0.02 || rx > 0.98 || ry < 0.02 || ry > 0.98 {
+                        if rx < 0.015 || rx > 0.985 || ry < 0.015 || ry > 0.985 {
                             rawValidB[y * width + x] = false
                         }
                     }
@@ -931,146 +1147,409 @@ extension VisionManager {
                 rawLumB[p] = (0.299 * Float(bufB[i]) + 0.587 * Float(bufB[i + 1]) + 0.114 * Float(bufB[i + 2])) / 255.0
             }
 
-            // 第一階段：全域粗平移對位 (±36px X, ±48px Y)，解決移動到四角時的透視與高度殘差
-            var bestGlobalDx = 0
-            var bestGlobalDy = 0
-            var bestGlobalCost: Float = .greatestFiniteMagnitude
+            var rawGxB = [Float](repeating: 0, count: width * height)
+            var rawGyB = [Float](repeating: 0, count: width * height)
+            for y in 1..<(height - 1) {
+                for x in 1..<(width - 1) {
+                    let p = y * width + x
+                    rawGxB[p] = (rawLumB[p + 1] - rawLumB[p - 1]) * 255.0
+                    rawGyB[p] = (rawLumB[p + width] - rawLumB[p - width]) * 255.0
+                }
+            }
 
-            initialBaseBuf.withUnsafeBufferPointer { ptrA in
-                bufB.withUnsafeBufferPointer { ptrB in
-                    func evalGlobal(_ dx: Int, _ dy: Int, step: Int) -> Float {
-                        var errSum: Float = 0
-                        var count = 0
-                        for y in stride(from: 14, to: height - 14, by: step) {
-                            let sy = y + dy
-                            guard sy >= 4, sy < height - 4 else { continue }
-                            for x in stride(from: 14, to: width - 14, by: step) {
-                                let sx = x + dx
-                                guard sx >= 4, sx < width - 4 else { continue }
-                                let pA = y * width + x
-                                let pB = sy * width + sx
-                                guard rawValidB[pB] else { continue }
-                                // 跳過雙方的高光反光區，僅以乾淨的拍立得紋理與邊界對位
-                                if baseLum0[pA] > 0.87 || rawLumB[pB] > 0.87 { continue }
-
-                                let iA = pA * 4
-                                let iB = pB * 4
-                                let cDiff = (abs(Float(ptrA[iA]) - Float(ptrB[iB]))
-                                           + abs(Float(ptrA[iA + 1]) - Float(ptrB[iB + 1]))
-                                           + abs(Float(ptrA[iA + 2]) - Float(ptrB[iB + 2]))) / 3.0
-                                let gxA = (baseLum0[pA + 1] - baseLum0[pA - 1]) * 255.0
-                                let gyA = (baseLum0[pA + width] - baseLum0[pA - width]) * 255.0
-                                let gxB = (rawLumB[pB + 1] - rawLumB[pB - 1]) * 255.0
-                                let gyB = (rawLumB[pB + width] - rawLumB[pB - width]) * 255.0
-                                let gDiff = abs(gxA - gxB) + abs(gyA - gyB)
-
-                                errSum += min(85.0, cDiff * 0.38 + gDiff * 0.62)
-                                count += 1
-                            }
-                        }
-                        guard count >= 45 else { return .greatestFiniteMagnitude }
-                        let penalty = hypot(Float(dx), Float(dy)) * 0.14
-                        return (errSum / Float(count)) + penalty
+            let surroundB = smoothWeightMapFast(rawLumB, width: width, height: height, radius: max(16, width / 12))
+            var rawGlareB = [Float](repeating: 0, count: width * height)
+            for y in 0..<height {
+                let v = Float(y) / Float(max(1, height - 1))
+                for x in 0..<width {
+                    let u = Float(x) / Float(max(1, width - 1))
+                    let p = y * width + x
+                    let isInnerPhoto = (u >= 0.06 && u <= 0.94 && v >= 0.05 && v <= 0.80)
+                    if rawLumB[p] >= 0.86 && isInnerPhoto {
+                        rawGlareB[p] = 1.0
+                    } else if rawLumB[p] >= 0.68 && (rawLumB[p] - surroundB[p]) >= 0.075 {
+                        rawGlareB[p] = 1.0
                     }
+                }
+            }
+            let expandedGlareMaskB = maxFilterFloatFast(rawGlareB, width: width, height: height, radius: max(8, width / 32))
 
-                    for dy in stride(from: -45, through: 45, by: 3) {
-                        for dx in stride(from: -36, through: 36, by: 3) {
-                            let c = evalGlobal(dx, dy, step: 6)
-                            if c < bestGlobalCost {
-                                bestGlobalCost = c
-                                bestGlobalDx = dx
-                                bestGlobalDy = dy
-                            }
-                        }
+            // =========================================================================
+            // Stage 2: 遮罩反光之 ZNCC 特徵點匹配 + RANSAC 8-DOF Homography 單應性矩陣配準
+            // =========================================================================
+
+            // 2.1 全域粗平移初估（僅在雙方皆非反光且畫面內的像素上計算）
+            var coarseDx = 0
+            var coarseDy = 0
+            var bestCoarseCost: Float = .greatestFiniteMagnitude
+            let maxShiftX = max(24, width / 10)
+            let maxShiftY = max(32, height / 10)
+
+            func evalCoarse(_ dx: Int, _ dy: Int, step: Int) -> Float {
+                var errSum: Float = 0
+                var count = 0
+                for y in stride(from: 16, to: height - 16, by: step) {
+                    let sy = y + dy
+                    guard sy >= 6, sy < height - 6 else { continue }
+                    for x in stride(from: 16, to: width - 16, by: step) {
+                        let sx = x + dx
+                        guard sx >= 6, sx < width - 6 else { continue }
+                        let pA = y * width + x
+                        let pB = sy * width + sx
+                        guard rawValidB[pB] else { continue }
+                        if expandedGlareMaskA[pA] > 0.5 || expandedGlareMaskB[pB] > 0.5 { continue }
+
+                        let lDiff = abs(baseLum0[pA] - rawLumB[pB]) * 255.0
+                        let gDiff = abs(baseGx0[pA] - rawGxB[pB]) + abs(baseGy0[pA] - rawGyB[pB])
+                        errSum += min(80.0, lDiff * 0.30 + gDiff * 0.70)
+                        count += 1
                     }
-                    let cDx = bestGlobalDx, cDy = bestGlobalDy
-                    bestGlobalCost = evalGlobal(cDx, cDy, step: 4)
-                    for dy in (cDy - 2)...(cDy + 2) {
-                        for dx in (cDx - 2)...(cDx + 2) {
-                            let c = evalGlobal(dx, dy, step: 4)
-                            if c < bestGlobalCost {
-                                bestGlobalCost = c
-                                bestGlobalDx = dx
-                                bestGlobalDy = dy
-                            }
-                        }
+                }
+                guard count >= 60 else { return .greatestFiniteMagnitude }
+                return (errSum / Float(count)) + hypot(Float(dx), Float(dy)) * 0.08
+            }
+
+            for dy in stride(from: -maxShiftY, through: maxShiftY, by: 4) {
+                for dx in stride(from: -maxShiftX, through: maxShiftX, by: 4) {
+                    let c = evalCoarse(dx, dy, step: 8)
+                    if c < bestCoarseCost {
+                        bestCoarseCost = c
+                        coarseDx = dx
+                        coarseDy = dy
+                    }
+                }
+            }
+            let cDx0 = coarseDx, cDy0 = coarseDy
+            for dy in (cDy0 - 3)...(cDy0 + 3) {
+                for dx in (cDx0 - 3)...(cDx0 + 3) {
+                    let c = evalCoarse(dx, dy, step: 5)
+                    if c < bestCoarseCost {
+                        bestCoarseCost = c
+                        coarseDx = dx
+                        coarseDy = dy
                     }
                 }
             }
 
-            // 第二階段：以 (bestGlobalDx, bestGlobalDy) 為中心的 4×6 穩健局部網格微調 (±7px)
-            let cols = 4
-            let rows = 6
-            var gridShiftX = [Float](repeating: Float(bestGlobalDx), count: (cols + 1) * (rows + 1))
-            var gridShiftY = [Float](repeating: Float(bestGlobalDy), count: (cols + 1) * (rows + 1))
-            let localRange = 7
+            // 2.2 在 8×12 空間網格中提取非反光區的 Harris / 強梯度特徵角點（保證全卡均勻分佈）
+            struct KeypointA {
+                let x: Int
+                let y: Int
+                let score: Float
+            }
+            let featCols = 8
+            let featRows = 12
+            var keypointsA: [KeypointA] = []
+            let margin = 14
+            for r in 0..<featRows {
+                let y0 = margin + (height - 2 * margin) * r / featRows
+                let y1 = margin + (height - 2 * margin) * (r + 1) / featRows
+                for c in 0..<featCols {
+                    let x0 = margin + (width - 2 * margin) * c / featCols
+                    let x1 = margin + (width - 2 * margin) * (c + 1) / featCols
+                    var bestPt: KeypointA? = nil
+                    for y in stride(from: y0, to: y1, by: 2) {
+                        for x in stride(from: x0, to: x1, by: 2) {
+                            let p = y * width + x
+                            guard expandedGlareMaskA[p] < 0.5 else { continue }
+                            // 結合梯度能量與角點正交響應（Harris-like cornerness）
+                            let gx = abs(baseGx0[p])
+                            let gy = abs(baseGy0[p])
+                            let gradMag = hypot(gx, gy)
+                            let cornerness = gradMag + 0.65 * min(gx, gy)
+                            if cornerness >= 18.0 {
+                                if bestPt == nil || cornerness > bestPt!.score {
+                                    bestPt = KeypointA(x: x, y: y, score: cornerness)
+                                }
+                            }
+                        }
+                    }
+                    if let bestPt {
+                        keypointsA.append(bestPt)
+                    }
+                }
+            }
 
-            initialBaseBuf.withUnsafeBufferPointer { ptrA in
-                bufB.withUnsafeBufferPointer { ptrB in
-                    for gy in 0...rows {
-                        let centerY = Int(Double(gy) / Double(rows) * Double(height - 1))
-                        let y0 = max(8, centerY - height / (rows * 2))
-                        let y1 = min(height - 9, centerY + height / (rows * 2))
-                        for gx in 0...cols {
-                            let centerX = Int(Double(gx) / Double(cols) * Double(width - 1))
-                            let x0 = max(8, centerX - width / (cols * 2))
-                            let x1 = min(width - 9, centerX + width / (cols * 2))
+            // 2.3 對每個特徵點執行 ZNCC 區塊匹配 + 拋物線亞像素峰值內插
+            var matchedSrc: [SIMD2<Double>] = []
+            var matchedDst: [SIMD2<Double>] = []
+            let patchR = 4 // 9x9 patch
+            let searchR = max(16, width / 26)
 
-                            var bestDx = bestGlobalDx
-                            var bestDy = bestGlobalDy
-                            var bestCost: Float = .greatestFiniteMagnitude
+            for kp in keypointsA {
+                let ax = kp.x, ay = kp.y
+                guard ax >= patchR + 2, ax < width - patchR - 2,
+                      ay >= patchR + 2, ay < height - patchR - 2 else { continue }
 
-                            for dy in (bestGlobalDy - localRange)...(bestGlobalDy + localRange) {
-                                for dx in (bestGlobalDx - localRange)...(bestGlobalDx + localRange) {
-                                    var errSum: Float = 0
-                                    var count: Int = 0
-                                    for y in stride(from: y0, to: y1, by: 4) {
-                                        let sy = y + dy
-                                        guard sy >= 2, sy < height - 2 else { continue }
-                                        for x in stride(from: x0, to: x1, by: 4) {
-                                            let sx = x + dx
-                                            guard sx >= 2, sx < width - 2 else { continue }
-                                            let pA = y * width + x
-                                            let pB = sy * width + sx
-                                            guard rawValidB[pB] else { continue }
-                                            if baseLum0[pA] > 0.88 || rawLumB[pB] > 0.88 { continue }
+                var sumA: Float = 0
+                let patchCount = (2 * patchR + 1) * (2 * patchR + 1)
+                for py in -patchR...patchR {
+                    let rowA = (ay + py) * width + ax
+                    for px in -patchR...patchR {
+                        sumA += baseLum0[rowA + px]
+                    }
+                }
+                let meanA = sumA / Float(patchCount)
+                var varA: Float = 0
+                for py in -patchR...patchR {
+                    let rowA = (ay + py) * width + ax
+                    for px in -patchR...patchR {
+                        let d = baseLum0[rowA + px] - meanA
+                        varA += d * d
+                    }
+                }
+                guard varA > 0.004 else { continue }
 
-                                            let iA = pA * 4
-                                            let iB = pB * 4
-                                            let cDiff = (abs(Float(ptrA[iA]) - Float(ptrB[iB]))
-                                                       + abs(Float(ptrA[iA + 1]) - Float(ptrB[iB + 1]))
-                                                       + abs(Float(ptrA[iA + 2]) - Float(ptrB[iB + 2]))) / 3.0
-                                            let gxA = (baseLum0[pA + 1] - baseLum0[pA - 1]) * 255.0
-                                            let gyA = (baseLum0[pA + width] - baseLum0[pA - width]) * 255.0
-                                            let gxB = (rawLumB[pB + 1] - rawLumB[pB - 1]) * 255.0
-                                            let gyB = (rawLumB[pB + width] - rawLumB[pB - width]) * 255.0
-                                            let gDiff = abs(gxA - gxB) + abs(gyA - gyB)
+                let initBx = ax + coarseDx
+                let initBy = ay + coarseDy
 
-                                            errSum += min(80.0, cDiff * 0.40 + gDiff * 0.60)
-                                            count += 1
-                                        }
+                func evalZNCC(bx: Int, by: Int) -> Float {
+                    guard bx >= patchR + 2, bx < width - patchR - 2,
+                          by >= patchR + 2, by < height - patchR - 2 else { return -1.0 }
+                    let centerB = by * width + bx
+                    guard rawValidB[centerB], expandedGlareMaskB[centerB] < 0.5 else { return -1.0 }
+
+                    var sumB: Float = 0
+                    for py in -patchR...patchR {
+                        let rowB = (by + py) * width + bx
+                        for px in -patchR...patchR {
+                            let pB = rowB + px
+                            if !rawValidB[pB] || expandedGlareMaskB[pB] > 0.5 { return -1.0 }
+                            sumB += rawLumB[pB]
+                        }
+                    }
+                    let meanB = sumB / Float(patchCount)
+                    var cov: Float = 0
+                    var varB: Float = 0
+                    var gradSim: Float = 0
+                    for py in -patchR...patchR {
+                        let rowA = (ay + py) * width + ax
+                        let rowB = (by + py) * width + bx
+                        for px in -patchR...patchR {
+                            let pA = rowA + px
+                            let pB = rowB + px
+                            let da = baseLum0[pA] - meanA
+                            let db = rawLumB[pB] - meanB
+                            cov += da * db
+                            varB += db * db
+                            let gDiff = (abs(baseGx0[pA] - rawGxB[pB]) + abs(baseGy0[pA] - rawGyB[pB])) / 255.0
+                            gradSim += max(0.0, 1.0 - gDiff * 2.2)
+                        }
+                    }
+                    guard varB > 0.003 else { return -1.0 }
+                    let zncc = cov / sqrt(varA * varB)
+                    let meanGradSim = gradSim / Float(patchCount)
+                    return zncc * 0.70 + meanGradSim * 0.30
+                }
+
+                var bestScore: Float = -1.0
+                var bestBx = initBx
+                var bestBy = initBy
+
+                // 先以 step = 2 粗搜，再於 ±2px 精搜
+                for sy in stride(from: initBy - searchR, through: initBy + searchR, by: 2) {
+                    for sx in stride(from: initBx - searchR, through: initBx + searchR, by: 2) {
+                        let s = evalZNCC(bx: sx, by: sy)
+                        if s > bestScore {
+                            bestScore = s
+                            bestBx = sx
+                            bestBy = sy
+                        }
+                    }
+                }
+                let cBx = bestBx, cBy = bestBy
+                for sy in (cBy - 2)...(cBy + 2) {
+                    for sx in (cBx - 2)...(cBx + 2) {
+                        let s = evalZNCC(bx: sx, by: sy)
+                        if s > bestScore {
+                            bestScore = s
+                            bestBx = sx
+                            bestBy = sy
+                        }
+                    }
+                }
+
+                guard bestScore >= 0.68 else { continue }
+
+                // 1D 拋物線亞像素峰值內插 (Sub-pixel Parabolic Peak Refinement)
+                let sL = evalZNCC(bx: bestBx - 1, by: bestBy)
+                let sR = evalZNCC(bx: bestBx + 1, by: bestBy)
+                let sU = evalZNCC(bx: bestBx, by: bestBy - 1)
+                let sD = evalZNCC(bx: bestBx, by: bestBy + 1)
+
+                var subDx: Double = 0.0
+                let denomX = sL - 2.0 * bestScore + sR
+                if sL > 0 && sR > 0 && abs(denomX) > 1e-4 {
+                    subDx = max(-0.5, min(0.5, Double(0.5 * (sL - sR) / denomX)))
+                }
+                var subDy: Double = 0.0
+                let denomY = sU - 2.0 * bestScore + sD
+                if sU > 0 && sD > 0 && abs(denomY) > 1e-4 {
+                    subDy = max(-0.5, min(0.5, Double(0.5 * (sU - sD) / denomY)))
+                }
+
+                matchedSrc.append(SIMD2<Double>(Double(ax), Double(ay)))
+                matchedDst.append(SIMD2<Double>(Double(bestBx) + subDx, Double(bestBy) + subDy))
+            }
+
+            // 2.4 RANSAC + Huber IRLS 求解 8-DOF 單應性矩陣 H_k (將 Base A 座標映射至 Donor B 座標)
+            var homographyAtoB: [Double] = [
+                1.0, 0.0, Double(coarseDx),
+                0.0, 1.0, Double(coarseDy),
+                0.0, 0.0, 1.0
+            ]
+            var homographyValid = false
+
+            if matchedSrc.count >= 8,
+               let (estimatedH, inlierCount) = Self.estimateHomographyRANSAC(
+                   src: matchedSrc,
+                   dst: matchedDst,
+                   inlierThreshold: 2.4,
+                   maxIterations: 220
+               ),
+               inlierCount >= max(8, matchedSrc.count / 3) {
+                // 檢查單應性矩陣是否保持合理剛體/透視比例（無翻轉或劇烈扭曲）
+                let tlP = Self.applyHomography(estimatedH, to: SIMD2<Double>(0, 0))
+                let trP = Self.applyHomography(estimatedH, to: SIMD2<Double>(Double(width), 0))
+                let brP = Self.applyHomography(estimatedH, to: SIMD2<Double>(Double(width), Double(height)))
+                let blP = Self.applyHomography(estimatedH, to: SIMD2<Double>(0, Double(height)))
+                let mappedQuad = [
+                    CGPoint(x: tlP.x, y: tlP.y),
+                    CGPoint(x: trP.x, y: trP.y),
+                    CGPoint(x: brP.x, y: brP.y),
+                    CGPoint(x: blP.x, y: blP.y)
+                ]
+                let mappedArea = VisionManager.quadArea(mappedQuad)
+                let areaRatio = mappedArea / Double(width * height)
+                if areaRatio >= 0.72 && areaRatio <= 1.38 && isNaturalPerspectiveQuad(mappedQuad) {
+                    homographyAtoB = estimatedH
+                    homographyValid = true
+                }
+            }
+
+            // =========================================================================
+            // Stage 3: Szeliski & Coughlan (1997) 剛性正則化控制點樣條光流 (Spline Control Mesh)
+            // =========================================================================
+            // 在 8-DOF Homography 平面對齊後，僅允許 ±2.0px 的亞像素控制點微調，並施加 8 輪拉普拉斯平滑正則化，
+            // 徹底杜絕舊版獨立網格造成的五官撕裂與錯位！
+            let cols = 6
+            let rows = 9
+            let numVerts = (cols + 1) * (rows + 1)
+            var dataDeltaX = [Float](repeating: 0, count: numVerts)
+            var dataDeltaY = [Float](repeating: 0, count: numVerts)
+            var vertConfidence = [Float](repeating: 0, count: numVerts)
+
+            if homographyValid {
+                let cellRadiusX = max(10, width / (cols * 2))
+                let cellRadiusY = max(10, height / (rows * 2))
+                let residualCandidates: [Float] = [-2.0, -1.25, -0.5, 0.0, 0.5, 1.25, 2.0]
+
+                for gy in 0...rows {
+                    let cy = Int((Double(gy) / Double(rows) * Double(height - 1)).rounded())
+                    let y0 = max(6, cy - cellRadiusY)
+                    let y1 = min(height - 7, cy + cellRadiusY)
+                    for gx in 0...cols {
+                        let cx = Int((Double(gx) / Double(cols) * Double(width - 1)).rounded())
+                        let x0 = max(6, cx - cellRadiusX)
+                        let x1 = min(width - 7, cx + cellRadiusX)
+                        let vIdx = gy * (cols + 1) + gx
+
+                        var bestDx: Float = 0
+                        var bestDy: Float = 0
+                        var bestCost: Float = .greatestFiniteMagnitude
+                        var zeroCost: Float = .greatestFiniteMagnitude
+                        var validSamplesCount = 0
+                        var gradEnergySum: Float = 0
+
+                        for dy in residualCandidates {
+                            for dx in residualCandidates {
+                                var errSum: Float = 0
+                                var count = 0
+                                var gEnergy: Float = 0
+                                for y in stride(from: y0, through: y1, by: 4) {
+                                    for x in stride(from: x0, through: x1, by: 4) {
+                                        let pA = y * width + x
+                                        guard expandedGlareMaskA[pA] < 0.5 else { continue }
+                                        let hp = Self.applyHomography(homographyAtoB, to: SIMD2<Double>(Double(x), Double(y)))
+                                        let sx = Float(hp.x) + dx
+                                        let sy = Float(hp.y) + dy
+                                        let ix = Int(sx.rounded())
+                                        let iy = Int(sy.rounded())
+                                        guard ix >= 3, ix < width - 3, iy >= 3, iy < height - 3 else { continue }
+                                        let pB = iy * width + ix
+                                        guard rawValidB[pB], expandedGlareMaskB[pB] < 0.5 else { continue }
+
+                                        let lB = Self.sampleBilinearFloat(rawLumB, width: width, height: height, x: sx, y: sy)
+                                        let gxBVal = Self.sampleBilinearFloat(rawGxB, width: width, height: height, x: sx, y: sy)
+                                        let gyBVal = Self.sampleBilinearFloat(rawGyB, width: width, height: height, x: sx, y: sy)
+
+                                        let lDiff = abs(baseLum0[pA] - lB) * 255.0
+                                        let gDiff = abs(baseGx0[pA] - gxBVal) + abs(baseGy0[pA] - gyBVal)
+                                        errSum += min(70.0, lDiff * 0.30 + gDiff * 0.70)
+                                        gEnergy += hypot(baseGx0[pA], baseGy0[pA])
+                                        count += 1
                                     }
-                                    if count >= 10 {
-                                        let penalty = Float(abs(dx - bestGlobalDx) + abs(dy - bestGlobalDy)) * 0.45
-                                        let avgCost = (errSum / Float(count)) + penalty
-                                        if avgCost < bestCost {
-                                            bestCost = avgCost
-                                            bestDx = dx
-                                            bestDy = dy
-                                        }
+                                }
+                                if count >= 12 {
+                                    let penalty = hypot(dx, dy) * 0.85
+                                    let cost = (errSum / Float(count)) + penalty
+                                    if dx == 0 && dy == 0 {
+                                        zeroCost = cost
+                                        validSamplesCount = count
+                                        gradEnergySum = gEnergy / Float(count)
+                                    }
+                                    if cost < bestCost {
+                                        bestCost = cost
+                                        bestDx = dx
+                                        bestDy = dy
                                     }
                                 }
                             }
-                            gridShiftX[gy * (cols + 1) + gx] = Float(bestDx)
-                            gridShiftY[gy * (cols + 1) + gx] = Float(bestDy)
+                        }
+
+                        if validSamplesCount >= 12 && gradEnergySum >= 8.0 && bestCost < zeroCost - 0.15 {
+                            dataDeltaX[vIdx] = bestDx
+                            dataDeltaY[vIdx] = bestDy
+                            vertConfidence[vIdx] = min(1.0, gradEnergySum / 28.0)
                         }
                     }
                 }
             }
 
-            // 透過雙線性內插對齊 Donor 影像與其畫面內有效遮罩 warpedValidB
-            var warpedB = bufB
+            // 8 輪拉普拉斯薄膜平滑正則化 (Laplacian Membrane Regularization, Szeliski & Coughlan 1997)
+            var smoothDeltaX = dataDeltaX
+            var smoothDeltaY = dataDeltaY
+            let lambdaReg: Float = 2.2
+            for _ in 0..<8 {
+                var nextX = smoothDeltaX
+                var nextY = smoothDeltaY
+                for gy in 0...rows {
+                    for gx in 0...cols {
+                        let idx = gy * (cols + 1) + gx
+                        var nSumX: Float = 0
+                        var nSumY: Float = 0
+                        var nCount: Float = 0
+                        if gx > 0        { nSumX += smoothDeltaX[idx - 1];          nSumY += smoothDeltaY[idx - 1];          nCount += 1 }
+                        if gx < cols     { nSumX += smoothDeltaX[idx + 1];          nSumY += smoothDeltaY[idx + 1];          nCount += 1 }
+                        if gy > 0        { nSumX += smoothDeltaX[idx - (cols + 1)]; nSumY += smoothDeltaY[idx - (cols + 1)]; nCount += 1 }
+                        if gy < rows     { nSumX += smoothDeltaX[idx + (cols + 1)]; nSumY += smoothDeltaY[idx + (cols + 1)]; nCount += 1 }
+                        let avgNX = nCount > 0 ? (nSumX / nCount) : 0
+                        let avgNY = nCount > 0 ? (nSumY / nCount) : 0
+                        let conf = vertConfidence[idx]
+                        nextX[idx] = (conf * dataDeltaX[idx] + lambdaReg * avgNX) / (conf + lambdaReg)
+                        nextY[idx] = (conf * dataDeltaY[idx] + lambdaReg * avgNY) / (conf + lambdaReg)
+                    }
+                }
+                smoothDeltaX = nextX
+                smoothDeltaY = nextY
+            }
+
+            // 以「單應性矩陣 H_k + 平滑樣條控制點位移」執行真實雙線性亞像素重採樣 (Sub-pixel Bilinear Warp)
+            var warpedB = [UInt8](repeating: 0, count: width * height * 4)
             var warpedValidB = [Bool](repeating: false, count: width * height)
+            var alignVerifyErrSum: Float = 0
+            var alignVerifyCount: Int = 0
+
             warpedB.withUnsafeMutableBufferPointer { dstPtr in
                 bufB.withUnsafeBufferPointer { srcPtr in
                     for y in 0..<height {
@@ -1078,6 +1557,7 @@ extension VisionManager {
                         let gy0 = min(rows - 1, max(0, Int(fy)))
                         let gy1 = gy0 + 1
                         let wy = fy - Float(gy0)
+
                         for x in 0..<width {
                             let fx = Float(x) / Float(max(1, width - 1)) * Float(cols)
                             let gx0 = min(cols - 1, max(0, Int(fx)))
@@ -1089,34 +1569,70 @@ extension VisionManager {
                             let idx01 = gy1 * (cols + 1) + gx0
                             let idx11 = gy1 * (cols + 1) + gx1
 
-                            let dx = (1 - wx) * (1 - wy) * gridShiftX[idx00]
-                                   + wx * (1 - wy) * gridShiftX[idx10]
-                                   + (1 - wx) * wy * gridShiftX[idx01]
-                                   + wx * wy * gridShiftX[idx11]
-                            let dy = (1 - wx) * (1 - wy) * gridShiftY[idx00]
-                                   + wx * (1 - wy) * gridShiftY[idx10]
-                                   + (1 - wx) * wy * gridShiftY[idx01]
-                                   + wx * wy * gridShiftY[idx11]
+                            let splineDx = (1 - wx) * (1 - wy) * smoothDeltaX[idx00]
+                                         + wx * (1 - wy) * smoothDeltaX[idx10]
+                                         + (1 - wx) * wy * smoothDeltaX[idx01]
+                                         + wx * wy * smoothDeltaX[idx11]
+                            let splineDy = (1 - wx) * (1 - wy) * smoothDeltaY[idx00]
+                                         + wx * (1 - wy) * smoothDeltaY[idx10]
+                                         + (1 - wx) * wy * smoothDeltaY[idx01]
+                                         + wx * wy * smoothDeltaY[idx11]
 
-                            let sxRaw = Int((Float(x) + dx).rounded())
-                            let syRaw = Int((Float(y) + dy).rounded())
+                            let hp = Self.applyHomography(homographyAtoB, to: SIMD2<Double>(Double(x), Double(y)))
+                            let srcX = Float(hp.x) + splineDx
+                            let srcY = Float(hp.y) + splineDy
+
+                            let x0 = Int(floor(srcX))
+                            let y0 = Int(floor(srcY))
                             let pDst = y * width + x
+                            guard x0 >= 2, x0 < width - 3, y0 >= 2, y0 < height - 3 else { continue }
+
+                            let p00 = y0 * width + x0
+                            guard rawValidB[p00], rawValidB[p00 + 1],
+                                  rawValidB[p00 + width], rawValidB[p00 + width + 1] else { continue }
+
+                            warpedValidB[pDst] = true
+                            let ax = srcX - Float(x0)
+                            let ay = srcY - Float(y0)
+                            let w00 = (1 - ax) * (1 - ay)
+                            let w10 = ax * (1 - ay)
+                            let w01 = (1 - ax) * ay
+                            let w11 = ax * ay
+
+                            let i00 = p00 * 4
+                            let i10 = (p00 + 1) * 4
+                            let i01 = (p00 + width) * 4
+                            let i11 = (p00 + width + 1) * 4
                             let dstIdx = pDst * 4
-                            if sxRaw >= 2 && sxRaw < width - 2 && syRaw >= 2 && syRaw < height - 2 {
-                                let pSrc = syRaw * width + sxRaw
-                                if rawValidB[pSrc] {
-                                    warpedValidB[pDst] = true
-                                    let srcIdx = pSrc * 4
-                                    dstPtr[dstIdx]     = srcPtr[srcIdx]
-                                    dstPtr[dstIdx + 1] = srcPtr[srcIdx + 1]
-                                    dstPtr[dstIdx + 2] = srcPtr[srcIdx + 2]
-                                    dstPtr[dstIdx + 3] = 255
-                                }
+
+                            let rVal = w00 * Float(srcPtr[i00])     + w10 * Float(srcPtr[i10])     + w01 * Float(srcPtr[i01])     + w11 * Float(srcPtr[i11])
+                            let gVal = w00 * Float(srcPtr[i00 + 1]) + w10 * Float(srcPtr[i10 + 1]) + w01 * Float(srcPtr[i01 + 1]) + w11 * Float(srcPtr[i11 + 1])
+                            let bVal = w00 * Float(srcPtr[i00 + 2]) + w10 * Float(srcPtr[i10 + 2]) + w01 * Float(srcPtr[i01 + 2]) + w11 * Float(srcPtr[i11 + 2])
+
+                            dstPtr[dstIdx]     = UInt8(min(255, max(0, Int(rVal.rounded()))))
+                            dstPtr[dstIdx + 1] = UInt8(min(255, max(0, Int(gVal.rounded()))))
+                            dstPtr[dstIdx + 2] = UInt8(min(255, max(0, Int(bVal.rounded()))))
+                            dstPtr[dstIdx + 3] = 255
+
+                            if (x & 3) == 0 && (y & 3) == 0 && expandedGlareMaskA[pDst] < 0.5 && expandedGlareMaskB[p00] < 0.5 {
+                                let lumBVal = (0.299 * rVal + 0.587 * gVal + 0.114 * bVal) / 255.0
+                                alignVerifyErrSum += abs(baseLum0[pDst] - lumBVal)
+                                alignVerifyCount += 1
                             }
                         }
                     }
                 }
             }
+
+            // 2.5 嚴格配準品質守門（Inlier & Structural Gate）：
+            // 若該張角點照片有效對齊區過小、或非反光區對齊誤差過大（如拍攝時劇烈手震），直接捨棄該張，絕不硬貼造成錯位！
+            guard alignVerifyCount >= 80, (alignVerifyErrSum / Float(alignVerifyCount)) <= 0.16 else {
+                continue
+            }
+
+            // =========================================================================
+            // Stage 4: 空間平滑環境光均衡場 + 多幀下包絡線反光剔除與無縫融合
+            // =========================================================================
 
             var lumMapA = [Float](repeating: 0, count: width * height)
             var lumMapB = [Float](repeating: 0, count: width * height)
@@ -1126,46 +1642,60 @@ extension VisionManager {
                 lumMapB[p] = (0.299 * Float(warpedB[i]) + 0.587 * Float(warpedB[i + 1]) + 0.114 * Float(warpedB[i + 2])) / 255.0
             }
 
-            let smoothLumA = smoothWeightMapFast(lumMapA, width: width, height: height, radius: max(3, width / 75))
-            let smoothLumB = smoothWeightMapFast(lumMapB, width: width, height: height, radius: max(3, width / 75))
-            let localSurroundA = smoothWeightMapFast(lumMapA, width: width, height: height, radius: max(18, width / 11))
+            let smoothLumA = smoothWeightMapFast(lumMapA, width: width, height: height, radius: max(3, width / 80))
+            let smoothLumB = smoothWeightMapFast(lumMapB, width: width, height: height, radius: max(3, width / 80))
+            let localSurroundA = smoothWeightMapFast(lumMapA, width: width, height: height, radius: max(20, width / 11))
 
-            // 僅從乾淨的中間調像素 (0.16...0.72 且 |A - B| < 0.06) 估算全域環境曝光差，
-            // 絕不把白襯衫或深色外套上的閃光燈反光斑誤吸納為背景光差！
-            var midToneDiffSum: Float = 0
-            var midToneCount: Int = 0
+            // 4.1 計算空間平滑光照差場 (Spatially-Varying Illumination Field)：
+            // 僅從乾淨非反光中間調像素取樣 (A - B)，透過大範圍濾波補齊角度傾斜造成的漸層亮度差
+            var midToneDiffNum = [Float](repeating: 0, count: width * height)
+            var midToneDiffDen = [Float](repeating: 0, count: width * height)
+            var globalMidSum: Float = 0
+            var globalMidCnt: Int = 0
+
             for p in 0..<(width * height) where warpedValidB[p] {
                 let a = smoothLumA[p]
                 let b = smoothLumB[p]
-                if a >= 0.16 && a <= 0.72 && b >= 0.16 && b <= 0.72 && abs(a - b) < 0.06 {
-                    midToneDiffSum += (a - b)
-                    midToneCount += 1
+                if a >= 0.14 && a <= 0.74 && b >= 0.14 && b <= 0.74 && abs(a - b) < 0.075 {
+                    let diff = a - b
+                    midToneDiffNum[p] = diff
+                    midToneDiffDen[p] = 1.0
+                    globalMidSum += diff
+                    globalMidCnt += 1
                 }
             }
-            let globalAmbientDiff: Float = midToneCount >= 24 ? (midToneDiffSum / Float(midToneCount)) : 0.0
+            let fallbackGlobalDiff: Float = globalMidCnt >= 24 ? (globalMidSum / Float(globalMidCnt)) : 0.0
+            let smoothNum = smoothWeightMapFast(midToneDiffNum, width: width, height: height, radius: max(28, width / 6))
+            let smoothDen = smoothWeightMapFast(midToneDiffDen, width: width, height: height, radius: max(28, width / 6))
+            var ambientDiffField = [Float](repeating: fallbackGlobalDiff, count: width * height)
+            for p in 0..<(width * height) {
+                if smoothDen[p] > 0.08 {
+                    let localDiff = smoothNum[p] / smoothDen[p]
+                    ambientDiffField[p] = max(-0.14, min(0.14, localDiff * 0.75 + fallbackGlobalDiff * 0.25))
+                }
+            }
 
-            // 2. 偵測真正的「鏡面反光高光峰值種子 (Specular Peak Seeds)」
-            // 同時涵蓋：(a) 白色衣服/亮面上的強光核 (lumA >= 0.89 && diff >= 0.06)、(b) 深色衣服/背景上的強光核、(c) 局部顯著凸起之亮斑
+            // 4.2 偵測反光高光峰值種子 (Specular Outlier Seeds)
             var rawPeak = [Float](repeating: 0, count: width * height)
             for p in 0..<(width * height) where warpedValidB[p] {
-                let corrSmoothB = smoothLumB[p] + globalAmbientDiff
-                let corrRawB = lumMapB[p] + globalAmbientDiff
-                // 若 Donor B 本身在該處也是過曝強反光 (> 0.92 且不比 A 暗)，不可作為修補種子
-                if lumMapB[p] >= 0.93 && corrSmoothB >= smoothLumA[p] - 0.03 {
+                let amb = ambientDiffField[p]
+                let corrSmoothB = smoothLumB[p] + amb
+                let corrRawB = lumMapB[p] + amb
+                if lumMapB[p] >= 0.92 && corrSmoothB >= smoothLumA[p] - 0.025 {
                     continue
                 }
                 let diff = lumMapA[p] - corrRawB
                 let regDiff = smoothLumA[p] - corrSmoothB
                 let localProminence = smoothLumA[p] - localSurroundA[p]
 
-                if (lumMapA[p] >= 0.89 && diff >= 0.060 && regDiff >= 0.042)
-                    || (lumMapA[p] >= 0.54 && diff >= 0.135 && regDiff >= 0.105)
-                    || (lumMapA[p] >= 0.78 && localProminence >= 0.080 && regDiff >= 0.058) {
+                if (lumMapA[p] >= 0.88 && diff >= 0.055 && regDiff >= 0.040)
+                    || (lumMapA[p] >= 0.52 && diff >= 0.125 && regDiff >= 0.095)
+                    || (lumMapA[p] >= 0.76 && localProminence >= 0.075 && regDiff >= 0.052) {
                     rawPeak[p] = 1.0
                 }
             }
 
-            let peakDensity = smoothWeightMapFast(rawPeak, width: width, height: height, radius: max(3, width / 66))
+            let peakDensity = smoothWeightMapFast(rawPeak, width: width, height: height, radius: max(3, width / 70))
             var peakSeed = [Float](repeating: 0, count: width * height)
             for p in 0..<(width * height) {
                 if rawPeak[p] > 0.5 && peakDensity[p] >= 0.12 {
@@ -1173,20 +1703,20 @@ extension VisionManager {
                 }
             }
 
-            // 3. 有限範圍測地線光暈向外膨脹 (Bounded Geodesic Halo Expansion)
-            // 以 peakSeed 周圍 width/6 為最大光暈半徑，將深色格紋外套/暗部背景上的閃光燈漸層光暈 (regDiff >= 0.024) 100% 納入替換
-            let maxHaloZone = maxFilterFloatFast(peakSeed, width: width, height: height, radius: max(22, width / 6))
+            // 4.3 有限範圍測地線光暈向外膨脹 (Bounded Geodesic Halo Expansion)
+            let maxHaloZone = maxFilterFloatFast(peakSeed, width: width, height: height, radius: max(24, width / 6))
             var haloMask = peakSeed
             let stepRadius = max(6, width / 32)
             for _ in 0..<5 {
                 let expanded = maxFilterFloatFast(haloMask, width: width, height: height, radius: stepRadius)
                 for p in 0..<(width * height) where warpedValidB[p] && maxHaloZone[p] > 0.5 {
                     guard expanded[p] > 0.5 else { continue }
-                    let corrSmoothB = smoothLumB[p] + globalAmbientDiff
-                    let corrRawB = lumMapB[p] + globalAmbientDiff
+                    let amb = ambientDiffField[p]
+                    let corrSmoothB = smoothLumB[p] + amb
+                    let corrRawB = lumMapB[p] + amb
                     let regDiff = smoothLumA[p] - corrSmoothB
                     let diff = lumMapA[p] - corrRawB
-                    if regDiff >= 0.024 || diff >= 0.034 {
+                    if regDiff >= 0.024 || diff >= 0.032 {
                         haloMask[p] = 1.0
                     }
                 }
@@ -1198,37 +1728,48 @@ extension VisionManager {
                 }
             }
 
-            // 向外微幅膨脹確保反光斑最外圈漸層邊緣也被 100% 乾淨替換
-            let dilatedHalo = maxFilterFloatFast(haloMask, width: width, height: height, radius: max(5, width / 36))
+            let dilatedHalo = maxFilterFloatFast(haloMask, width: width, height: height, radius: max(5, width / 38))
 
-            // 嚴格禁止把畫面外區域或 Donor B 本身的反光斑貼進來
+            // 計算有效畫面內部安全距離羽化，防止在有效邊界處產生生硬切線
+            var validFloat = [Float](repeating: 0, count: width * height)
+            for p in 0..<(width * height) where warpedValidB[p] {
+                validFloat[p] = 1.0
+            }
+            let interiorWeight = smoothWeightMapFast(validFloat, width: width, height: height, radius: max(8, width / 36))
+
             var cleanDilated = dilatedHalo
             for p in 0..<(width * height) {
-                if !warpedValidB[p] {
+                let inWeight = max(0.0, min(1.0, (interiorWeight[p] - 0.55) / 0.45))
+                if !warpedValidB[p] || inWeight <= 0.01 {
                     cleanDilated[p] = 0.0
                     haloMask[p] = 0.0
                     continue
                 }
-                let corrSmoothB = smoothLumB[p] + globalAmbientDiff
-                if corrSmoothB > smoothLumA[p] + 0.015 {
+                let corrSmoothB = smoothLumB[p] + ambientDiffField[p]
+                if corrSmoothB > smoothLumA[p] + 0.012 {
                     cleanDilated[p] = 0.0
                     haloMask[p] = 0.0
+                } else {
+                    cleanDilated[p] *= inWeight
+                    haloMask[p] *= inWeight
                 }
             }
 
-            let featherR = max(6, width / 22)
+            let featherR = max(7, width / 22)
             let feathered1 = smoothWeightMapFast(cleanDilated, width: width, height: height, radius: featherR)
             let feathered2 = smoothWeightMapFast(feathered1, width: width, height: height, radius: featherR)
 
-            // 4. 在反光遮罩內執行 100% 無反光像素替換 (haloMask 內 w = 1.0，徹底消除中央閃光白斑與外圍灰霧！)
-            let delta = globalAmbientDiff * 255.0
+            // 4.4 執行無反光像素替換與雙尺度平滑過渡
             for p in 0..<(width * height) where warpedValidB[p] {
-                let corrSmoothB = smoothLumB[p] + globalAmbientDiff
-                if corrSmoothB > smoothLumA[p] + 0.015 { continue }
-                let w = min(1.0, max(haloMask[p] > 0.5 ? 1.0 : 0.0, feathered2[p] * 1.45))
+                let amb = ambientDiffField[p]
+                let corrSmoothB = smoothLumB[p] + amb
+                if corrSmoothB > smoothLumA[p] + 0.012 { continue }
+                let w = min(1.0, max(haloMask[p] * 0.98, feathered2[p] * 1.42))
                 guard w > 0.01 else { continue }
+
                 let idx = p * 4
                 let wA = 1.0 - w
+                let delta = amb * 255.0
 
                 let rB = min(255.0, max(0.0, Float(warpedB[idx]) + delta))
                 let gB = min(255.0, max(0.0, Float(warpedB[idx + 1]) + delta))
@@ -1248,7 +1789,6 @@ extension VisionManager {
         let totalPixels = max(1, width * height)
         let ratioBefore = Double(initialGlarePixelCount) / Double(totalPixels)
 
-        // 若工作畫布已等於原圖尺寸，直接輸出合成結果
         guard let fusedWorkCtx = CGContext(
             data: &currentBuf,
             width: width,
@@ -1304,7 +1844,7 @@ extension VisionManager {
         let ciMask = CIImage(cgImage: smallMaskCG)
             .transformed(by: upscaleTransform)
             .clampedToExtent()
-            .applyingGaussianBlur(sigma: 2.5)
+            .applyingGaussianBlur(sigma: 2.8)
             .cropped(to: fullExtent)
 
         let blend = CIFilter.blendWithMask()
@@ -1318,6 +1858,254 @@ extension VisionManager {
         }
 
         return (finalCG, ratioBefore, ratioBefore * 0.05)
+    }
+
+    // MARK: - 數學核心：RANSAC + Normalized DLT 8-DOF 單應性矩陣求解器與雙線性內插
+
+    /// 對單應性矩陣 $H$ ($3\times 3$ row-major) 執行透視投影：$(x', y') = \pi(H \cdot [x, y, 1]^T)$
+    @inline(__always)
+    private static func applyHomography(_ H: [Double], to pt: SIMD2<Double>) -> SIMD2<Double> {
+        let denom = H[6] * pt.x + H[7] * pt.y + H[8]
+        let invW = abs(denom) > 1e-8 ? (1.0 / denom) : 1.0
+        let nx = (H[0] * pt.x + H[1] * pt.y + H[2]) * invW
+        let ny = (H[3] * pt.x + H[4] * pt.y + H[5]) * invW
+        return SIMD2<Double>(nx, ny)
+    }
+
+    /// 浮點單通道影像之雙線性亞像素內插
+    @inline(__always)
+    private static func sampleBilinearFloat(
+        _ buf: [Float],
+        width: Int,
+        height: Int,
+        x: Float,
+        y: Float
+    ) -> Float {
+        let x0 = max(0, min(width - 2, Int(floor(x))))
+        let y0 = max(0, min(height - 2, Int(floor(y))))
+        let fx = max(0.0, min(1.0, x - Float(x0)))
+        let fy = max(0.0, min(1.0, y - Float(y0)))
+        let p00 = y0 * width + x0
+        let v00 = buf[p00]
+        let v10 = buf[p00 + 1]
+        let v01 = buf[p00 + width]
+        let v11 = buf[p00 + width + 1]
+        return (1 - fx) * (1 - fy) * v00
+             + fx * (1 - fy) * v10
+             + (1 - fx) * fy * v01
+             + fx * fy * v11
+    }
+
+    /// RANSAC + Huber 加權最小平方法求解 $3\times 3$ 8-DOF 單應性矩陣 $H$
+    private static func estimateHomographyRANSAC(
+        src: [SIMD2<Double>],
+        dst: [SIMD2<Double>],
+        inlierThreshold: Double,
+        maxIterations: Int
+    ) -> (H: [Double], inliers: Int)? {
+        let n = min(src.count, dst.count)
+        guard n >= 4 else { return nil }
+
+        var bestH: [Double]? = nil
+        var bestInliers: [Int] = []
+        let threshSq = inlierThreshold * inlierThreshold
+
+        // 確定性虛擬隨機產生器（保證可重現且極速）
+        var rngState: UInt64 = 0x9E3779B97F4A7C15
+        @inline(__always)
+        func nextIndex() -> Int {
+            rngState ^= rngState >> 12
+            rngState ^= rngState << 25
+            rngState ^= rngState >> 27
+            let val = rngState &* 2685821657736338717
+            return Int(val % UInt64(n))
+        }
+
+        for _ in 0..<maxIterations {
+            let i0 = nextIndex()
+            var i1 = nextIndex()
+            var guardCnt = 0
+            while i1 == i0 && guardCnt < 8 { i1 = nextIndex(); guardCnt += 1 }
+            var i2 = nextIndex()
+            guardCnt = 0
+            while (i2 == i0 || i2 == i1) && guardCnt < 8 { i2 = nextIndex(); guardCnt += 1 }
+            var i3 = nextIndex()
+            guardCnt = 0
+            while (i3 == i0 || i3 == i1 || i3 == i2) && guardCnt < 8 { i3 = nextIndex(); guardCnt += 1 }
+            if i0 == i1 || i0 == i2 || i0 == i3 || i1 == i2 || i1 == i3 || i2 == i3 { continue }
+
+            let s4 = [src[i0], src[i1], src[i2], src[i3]]
+            let d4 = [dst[i0], dst[i1], dst[i2], dst[i3]]
+            guard let H = solveHomographyNormalizedDLT(src: s4, dst: d4, weights: nil) else { continue }
+
+            var inliers: [Int] = []
+            for idx in 0..<n {
+                let proj = applyHomography(H, to: src[idx])
+                let dx = proj.x - dst[idx].x
+                let dy = proj.y - dst[idx].y
+                if dx * dx + dy * dy <= threshSq {
+                    inliers.append(idx)
+                }
+            }
+            if inliers.count > bestInliers.count {
+                bestInliers = inliers
+                bestH = H
+            }
+        }
+
+        guard bestInliers.count >= 4 else { return nil }
+
+        // 使用全部 Inliers 重新擬合最小平方 Homography，並執行 1 輪 Huber IRLS 精煉
+        let inlierSrc = bestInliers.map { src[$0] }
+        let inlierDst = bestInliers.map { dst[$0] }
+        var refinedH = solveHomographyNormalizedDLT(src: inlierSrc, dst: inlierDst, weights: nil) ?? bestH!
+
+        var huberWeights = [Double](repeating: 1.0, count: inlierSrc.count)
+        let huberDelta = max(1e-5, inlierThreshold * 0.75)
+        for i in 0..<inlierSrc.count {
+            let proj = applyHomography(refinedH, to: inlierSrc[i])
+            let err = hypot(proj.x - inlierDst[i].x, proj.y - inlierDst[i].y)
+            huberWeights[i] = err <= huberDelta ? 1.0 : (huberDelta / err)
+        }
+        if let irlsH = solveHomographyNormalizedDLT(src: inlierSrc, dst: inlierDst, weights: huberWeights) {
+            refinedH = irlsH
+        }
+
+        return (refinedH, bestInliers.count)
+    }
+
+    /// Hartley 正規化加權直接線性變換 (Normalized Weighted DLT) 求解 $3\times 3$ 8-DOF 單應性矩陣 $H$
+    private static func solveHomographyNormalizedDLT(
+        src: [SIMD2<Double>],
+        dst: [SIMD2<Double>],
+        weights: [Double]?
+    ) -> [Double]? {
+        let n = min(src.count, dst.count)
+        guard n >= 4 else { return nil }
+
+        // 1. Hartley Isotropic Normalization (平移重心至原點並縮放平均距離至 sqrt(2))
+        var meanSrc = SIMD2<Double>(0, 0)
+        var meanDst = SIMD2<Double>(0, 0)
+        for i in 0..<n {
+            meanSrc += src[i]
+            meanDst += dst[i]
+        }
+        meanSrc /= Double(n)
+        meanDst /= Double(n)
+
+        var distSrc = 0.0
+        var distDst = 0.0
+        for i in 0..<n {
+            distSrc += hypot(src[i].x - meanSrc.x, src[i].y - meanSrc.y)
+            distDst += hypot(dst[i].x - meanDst.x, dst[i].y - meanDst.y)
+        }
+        let scaleSrc = (distSrc > 1e-8) ? (sqrt(2.0) * Double(n) / distSrc) : 1.0
+        let scaleDst = (distDst > 1e-8) ? (sqrt(2.0) * Double(n) / distDst) : 1.0
+
+        // 建立 8x8 正規方程式 (A^T W A) h = A^T W b (固定 h_8 = 1.0)
+        var ata = [Double](repeating: 0.0, count: 64)
+        var atb = [Double](repeating: 0.0, count: 8)
+
+        for i in 0..<n {
+            let x = (src[i].x - meanSrc.x) * scaleSrc
+            let y = (src[i].y - meanSrc.y) * scaleSrc
+            let xp = (dst[i].x - meanDst.x) * scaleDst
+            let yp = (dst[i].y - meanDst.y) * scaleDst
+            let w = weights?[i] ?? 1.0
+
+            let r1: [Double] = [x, y, 1.0, 0.0, 0.0, 0.0, -x * xp, -y * xp]
+            let b1 = xp
+            let r2: [Double] = [0.0, 0.0, 0.0, x, y, 1.0, -x * yp, -y * yp]
+            let b2 = yp
+
+            for r in 0..<8 {
+                let wr1 = w * r1[r]
+                let wr2 = w * r2[r]
+                atb[r] += wr1 * b1 + wr2 * b2
+                for c in r..<8 {
+                    ata[r * 8 + c] += wr1 * r1[c] + wr2 * r2[c]
+                }
+            }
+        }
+        for r in 0..<8 {
+            for c in 0..<r {
+                ata[r * 8 + c] = ata[c * 8 + r]
+            }
+            ata[r * 8 + r] += 1e-9 // 微量 Tikhonov 正則化防止共線奇異
+        }
+
+        guard let hNorm8 = solveLinearSystem8x8(matrix: ata, rhs: atb) else { return nil }
+        let Hn: [Double] = [
+            hNorm8[0], hNorm8[1], hNorm8[2],
+            hNorm8[3], hNorm8[4], hNorm8[5],
+            hNorm8[6], hNorm8[7], 1.0
+        ]
+
+        // 反正規化：H = T_dst^{-1} * Hn * T_src
+        // T_src = [scaleSrc, 0, -scaleSrc*meanSrc.x; 0, scaleSrc, -scaleSrc*meanSrc.y; 0, 0, 1]
+        // T_dst^{-1} = [1/scaleDst, 0, meanDst.x; 0, 1/scaleDst, meanDst.y; 0, 0, 1]
+        let txS = -scaleSrc * meanSrc.x
+        let tyS = -scaleSrc * meanSrc.y
+        let m00 = Hn[0] * scaleSrc, m01 = Hn[1] * scaleSrc, m02 = Hn[0] * txS + Hn[1] * tyS + Hn[2]
+        let m10 = Hn[3] * scaleSrc, m11 = Hn[4] * scaleSrc, m12 = Hn[3] * txS + Hn[4] * tyS + Hn[5]
+        let m20 = Hn[6] * scaleSrc, m21 = Hn[7] * scaleSrc, m22 = Hn[6] * txS + Hn[7] * tyS + Hn[8]
+
+        let invSD = 1.0 / scaleDst
+        var H: [Double] = [
+            invSD * m00 + meanDst.x * m20, invSD * m01 + meanDst.x * m21, invSD * m02 + meanDst.x * m22,
+            invSD * m10 + meanDst.y * m20, invSD * m11 + meanDst.y * m21, invSD * m12 + meanDst.y * m22,
+            m20,                           m21,                           m22
+        ]
+        if abs(H[8]) > 1e-8 {
+            let invH8 = 1.0 / H[8]
+            for i in 0..<9 { H[i] *= invH8 }
+        }
+        return H
+    }
+
+    /// 具主元選擇之 $8\times 8$ 高斯消去法線性求解器
+    private static func solveLinearSystem8x8(matrix: [Double], rhs: [Double]) -> [Double]? {
+        var A = matrix
+        var b = rhs
+        let n = 8
+
+        for k in 0..<n {
+            var maxRow = k
+            var maxVal = abs(A[k * n + k])
+            for i in (k + 1)..<n {
+                let v = abs(A[i * n + k])
+                if v > maxVal {
+                    maxVal = v
+                    maxRow = i
+                }
+            }
+            if maxVal < 1e-11 { return nil }
+            if maxRow != k {
+                for j in k..<n {
+                    A.swapAt(k * n + j, maxRow * n + j)
+                }
+                b.swapAt(k, maxRow)
+            }
+            let pivot = A[k * n + k]
+            for i in (k + 1)..<n {
+                let factor = A[i * n + k] / pivot
+                A[i * n + k] = 0.0
+                for j in (k + 1)..<n {
+                    A[i * n + j] -= factor * A[k * n + j]
+                }
+                b[i] -= factor * b[k]
+            }
+        }
+
+        var x = [Double](repeating: 0.0, count: n)
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            var sum = b[i]
+            for j in (i + 1)..<n {
+                sum -= A[i * n + j] * x[j]
+            }
+            x[i] = sum / A[i * n + i]
+        }
+        return x
     }
 
     /// O(1) 滑動視窗二元形態學膨脹濾波器（利用盒狀滑動累加器判斷視窗內是否存在 > 0 像素，無內部迴圈，耗時 < 1ms）

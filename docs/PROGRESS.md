@@ -10,11 +10,12 @@
 * **最後更新時間**：2026-10-09
 * **當前所屬階段**：Phase 6.5 — 實機體驗回饋與相冊／調色擴充待辦清單 (UX & Album Polish Todo List)
 * **當前分支**：`main`
-* **當前進行中任務**：已完成 **Task 6.5.1 (區塊 1)**：
-  1. **拍照/匯入後修改成員全面升級為「多層多選選單」且點選不自動關閉 (`ChekiItem.swift`, `MemberAssignmentMenuContent.swift`, `ChekiInfoView.swift`, `ChekiDetailView.swift`, `BatchPairingView.swift`, `LibraryView.swift`, `PhotoLibraryManager.swift`)**：
-     - 擴充 `ChekiItem` 支援多位成員指派（保留主關聯 `idolMember` 向下相容並新增 `assignedMemberIDsJSON` 多成員清單與 `toggleAssignedMember` / `isAssigned(to:)` / `assignedMembers(from:)` 等輔助方法），同步支援多成員相冊歸類、搜尋與 iOS 系統相簿多相簿寫入。
-     - 將單張檢視 `⋯` 選單、資訊面板 (`ChekiInfoView`)、相簿網格長按選單及批次工作台 (`BatchPairingView`) 的成員選單全部加上 `.menuActionDismissBehavior(.disabled)`，點選成員勾選/取消勾選時選單保持開啟，點擊旁邊 (Lose Focus) 才關閉。
-* **最新穩定 Git Commit**：feat(成員選單): 完成 Task 6.5.1 拍照與匯入後雙層多選成員選單且點擊不自動關閉
+* **當前進行中任務**：已完成 **Google PhotoScan 真實 4 階段底層去反光演算法重構與再次裁切底圖逆投影修復 (`VisionManager+AntiGlare.swift`, `CameraScannerView.swift`, `ChekiDetailView.swift`)**：
+  1. **Stage 1（內縮象限引導與自動滯留快門）**：將 4 點位置由外框極端角落 `(0.08~0.92)` 改為 Google PhotoScan 內縮象限重心 `(0.26, 0.25), (0.74, 0.25), (0.74, 0.70), (0.26, 0.70)`，確保對準時 90% 以上拍立得保留於畫面內；並加入中心準星對準後自動滯留倒數快門（保留手動點擊快門）。
+  2. **Stage 2（反光遮罩排除 + 8-DOF 單應性矩陣 Homography $H_k$）**：先遮蔽高光反光區與膨脹光暈，再提取 $8\times 12$ 空間格網強梯度特徵點，透過多尺度 ZNCC 區塊匹配 + 拋物線亞像素峰值擬合 + 220 次 RANSAC + Huber IRLS 求解完整 8 自由度 3D 透視矩陣 $H_k$，並加入嚴格對位品質守門（淘汰模糊或錯位幀）。
+  3. **Stage 3（Szeliski 正則化控制網格微光流 + 浮點雙線性插值）**：實作 $6\times 9$ 彈性控制網格（限制殘差 $\pm 2.0\text{ px}$ 並施加 8 輪拉普拉斯薄膜平滑正則化 $\lambda_{\text{reg}}=2.2$）與雙線性亞像素浮點重採樣，徹底根除五官撕裂與整數鋸齒。
+  4. **Stage 4（低頻色溫流形校準 + 多頻段無縫羽化融合 + 原圖逆透視回寫）**：補償角度間環境低頻光照差 $\Delta L_k(x,y)$，並透過 `projectFusedCardBackToOriginalImage` (`CIPerspectiveTransform`) 將無反光成品逆投影回寫至 `originalFrontImageData` / `originalBackImageData`，確保後續進入「重新調整邊框」絕不退回第 1 張有反光的原圖。
+* **最新穩定 Git Commit**：fix(防反光): 實作 Google PhotoScan 4 階段底層去反光管線與再次裁切逆投影底圖保護
 * **下一動執行指示**：執行 **Task 6.5.2 (區塊 2)**（相冊專輯長按選單與漢堡選單擴充：攝影追加、從相冊讀入、修改成員名／修改團體名）
 
 ---

@@ -1405,7 +1405,7 @@ struct ChekiDetailView: View {
         let preferredFmt = currentItem.filmFormat
         showToast(L10n.tr("正在合成雙角度去反光⋯", "マルチアングル反射除去を合成中⋯"))
 
-        let fusedJPEG: Data? = await Task.detached(priority: .userInitiated) {
+        let fusedOutcome: (fusedCardJPEG: Data, fusedOriginalJPEG: Data?, cornersJSON: String?)? = await Task.detached(priority: .userInitiated) {
             guard let primaryCG = UIImage(data: primaryData)?.normalizedImage.cgImage,
                   let secondCG = UIImage(data: secondData)?.normalizedImage.cgImage else {
                 return nil
@@ -1416,23 +1416,27 @@ struct ChekiDetailView: View {
                 secondaryImage: secondCG,
                 borderInsetRatio: insetRatio,
                 preferredFormat: preferredFmt
-            ) else {
+            ),
+            let cardJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.92) else {
                 return nil
             }
-            return UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.92)
+            let origJPEG = UIImage(cgImage: result.fusedOriginalCGImage).jpegData(compressionQuality: 0.92)
+            return (cardJPEG, origJPEG, result.primaryCorners.toJSONString())
         }.value
 
-        if let fusedJPEG {
+        if let fusedOutcome {
             if editingBack {
-                if currentItem.originalBackImageData == nil {
-                    currentItem.originalBackImageData = currentItem.backImageData
+                currentItem.originalBackImageData = fusedOutcome.fusedOriginalJPEG ?? currentItem.originalBackImageData ?? currentItem.backImageData
+                if let cornersJSON = fusedOutcome.cornersJSON {
+                    currentItem.backPerspectivePointsJSON = cornersJSON
                 }
-                currentItem.backImageData = fusedJPEG
+                currentItem.backImageData = fusedOutcome.fusedCardJPEG
             } else {
-                if currentItem.originalFrontImageData == nil {
-                    currentItem.originalFrontImageData = currentItem.frontImageData
+                currentItem.originalFrontImageData = fusedOutcome.fusedOriginalJPEG ?? currentItem.originalFrontImageData ?? currentItem.frontImageData
+                if let cornersJSON = fusedOutcome.cornersJSON {
+                    currentItem.perspectivePointsJSON = cornersJSON
                 }
-                currentItem.frontImageData = fusedJPEG
+                currentItem.frontImageData = fusedOutcome.fusedCardJPEG
             }
             try? modelContext.save()
             UINotificationFeedbackGenerator().notificationOccurred(.success)

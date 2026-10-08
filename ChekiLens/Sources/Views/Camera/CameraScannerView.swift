@@ -762,11 +762,13 @@ struct CameraScannerView: View {
     @State private var pendingOriginalFrontImageData: Data? = nil
     @State private var pendingFrontCropTask: Task<(Data?, Data?, String?, Date?, FilmFormat), Never>? = nil
 
-    // Task 5.4 & 6.1: Google フォトスキャン (PhotoScan) 四角合成防反光連續拍攝狀態（首張固定四邊 + 陀螺儀移動 + 四角手動按快門）
+    // Task 5.4 & 6.1: Google フォトスキャン (PhotoScan) 四角合成防反光連續拍攝狀態（首張固定四邊 + 內縮四象限點位 + 對準自動快門與手動快門雙支援）
     @State private var isPhotoScanSessionActive: Bool = false
     @State private var photoScanCapturedImages: [UIImage] = []
     @State private var photoScanCapturedQuads: [[CGPoint]?] = []
     @State private var photoScanCornerCompleted: [Bool] = [false, false, false, false]
+    @State private var photoScanDwellTargetIndex: Int? = nil
+    @State private var photoScanDwellProgress: CGFloat = 0.0
     @State private var pendingModeBFirstRawJPEG: Data? = nil
     @State private var pendingModeBPreparedTask: Task<VisionManager.ModeBPreparedFirstAngle?, Never>? = nil
     @State private var statusBannerMessage: String? = nil
@@ -982,12 +984,13 @@ struct CameraScannerView: View {
                     ChekiQuadTrackingOverlay(normalizedPoints: quad)
                 }
 
-                // 四角合成防反光：陀螺儀追蹤之四個角落圓點與中央準星（移動至四角後分別手動按快門拍攝）
+                // 四角合成防反光：內縮四象限圓點與中央對準圓環（對準停穩自動快門拍攝，亦支援按快門或點選圓點）
                 if captureMode == .dualGlare && isPhotoScanSessionActive {
                     PhotoScanFourCornerOverlay(
                         quadPoints: camera.trackedQuadPoints ?? Self.defaultPreviewQuad,
                         cornerCompleted: photoScanCornerCompleted,
                         activeTargetIndex: activePhotoScanCornerIndex,
+                        dwellProgress: photoScanDwellProgress,
                         onTapCorner: { cornerIdx in
                             Task { await capturePhotoScanCorner(index: cornerIdx) }
                         }
@@ -1054,6 +1057,9 @@ struct CameraScannerView: View {
                         triggerFocusIndicator(at: location)
                     }
             )
+            .onChange(of: camera.trackedQuadPoints) { _, newQuad in
+                evaluatePhotoScanDwellAutoShutter(with: newQuad)
+            }
         }
         .aspectRatio(3.0 / 4.0, contentMode: .fit)
     }
@@ -1363,7 +1369,7 @@ struct CameraScannerView: View {
         }
     }
 
-    // MARK: - 四角防反光：首張固定四邊 + 陀螺儀移動 + 四角手動按快門
+    // MARK: - Google PhotoScan Stage 1: 內縮四象限點位 + 對準穩定自動快門 (Dwell Auto-Shutter)
 
     private func resetPhotoScanState() {
         camera.unlockQuadAndStopGyro()
@@ -1374,16 +1380,19 @@ struct CameraScannerView: View {
         photoScanCapturedImages.removeAll()
         photoScanCapturedQuads.removeAll()
         photoScanCornerCompleted = [false, false, false, false]
+        photoScanDwellTargetIndex = nil
+        photoScanDwellProgress = 0.0
     }
 
-    /// 根據拍立得外框四角 `[TL, TR, BR, BL]` 雙線性內插出四個角落目標圓點位置 `(左上 1, 右上 2, 右下 3, 左下 4)`
+    /// Google PhotoScan Stage 1：將 4 個引導點設於拍立得相片區四個內縮象限中心 `(0.26, 0.25) ~ (0.74, 0.70)`，
+    /// 確保中央圓環對準任一點時，閃光燈反光斑移出中央，同時整張拍立得 90% 以上面積與白邊仍留在取景畫面內供 RANSAC 8-DOF 單應性矩陣配準！
     static func computeFourCornerTargetPoints(from quad: [CGPoint]) -> [CGPoint] {
         guard quad.count == 4 else { return defaultPreviewQuad }
         let uvCoords: [(CGFloat, CGFloat)] = [
-            (0.08, 0.08), // 0: 左上角 1
-            (0.92, 0.08), // 1: 右上角 2
-            (0.92, 0.92), // 2: 右下角 3
-            (0.08, 0.92)  // 3: 左下角 4
+            (0.26, 0.25), // 0: 左上象限 1
+            (0.74, 0.25), // 1: 右上象限 2
+            (0.74, 0.70), // 2: 右下象限 3
+            (0.26, 0.70)  // 3: 左下象限 4
         ]
         return uvCoords.map { (u, v) in
             let topX = quad[0].x + (quad[1].x - quad[0].x) * u
@@ -1394,6 +1403,59 @@ struct CameraScannerView: View {
                 x: topX + (botX - topX) * v,
                 y: topY + (botY - topY) * v
             )
+        }
+    }
+
+    /// 當使用者將取景器中央圓環 `(0.5, 0.5)` 對準任一未拍攝的圓點並停穩時，自動累積圓環進度並觸發快門（避免手按快門瞬間晃動）
+    @MainActor
+    private func evaluatePhotoScanDwellAutoShutter(with quadOpt: [CGPoint]?) {
+        guard captureMode == .dualGlare,
+              isPhotoScanSessionActive,
+              !isProcessingCapture,
+              let quad = quadOpt,
+              quad.count == 4 else {
+            if photoScanDwellProgress > 0 {
+                photoScanDwellProgress = 0.0
+                photoScanDwellTargetIndex = nil
+            }
+            return
+        }
+
+        let targets = Self.computeFourCornerTargetPoints(from: quad)
+        let center = CGPoint(x: 0.5, y: 0.5)
+        var alignedIdx: Int? = nil
+        var bestDist: CGFloat = .greatestFiniteMagnitude
+
+        for idx in 0..<min(4, targets.count) where !photoScanCornerCompleted[idx] {
+            let d = hypot(targets[idx].x - center.x, targets[idx].y - center.y)
+            if d < bestDist {
+                bestDist = d
+                alignedIdx = idx
+            }
+        }
+
+        if let idx = alignedIdx, bestDist <= 0.068 {
+            if photoScanDwellTargetIndex == idx {
+                let nextProg = min(1.0, photoScanDwellProgress + 0.36)
+                withAnimation(.linear(duration: 0.08)) {
+                    photoScanDwellProgress = nextProg
+                }
+                if nextProg >= 1.0 {
+                    photoScanDwellProgress = 0.0
+                    photoScanDwellTargetIndex = nil
+                    Task { await capturePhotoScanCorner(index: idx) }
+                }
+            } else {
+                photoScanDwellTargetIndex = idx
+                withAnimation(.linear(duration: 0.08)) {
+                    photoScanDwellProgress = 0.36
+                }
+            }
+        } else if photoScanDwellProgress > 0 {
+            withAnimation(.easeOut(duration: 0.12)) {
+                photoScanDwellProgress = 0.0
+            }
+            photoScanDwellTargetIndex = nil
         }
     }
 
@@ -1817,8 +1879,9 @@ struct CameraScannerView: View {
                         preparedFirstAngle: preparedFirstAngle
                     )
                     let fusedJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.92)
-                    let normalizedFirstJPEG = UIImage(cgImage: normalizedCGs[0]).jpegData(compressionQuality: 0.90) ?? initialRawData
-                    let imageSizeA = CGSize(width: normalizedCGs[0].width, height: normalizedCGs[0].height)
+                    // 將已逆透視嵌入無反光合成圖之原始底圖存入 originalFrontImageData，確保事後手動重新調整四角或邊界時永遠維持無反光狀態！
+                    let normalizedFirstJPEG = UIImage(cgImage: result.fusedOriginalCGImage).jpegData(compressionQuality: 0.92) ?? initialRawData
+                    let imageSizeA = CGSize(width: result.fusedOriginalCGImage.width, height: result.fusedOriginalCGImage.height)
                     let pointsJSON = ChekiItem.encodeNormalizedCorners(result.primaryDetection.corners, imageSize: imageSizeA)
 
                     let ocrDate: Date?
@@ -2020,12 +2083,13 @@ struct CameraScannerView: View {
     }
 }
 
-// MARK: - 四角合成防反光：陀螺儀移動四角圓點與中央準星導引 (PhotoScanFourCornerOverlay)
+// MARK: - 四角合成防反光：內縮四象限圓點與中央自動快門導引 (PhotoScanFourCornerOverlay)
 
 private struct PhotoScanFourCornerOverlay: View {
     let quadPoints: [CGPoint]
     let cornerCompleted: [Bool]
     let activeTargetIndex: Int?
+    let dwellProgress: CGFloat
     let onTapCorner: (Int) -> Void
 
     var body: some View {
@@ -2037,7 +2101,7 @@ private struct PhotoScanFourCornerOverlay: View {
             let centerPoint = CGPoint(x: w * 0.5, y: h * 0.5)
 
             ZStack {
-                // 1. 中央對準目標方向虛線（由畫面中央指向目前待按下快門的角點圓圈）
+                // 1. 中央對準目標方向虛線（由畫面中央指向目前待拍攝的角點圓圈）
                 if let activeIdx = activeTargetIndex, activeIdx < screenTargets.count {
                     let targetPt = screenTargets[activeIdx]
                     Path { path in
@@ -2050,7 +2114,7 @@ private struct PhotoScanFourCornerOverlay: View {
                     )
                 }
 
-                // 2. 四個角落目標圓點（隨陀螺儀平滑位移；移動到該角後按底部快門或直接點選圓點即可拍攝）
+                // 2. 四個內縮象限目標圓點（對準停穩自動拍攝，或按底部快門／直接點選圓點拍攝）
                 ForEach(0..<min(4, screenTargets.count), id: \.self) { idx in
                     let isDone = cornerCompleted[idx]
                     let isCurrentTarget = (activeTargetIndex == idx)
@@ -2087,11 +2151,22 @@ private struct PhotoScanFourCornerOverlay: View {
                     .position(screenTargets[idx])
                 }
 
-                // 3. 取景器正中央對準圓環（對準角點後手動按下快門）
+                // 3. 取景器正中央對準圓環（含 Google PhotoScan 對準停穩自動快門進度弧）
                 ZStack {
                     Circle()
                         .strokeBorder(Color.white.opacity(0.75), lineWidth: 3.0)
                         .frame(width: 58, height: 58)
+
+                    if dwellProgress > 0.01 {
+                        Circle()
+                            .trim(from: 0.0, to: min(1.0, dwellProgress))
+                            .stroke(
+                                Color.cyan,
+                                style: StrokeStyle(lineWidth: 4.0, lineCap: .round)
+                            )
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: 58, height: 58)
+                    }
 
                     Circle()
                         .fill(Color.cyan.opacity(0.85))
