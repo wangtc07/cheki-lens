@@ -769,6 +769,15 @@ struct AlbumsRootView: View {
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingBatchPairingSheet: Bool = false
+    @State private var showingCameraScanner: Bool = false
+    @State private var showingAlbumPhotosPicker: Bool = false
+    @State private var selectedAlbumPhotos: [PhotosPickerItem] = []
+    @State private var pendingBatchPhotos: [PhotosPickerItem] = []
+    @State private var actionTargetMember: IdolMember? = nil
+
+    @State private var renamingGroup: IdolGroup? = nil
+    @State private var renamingMember: IdolMember? = nil
+    @State private var renameText: String = ""
     private var chromeState = NavigationChromeState.shared
 
     private let albumColumns = [
@@ -831,14 +840,75 @@ struct AlbumsRootView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+            .photosPicker(
+                isPresented: $showingAlbumPhotosPicker,
+                selection: $selectedAlbumPhotos,
+                maxSelectionCount: nil,
+                matching: .images,
+                photoLibrary: .shared()
+            )
+            .onChange(of: selectedAlbumPhotos) { _, newItems in
+                guard !newItems.isEmpty else { return }
+                pendingBatchPhotos = newItems
+                selectedAlbumPhotos = []
+                showingBatchPairingSheet = true
+            }
             .sheet(isPresented: $showingQuickCreateSheet) {
                 QuickCreateIdolSheet()
             }
             .sheet(isPresented: $showingSettingsSheet) {
                 SettingsView()
             }
-            .sheet(isPresented: $showingBatchPairingSheet) {
-                BatchPairingView()
+            .sheet(isPresented: $showingBatchPairingSheet, onDismiss: {
+                pendingBatchPhotos = []
+                actionTargetMember = nil
+            }) {
+                BatchPairingView(initialPickerItems: pendingBatchPhotos, defaultMember: actionTargetMember)
+            }
+            .fullScreenCover(isPresented: $showingCameraScanner, onDismiss: {
+                actionTargetMember = nil
+            }) {
+                CameraScannerView(defaultMember: actionTargetMember)
+            }
+            .alert(
+                L10n.tr("修改團體名", "グループ名を変更"),
+                isPresented: Binding(
+                    get: { renamingGroup != nil },
+                    set: { if !$0 { renamingGroup = nil } }
+                )
+            ) {
+                TextField(L10n.tr("輸入新的團體名稱", "新しいグループ名を入力"), text: $renameText)
+                Button(L10n.tr("取消", "キャンセル"), role: .cancel) {
+                    renamingGroup = nil
+                }
+                Button(L10n.tr("儲存", "保存")) {
+                    let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty, let group = renamingGroup {
+                        group.name = trimmed
+                        try? modelContext.save()
+                    }
+                    renamingGroup = nil
+                }
+            }
+            .alert(
+                L10n.tr("修改成員名", "メンバー名を変更"),
+                isPresented: Binding(
+                    get: { renamingMember != nil },
+                    set: { if !$0 { renamingMember = nil } }
+                )
+            ) {
+                TextField(L10n.tr("輸入新的成員名稱", "新しいメンバー名を入力"), text: $renameText)
+                Button(L10n.tr("取消", "キャンセル"), role: .cancel) {
+                    renamingMember = nil
+                }
+                Button(L10n.tr("儲存", "保存")) {
+                    let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty, let member = renamingMember {
+                        member.stageName = trimmed
+                        try? modelContext.save()
+                    }
+                    renamingMember = nil
+                }
             }
             .navigationDestination(for: IdolGroup.self) { group in
                 GroupMembersAlbumView(group: group, allItems: validChekiItems)
@@ -891,6 +961,52 @@ struct AlbumsRootView: View {
 
                     Menu {
                         Button {
+                            actionTargetMember = nil
+                            showingCameraScanner = true
+                        } label: {
+                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                        }
+
+                        Button {
+                            actionTargetMember = nil
+                            showingAlbumPhotosPicker = true
+                        } label: {
+                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                        }
+
+                        if hierarchyMode == .groups && !idolGroups.isEmpty {
+                            Menu {
+                                ForEach(idolGroups) { group in
+                                    Button {
+                                        renameText = group.name
+                                        renamingGroup = group
+                                    } label: {
+                                        Label(group.name, systemImage: "pencil")
+                                    }
+                                }
+                            } label: {
+                                Label(L10n.tr("修改團體名", "グループ名を変更"), systemImage: "pencil")
+                            }
+                        } else if hierarchyMode == .members && !allExpandedMembers.isEmpty {
+                            Menu {
+                                ForEach(allExpandedMembers) { member in
+                                    Button {
+                                        renameText = member.stageName
+                                        renamingMember = member
+                                    } label: {
+                                        Label(member.albumTitle, systemImage: "pencil")
+                                    }
+                                }
+                            } label: {
+                                Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
+                            }
+                        }
+
+                        Divider()
+
+                        Button {
+                            pendingBatchPhotos = []
+                            actionTargetMember = nil
                             showingBatchPairingSheet = true
                         } label: {
                             Label("批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
@@ -969,6 +1085,30 @@ struct AlbumsRootView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            actionTargetMember = group.sortedMembers.first
+                            showingCameraScanner = true
+                        } label: {
+                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                        }
+
+                        Button {
+                            actionTargetMember = group.sortedMembers.first
+                            showingAlbumPhotosPicker = true
+                        } label: {
+                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                        }
+
+                        Divider()
+
+                        Button {
+                            renameText = group.name
+                            renamingGroup = group
+                        } label: {
+                            Label(L10n.tr("修改團體名", "グループ名を変更"), systemImage: "pencil")
+                        }
+                    }
                 }
 
                 if !uncategorizedItems.isEmpty {
@@ -980,6 +1120,21 @@ struct AlbumsRootView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            actionTargetMember = nil
+                            showingCameraScanner = true
+                        } label: {
+                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                        }
+
+                        Button {
+                            actionTargetMember = nil
+                            showingAlbumPhotosPicker = true
+                        } label: {
+                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -1013,6 +1168,30 @@ struct AlbumsRootView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            actionTargetMember = member
+                            showingCameraScanner = true
+                        } label: {
+                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                        }
+
+                        Button {
+                            actionTargetMember = member
+                            showingAlbumPhotosPicker = true
+                        } label: {
+                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                        }
+
+                        Divider()
+
+                        Button {
+                            renameText = member.stageName
+                            renamingMember = member
+                        } label: {
+                            Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
+                        }
+                    }
                 }
 
                 if !uncategorizedItems.isEmpty {
@@ -1024,6 +1203,21 @@ struct AlbumsRootView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            actionTargetMember = nil
+                            showingCameraScanner = true
+                        } label: {
+                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                        }
+
+                        Button {
+                            actionTargetMember = nil
+                            showingAlbumPhotosPicker = true
+                        } label: {
+                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -1129,8 +1323,19 @@ private struct GroupMembersAlbumView: View {
     let group: IdolGroup
     let allItems: [ChekiItem]
 
+    @Environment(\.modelContext) private var modelContext
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
+    @State private var showingCameraScanner: Bool = false
+    @State private var showingAlbumPhotosPicker: Bool = false
+    @State private var selectedAlbumPhotos: [PhotosPickerItem] = []
+    @State private var pendingBatchPhotos: [PhotosPickerItem] = []
+    @State private var showingBatchPairingSheet: Bool = false
+    @State private var actionTargetMember: IdolMember? = nil
+
+    @State private var showingRenameGroupAlert: Bool = false
+    @State private var renamingMember: IdolMember? = nil
+    @State private var renameText: String = ""
 
     private let albumColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -1162,6 +1367,30 @@ private struct GroupMembersAlbumView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button {
+                                actionTargetMember = member
+                                showingCameraScanner = true
+                            } label: {
+                                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                            }
+
+                            Button {
+                                actionTargetMember = member
+                                showingAlbumPhotosPicker = true
+                            } label: {
+                                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                            }
+
+                            Divider()
+
+                            Button {
+                                renameText = member.stageName
+                                renamingMember = member
+                            } label: {
+                                Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -1172,6 +1401,19 @@ private struct GroupMembersAlbumView: View {
         .background(Color(.systemBackground))
         .navigationTitle(group.name)
         .navigationBarTitleDisplayMode(.inline)
+        .photosPicker(
+            isPresented: $showingAlbumPhotosPicker,
+            selection: $selectedAlbumPhotos,
+            maxSelectionCount: nil,
+            matching: .images,
+            photoLibrary: .shared()
+        )
+        .onChange(of: selectedAlbumPhotos) { _, newItems in
+            guard !newItems.isEmpty else { return }
+            pendingBatchPhotos = newItems
+            selectedAlbumPhotos = []
+            showingBatchPairingSheet = true
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
@@ -1182,6 +1424,44 @@ private struct GroupMembersAlbumView: View {
                     }
 
                     Menu {
+                        Button {
+                            actionTargetMember = group.sortedMembers.first
+                            showingCameraScanner = true
+                        } label: {
+                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                        }
+
+                        Button {
+                            actionTargetMember = group.sortedMembers.first
+                            showingAlbumPhotosPicker = true
+                        } label: {
+                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                        }
+
+                        Button {
+                            renameText = group.name
+                            showingRenameGroupAlert = true
+                        } label: {
+                            Label(L10n.tr("修改團體名", "グループ名を変更"), systemImage: "pencil")
+                        }
+
+                        if !group.sortedMembers.isEmpty {
+                            Menu {
+                                ForEach(group.sortedMembers) { member in
+                                    Button {
+                                        renameText = member.stageName
+                                        renamingMember = member
+                                    } label: {
+                                        Label(member.stageName, systemImage: "pencil")
+                                    }
+                                }
+                            } label: {
+                                Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "person.text.rectangle")
+                            }
+                        }
+
+                        Divider()
+
                         Button {
                             showingQuickCreateSheet = true
                         } label: {
@@ -1206,6 +1486,51 @@ private struct GroupMembersAlbumView: View {
         }
         .sheet(isPresented: $showingSettingsSheet) {
             SettingsView()
+        }
+        .sheet(isPresented: $showingBatchPairingSheet, onDismiss: {
+            pendingBatchPhotos = []
+            actionTargetMember = nil
+        }) {
+            BatchPairingView(initialPickerItems: pendingBatchPhotos, defaultMember: actionTargetMember)
+        }
+        .fullScreenCover(isPresented: $showingCameraScanner, onDismiss: {
+            actionTargetMember = nil
+        }) {
+            CameraScannerView(defaultMember: actionTargetMember)
+        }
+        .alert(
+            L10n.tr("修改團體名", "グループ名を変更"),
+            isPresented: $showingRenameGroupAlert
+        ) {
+            TextField(L10n.tr("輸入新的團體名稱", "新しいグループ名を入力"), text: $renameText)
+            Button(L10n.tr("取消", "キャンセル"), role: .cancel) {}
+            Button(L10n.tr("儲存", "保存")) {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    group.name = trimmed
+                    try? modelContext.save()
+                }
+            }
+        }
+        .alert(
+            L10n.tr("修改成員名", "メンバー名を変更"),
+            isPresented: Binding(
+                get: { renamingMember != nil },
+                set: { if !$0 { renamingMember = nil } }
+            )
+        ) {
+            TextField(L10n.tr("輸入新的成員名稱", "新しいメンバー名を入力"), text: $renameText)
+            Button(L10n.tr("取消", "キャンセル"), role: .cancel) {
+                renamingMember = nil
+            }
+            Button(L10n.tr("儲存", "保存")) {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty, let member = renamingMember {
+                    member.stageName = trimmed
+                    try? modelContext.save()
+                }
+                renamingMember = nil
+            }
         }
     }
 }
@@ -1235,6 +1560,8 @@ struct AlbumHeroDetailView: View {
     @State private var showingSettingsSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
     @State private var showingBatchPairingSheet: Bool = false
+    @State private var showingRenameMemberAlert: Bool = false
+    @State private var renameMemberText: String = ""
 
     @State private var sortAscending: Bool = false
     @State private var filterDualSideOnly: Bool = false
@@ -1379,7 +1706,7 @@ struct AlbumHeroDetailView: View {
                             Button {
                                 showingCameraScanner = true
                             } label: {
-                                Label("使用相機拍攝至此相冊", systemImage: "camera")
+                                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
                             }
 
                             PhotosPicker(
@@ -1388,7 +1715,16 @@ struct AlbumHeroDetailView: View {
                                 matching: .images,
                                 photoLibrary: .shared()
                             ) {
-                                Label("從相簿多選匯入（不限張數）", systemImage: "photo.badge.plus")
+                                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                            }
+
+                            if let defaultMember {
+                                Button {
+                                    renameMemberText = defaultMember.stageName
+                                    showingRenameMemberAlert = true
+                                } label: {
+                                    Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
+                                }
                             }
 
                             Button {
@@ -1558,6 +1894,20 @@ struct AlbumHeroDetailView: View {
             }
         }) {
             CameraScannerView(defaultMember: defaultMember)
+        }
+        .alert(
+            L10n.tr("修改成員名", "メンバー名を変更"),
+            isPresented: $showingRenameMemberAlert
+        ) {
+            TextField(L10n.tr("輸入新的成員名稱", "新しいメンバー名を入力"), text: $renameMemberText)
+            Button(L10n.tr("取消", "キャンセル"), role: .cancel) {}
+            Button(L10n.tr("儲存", "保存")) {
+                let trimmed = renameMemberText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty, let defaultMember {
+                    defaultMember.stageName = trimmed
+                    try? modelContext.save()
+                }
+            }
         }
         .overlay {
             if isProcessing {

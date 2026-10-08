@@ -1405,7 +1405,7 @@ struct ChekiDetailView: View {
         let preferredFmt = currentItem.filmFormat
         showToast(L10n.tr("正在合成雙角度去反光⋯", "マルチアングル反射除去を合成中⋯"))
 
-        let fusedOutcome: (fusedCardJPEG: Data, fusedOriginalJPEG: Data?, cornersJSON: String?)? = await Task.detached(priority: .userInitiated) {
+        let fusedOutcome: (fusedCardJPEG: Data, fusedOriginalJPEG: Data?, cornersJSON: String?)? = await Task.detached(priority: .userInitiated) { () -> (fusedCardJPEG: Data, fusedOriginalJPEG: Data?, cornersJSON: String?)? in
             guard let primaryCG = UIImage(data: primaryData)?.normalizedImage.cgImage,
                   let secondCG = UIImage(data: secondData)?.normalizedImage.cgImage else {
                 return nil
@@ -1421,7 +1421,11 @@ struct ChekiDetailView: View {
                 return nil
             }
             let origJPEG = UIImage(cgImage: result.fusedOriginalCGImage).jpegData(compressionQuality: 0.92)
-            return (cardJPEG, origJPEG, result.primaryCorners.toJSONString())
+            let cornersJSON = ChekiItem.encodeNormalizedCorners(
+                result.primaryDetection.corners,
+                imageSize: result.primaryDetection.imageSize
+            )
+            return (cardJPEG, origJPEG, cornersJSON)
         }.value
 
         if let fusedOutcome {
