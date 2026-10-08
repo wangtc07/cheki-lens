@@ -36,8 +36,8 @@
      - **先秒存原圖並立即結束 Loading (`isProcessingCapture = false`)**：無論「拍照」、「正反雙面」或「防反光」，快門拍下瞬間立即將原始圖片寫入 SwiftData `ChekiItem`（左下角預覽縮圖即時更新）並立刻解除快門 Loading 狀態，讓使用者可零延遲連續操作。
      - **正位裁切、手寫日期 OCR、四角防反光合成與系統相簿同步全背景化**：於獨立背景 `Task` 中使用降採樣 `normalizedImage(maxDimension: 2048)` 執行四角偵測、透視正位裁切、OCR 日期辨識與防反光合成，完成後自動原地更新 `ChekiItem` 並同步至 iOS 系統相簿。
      - **精簡資訊面板 (`ChekiInfoView.swift`)**：移除「拍攝資訊」區塊中的「處理狀態」欄位，僅保留日期、時間、規格、成員與備忘。
-     - **系統相簿同步刪除 (`PhotoLibraryManager.swift`, `LibraryView.swift`, `ChekiDetailView.swift`, `SettingsView.swift`, `CameraScannerView.swift`)**：新增 `PhotoLibraryManager.deleteItems`、`removeBackside` 與 `deleteAssetsFromSystemPhotoLibrary`，當開啟系統相簿同步（或項目已同步至系統相簿）時，於「全部」、「相冊詳情」或「單張全螢幕檢視」刪除拍立得（或移除背面照片）會一併透過 `PHAssetChangeRequest.deleteAssets` 自 iOS 系統相簿 (`Photos.app`) 刪除對應照片。
-* **最新穩定 Git Commit**：feat(PhotosSync): 刪除拍立得時同步自 iOS 系統相簿刪除照片
+     - **系統相簿同步刪除 (`PhotoLibraryManager.swift`, `LibraryView.swift`, `ChekiDetailView.swift`, `SettingsView.swift`, `CameraScannerView.swift`)**：新增 `PhotoLibraryManager.deleteItems`、`removeBackside` 與 `deleteAssetsFromSystemPhotoLibrary`，當開啟系統相簿同步（或項目已同步至系統相簿）時，於「全部」、「相冊詳情」或「單張全螢幕檢視」刪除拍立得（或移除背面照片）會一併透過 `PHAssetChangeRequest.deleteAssets` 自 iOS 系統相簿 (`Photos.app`) 刪除對應照片，並精簡刪除確認視窗主標題（「確定要刪除N張照片嗎？」／「確定要刪除此照片嗎？」）確保單行顯示不換行。
+* **最新穩定 Git Commit**：style(UI): 精簡刪除確認視窗主標題文字避免換行
 * **下一動執行指示**：執行 **Task 6.2**（支援深色/淺色模式與動態字級 Dynamic Type）
 
 ---

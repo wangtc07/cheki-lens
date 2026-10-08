@@ -221,7 +221,7 @@ struct ChekiDetailView: View {
             )
         }
         .confirmationDialog(
-            "確定要刪除此張拍立得嗎？",
+            "確定要刪除此照片嗎？",
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {

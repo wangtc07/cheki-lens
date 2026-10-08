@@ -149,7 +149,7 @@ struct LibraryView: View {
                 }
             }
             .confirmationDialog(
-                "確定要刪除選取的 \(selectedItemIDs.count) 張拍立得嗎？",
+                "確定要刪除\(selectedItemIDs.count)張照片嗎？",
                 isPresented: $showDeleteConfirm,
                 titleVisibility: .visible
             ) {
@@ -1469,7 +1469,7 @@ struct AlbumHeroDetailView: View {
             }
         }
         .confirmationDialog(
-            "確定要刪除選取的 \(selectedItemIDs.count) 張拍立得嗎？",
+            "確定要刪除\(selectedItemIDs.count)張照片嗎？",
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
