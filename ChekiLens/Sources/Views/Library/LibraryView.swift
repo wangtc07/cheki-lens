@@ -338,15 +338,8 @@ struct LibraryView: View {
                     } label: {
                         Text(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
                             .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 14)
-                            .frame(height: 36)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(.white.opacity(0.16), lineWidth: 0.6)
-                            )
+                            .darkSystemCapsuleChrome(height: 36)
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -355,9 +348,7 @@ struct LibraryView: View {
                     } label: {
                         Image(systemName: "camera.fill")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.blue)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .darkSystemCircleChrome(size: 36)
                     }
                     .buttonStyle(.plain)
                     .fixedSize()
@@ -372,9 +363,7 @@ struct LibraryView: View {
                     ) {
                         Image(systemName: "plus")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.blue)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .darkSystemCircleChrome(size: 36)
                     }
                     .buttonStyle(.plain)
                     .fixedSize()
@@ -470,9 +459,7 @@ struct LibraryView: View {
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.blue)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .darkSystemCircleChrome(size: 36)
                     }
                     .fixedSize()
                     .accessibilityLabel("篩選與更多設定")
@@ -491,21 +478,12 @@ struct LibraryView: View {
                         if isSelectionMode {
                             Image(systemName: "xmark")
                                 .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.primary)
-                                .frame(width: 36, height: 36)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .overlay(
-                                    Circle()
-                                        .strokeBorder(.white.opacity(0.16), lineWidth: 0.6)
-                                )
+                                .darkSystemCircleChrome(size: 36)
                         } else {
                             Text("選取")
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.blue)
                                 .fixedSize(horizontal: true, vertical: false)
-                                .padding(.horizontal, 14)
-                                .frame(height: 36)
-                                .background(.ultraThinMaterial, in: Capsule())
+                                .darkSystemCapsuleChrome(height: 36)
                         }
                     }
                     .buttonStyle(.plain)
@@ -1030,17 +1008,22 @@ struct AlbumsRootView: View {
 
                 Spacer()
 
-                HStack(spacing: 8) {
+                HStack(spacing: 0) {
                     Button {
                         showingQuickCreateSheet = true
                     } label: {
                         Image(systemName: "plus")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 36)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("新增團體或成員相冊")
+
+                    Rectangle()
+                        .fill(.white.opacity(0.22))
+                        .frame(width: 0.8, height: 18)
 
                     Menu {
                         Button {
@@ -1147,12 +1130,13 @@ struct AlbumsRootView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .frame(width: 36, height: 36)
-                            .background(.ultraThinMaterial, in: Circle())
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 36)
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel("更多選項與設定")
                 }
+                .darkSystemUnifiedCapsuleContainer()
             }
 
             // 頂部「團體 | 成員」原地切換（點擊「成員」直接在此頁面展開所有成員相冊）
@@ -1737,12 +1721,21 @@ private struct GroupMembersAlbumView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 12) {
+                HStack(spacing: 0) {
                     Button {
                         showingQuickCreateSheet = true
                     } label: {
                         Image(systemName: "plus")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 34)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+
+                    Rectangle()
+                        .fill(.white.opacity(0.22))
+                        .frame(width: 0.8, height: 18)
 
                     Menu {
                         Button {
@@ -1823,9 +1816,14 @@ private struct GroupMembersAlbumView: View {
                             Label("設定", systemImage: "gearshape")
                         }
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Image(systemName: "ellipsis")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 34)
+                            .contentShape(Rectangle())
                     }
                 }
+                .darkSystemUnifiedCapsuleContainer()
             }
         }
         .sheet(isPresented: $showingQuickCreateSheet) {
@@ -1944,6 +1942,46 @@ private struct GroupMembersAlbumView: View {
                 Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
             }
         }
+    }
+}
+
+private extension View {
+    func darkSystemCircleChrome(size: CGFloat = 36) -> some View {
+        self
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(Color.black.opacity(0.68), in: Circle())
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(
+                Circle()
+                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.6)
+            )
+            .environment(\.colorScheme, .dark)
+    }
+
+    func darkSystemCapsuleChrome(height: CGFloat = 36, horizontalPadding: CGFloat = 14) -> some View {
+        self
+            .foregroundStyle(.white)
+            .padding(.horizontal, horizontalPadding)
+            .frame(height: height)
+            .background(Color.black.opacity(0.68), in: Capsule())
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.6)
+            )
+            .environment(\.colorScheme, .dark)
+    }
+
+    func darkSystemUnifiedCapsuleContainer() -> some View {
+        self
+            .background(Color.black.opacity(0.68), in: Capsule())
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.6)
+            )
+            .environment(\.colorScheme, .dark)
     }
 }
 
@@ -2132,112 +2170,115 @@ struct AlbumHeroDetailView: View {
                         } label: {
                             Text(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選")
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
                                 .fixedSize(horizontal: true, vertical: false)
-                                .padding(.horizontal, 14)
-                                .frame(height: 34)
-                                .background(.ultraThinMaterial, in: Capsule())
+                                .darkSystemCapsuleChrome(height: 34)
                         }
                         .buttonStyle(.plain)
                     } else {
-                        PhotosPicker(
-                            selection: $selectedPhotos,
-                            maxSelectionCount: nil,
-                            matching: .images,
-                            preferredItemEncoding: .automatic,
-                            photoLibrary: .shared()
-                        ) {
-                            Image(systemName: "plus")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .background(.ultraThinMaterial, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .fixedSize()
-                        .accessibilityLabel("從相簿追加拍立得至此相冊")
-
-                        Menu {
-                            Button {
-                                showingCameraScanner = true
-                            } label: {
-                                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
-                            }
-
+                        HStack(spacing: 0) {
                             PhotosPicker(
                                 selection: $selectedPhotos,
                                 maxSelectionCount: nil,
                                 matching: .images,
+                                preferredItemEncoding: .automatic,
                                 photoLibrary: .shared()
                             ) {
-                                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                                Image(systemName: "plus")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 38, height: 34)
+                                    .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("從相簿追加拍立得至此相冊")
 
-                            if let defaultMember {
-                                Button {
-                                    renameMemberText = defaultMember.stageName
-                                    showingRenameMemberAlert = true
-                                } label: {
-                                    Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
-                                }
-                            }
-
-                            Button {
-                                processingItems = []
-                                showingBatchPairingSheet = true
-                            } label: {
-                                Label("開啟批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
-                            }
+                            Rectangle()
+                                .fill(.white.opacity(0.22))
+                                .frame(width: 0.8, height: 18)
 
                             Menu {
-                                ForEach(Self.supportedColumnCounts, id: \.self) { count in
+                                Button {
+                                    showingCameraScanner = true
+                                } label: {
+                                    Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                                }
+
+                                PhotosPicker(
+                                    selection: $selectedPhotos,
+                                    maxSelectionCount: nil,
+                                    matching: .images,
+                                    photoLibrary: .shared()
+                                ) {
+                                    Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                                }
+
+                                if let defaultMember {
                                     Button {
-                                        withAnimation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15)) {
-                                            columnCount = count
-                                        }
+                                        renameMemberText = defaultMember.stageName
+                                        showingRenameMemberAlert = true
                                     } label: {
-                                        Label("\(count) 欄網格", systemImage: columnCount == count ? "checkmark" : "square.grid.3x3")
+                                        Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
                                     }
                                 }
-                            } label: {
-                                Label("網格密度", systemImage: "square.grid.3x3")
-                            }
 
-                            Menu {
                                 Button {
-                                    sortAscending = false
+                                    processingItems = []
+                                    showingBatchPairingSheet = true
                                 } label: {
-                                    Label("由新到舊", systemImage: !sortAscending ? "checkmark" : "arrow.down")
+                                    Label("開啟批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
                                 }
-                                Button {
-                                    sortAscending = true
+
+                                Menu {
+                                    ForEach(Self.supportedColumnCounts, id: \.self) { count in
+                                        Button {
+                                            withAnimation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15)) {
+                                                columnCount = count
+                                            }
+                                        } label: {
+                                            Label("\(count) 欄網格", systemImage: columnCount == count ? "checkmark" : "square.grid.3x3")
+                                        }
+                                    }
                                 } label: {
-                                    Label("由舊到新", systemImage: sortAscending ? "checkmark" : "arrow.up")
+                                    Label("網格密度", systemImage: "square.grid.3x3")
                                 }
+
+                                Menu {
+                                    Button {
+                                        sortAscending = false
+                                    } label: {
+                                        Label("由新到舊", systemImage: !sortAscending ? "checkmark" : "arrow.down")
+                                    }
+                                    Button {
+                                        sortAscending = true
+                                    } label: {
+                                        Label("由舊到新", systemImage: sortAscending ? "checkmark" : "arrow.up")
+                                    }
+                                    Divider()
+                                    Button {
+                                        filterDualSideOnly.toggle()
+                                    } label: {
+                                        Label("僅顯示正反雙面", systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait")
+                                    }
+                                } label: {
+                                    Label("排序與篩選", systemImage: "line.3.horizontal.decrease")
+                                }
+
                                 Divider()
+
                                 Button {
-                                    filterDualSideOnly.toggle()
+                                    showingSettingsSheet = true
                                 } label: {
-                                    Label("僅顯示正反雙面", systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait")
+                                    Label("設定（自動邊界微調）", systemImage: "gearshape")
                                 }
                             } label: {
-                                Label("排序與篩選", systemImage: "line.3.horizontal.decrease")
+                                Image(systemName: "ellipsis")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 38, height: 34)
+                                    .contentShape(Rectangle())
                             }
-
-                            Divider()
-
-                            Button {
-                                showingSettingsSheet = true
-                            } label: {
-                                Label("設定（自動邊界微調）", systemImage: "gearshape")
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .background(.ultraThinMaterial, in: Circle())
                         }
+                        .darkSystemUnifiedCapsuleContainer()
                         .fixedSize()
                     }
 
@@ -2254,17 +2295,12 @@ struct AlbumHeroDetailView: View {
                             if isSelectionMode {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 13, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 34, height: 34)
-                                    .background(.ultraThinMaterial, in: Circle())
+                                    .darkSystemCircleChrome(size: 34)
                             } else {
                                 Text("選取")
                                     .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.white)
                                     .fixedSize(horizontal: true, vertical: false)
-                                    .padding(.horizontal, 14)
-                                    .frame(height: 34)
-                                    .background(.ultraThinMaterial, in: Capsule())
+                                    .darkSystemCapsuleChrome(height: 34)
                             }
                         }
                         .buttonStyle(.plain)
