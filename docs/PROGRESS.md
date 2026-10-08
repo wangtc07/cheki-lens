@@ -16,7 +16,8 @@
      - **相機互動 (`CameraScannerView.swift`)**：切換至「防反光」模式時自動開啟相機 LED 持續補光燈 (`setTorchModeOn`) 將鏡面反光聚攏，先拍攝基準中心照，接著在拍立得四角浮現 `左上 ①`、`右上 ②`、`右下 ③`、`左下 ④` 4 個引導圓圈與中央準心環；將準心移至圓圈對準約 0.35 秒即自動吸附連拍（亦支援手動點擊或隨時按「立即合成」）。同時解除未解鎖 Pro 時誤落入單張拍照之門檻。
      - **全卡 `0% ~ 100%` 測地線光暈 100% 乾淨像素替換 (`VisionManager+AntiGlare.swift`)**：解除舊版頂部 `11.5%` 與底部 `22.5%` 邊框排除限制（解決頂部兔耳/氣球與底部手寫字反光無法消除問題），改用 `4×6` 截斷 L1 (`min(d, 85)`) 局部網格微平移對位 + 鏡面高光峰值種子 (`L >= 0.84`) + 4 輪測地線光暈膨脹，對反光核心與藍白光暈執行 `weight = 1.0`（100% 無反光像素替換），非反光區嚴格保持 `weight = 0.0` 零重影。
   3. **手動四頂點裁切編輯器支援移出相片邊界外 (`ChekiDetailView.swift`, `VisionManager+PerspectiveCorrect.swift`, `ChekiItem.swift`)**：放寬頂點拖曳與儲存範圍至 `-0.45 ~ 1.45`、加寬畫布預設邊距 (`padding: 44`) 並支援雙指縮小至 `0.65x`，且於透視校正超出相片邊界時透過 `clampedToExtent()` 自動延續相紙白邊色澤，避免傾斜超出畫面的拍立得邊角產生黑邊缺角。
-* **最新穩定 Git Commit**：feat(CropEditor): 支援手動修正四頂點拖曳至相片外並自動延伸透視白邊
+  4. **單張全螢幕檢視單擊全畫面平滑漸進漸出與放大防跳動 (`ChekiDetailView.swift`)**：固定卡片基準 Layout Frame 並移除會觸發系統 Safe Area 重排的 `.statusBarHidden` 與 `if !isChromeHidden` 視圖銷毀重建，改以 GPU `scaleEffect` + `offset` 搭配翻頁同款漸進漸出曲線 (`pageAndZoomAnimation`) 驅動全畫面放大；當圖片處於放大狀態 (`isImageZoomed`) 時自動隱藏 icon，且單擊畫面僅切換 icon 顯示而不改變圖片倍率與座標，徹底消除畫面跳動與抖動。
+* **最新穩定 Git Commit**：fix(Detail): 修正單擊全畫面放大抖動與圖片放大時單擊跳動問題
 * **下一動執行指示**：執行 **Task 6.2**（支援深色/淺色模式與動態字級 Dynamic Type）
 
 ---

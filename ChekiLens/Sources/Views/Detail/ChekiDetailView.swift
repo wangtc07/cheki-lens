@@ -36,9 +36,13 @@ struct ChekiDetailView: View {
     /// 拖曳方向鎖定（區分水平切換相片 vs 垂直呼出備忘/返回）
     @State private var dragAxisLock: Axis? = nil
 
-    /// 雙指縮放倍率
+    /// 雙指縮放倍率與放大後平移偏移量
     @State private var zoomScale: CGFloat = 1.0
     @State private var activePinchScale: CGFloat = 1.0
+    @State private var zoomPanOffset: CGSize = .zero
+    @State private var activeZoomPanDelta: CGSize = .zero
+    /// 記錄開始雙指放大時是否處於全畫面模式（確保放大後單擊切換 icon 時，圖片位置與倍率 100% 鎖定不跳動）
+    @State private var isZoomedFromFullScreen: Bool = false
 
     /// 彈窗與面板控制
     @State private var showingInfoSheet: Bool = false
@@ -96,6 +100,11 @@ struct ChekiDetailView: View {
         return tags.contains { $0 == "#最愛" || $0 == "最愛" || $0 == "#お気に入り" }
     }
 
+    /// 當前圖片是否處於放大狀態
+    private var isImageZoomed: Bool {
+        (zoomScale * activePinchScale) > 1.002
+    }
+
     var body: some View {
         ZStack {
             // 1. 全黑沉浸式背景（符合 Apple Photos 單張檢視暗色模式）
@@ -112,28 +121,29 @@ struct ChekiDetailView: View {
             }
             .ignoresSafeArea()
 
-            // 3. 頂部與底部懸浮控制介面（點擊畫面可隱藏進入全螢幕沉浸模式）
-            if !isChromeHidden {
-                GeometryReader { overlayGeo in
-                    let isLandscape = overlayGeo.size.width > overlayGeo.size.height
-                    VStack(spacing: 0) {
-                        topOverlayNavigationBar(isLandscape: isLandscape)
-                            .transition(.move(edge: .top).combined(with: .opacity))
+            // 3. 頂部與底部懸浮控制介面（常駐視圖樹並以 opacity/offset 漸進漸出動畫切換，根除視圖重建造成的單擊抖動）
+            GeometryReader { overlayGeo in
+                let isLandscape = overlayGeo.size.width > overlayGeo.size.height
+                VStack(spacing: 0) {
+                    topOverlayNavigationBar(isLandscape: isLandscape)
+                        .opacity(isChromeHidden ? 0.0 : 1.0)
+                        .offset(y: isChromeHidden ? -18 : 0)
 
-                        Spacer(minLength: 0)
+                    Spacer(minLength: 0)
 
-                        if !hasSeenDetailCoachMark && !isLandscape {
-                            detailCoachMarkBanner
-                                .padding(.bottom, 6)
-                                .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                        }
-
-                        bottomControlsStack(isLandscape: isLandscape, containerWidth: overlayGeo.size.width)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    if !hasSeenDetailCoachMark && !isLandscape {
+                        detailCoachMarkBanner
+                            .padding(.bottom, 6)
+                            .opacity(isChromeHidden ? 0.0 : 1.0)
                     }
-                    .frame(width: overlayGeo.size.width, height: overlayGeo.size.height)
+
+                    bottomControlsStack(isLandscape: isLandscape, containerWidth: overlayGeo.size.width)
+                        .opacity(isChromeHidden ? 0.0 : 1.0)
+                        .offset(y: isChromeHidden ? 22 : 0)
                 }
+                .frame(width: overlayGeo.size.width, height: overlayGeo.size.height)
             }
+            .allowsHitTesting(!isChromeHidden)
 
             if let toast = syncStatusToast {
                 VStack {
@@ -151,7 +161,6 @@ struct ChekiDetailView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .statusBarHidden(isChromeHidden)
         .photosPicker(
             isPresented: $isShowingBacksidePicker,
             selection: $backsidePickerItem,
@@ -406,17 +415,21 @@ struct ChekiDetailView: View {
     // MARK: - 2. 中央拍立得水平滑動分頁與 3D Y 軸翻轉動畫 (Interactive Horizontal Pager + 3D Flip)
 
     private func mainCardViewport(fullScreenSize: CGSize, isLandscape: Bool) -> some View {
-        // 計算卡片實際可用尺寸：
-        // - 全螢幕隱藏工具列 (isChromeHidden == true) 時：0 邊距，100% 填滿全螢幕高度與寬度
-        // - 顯示工具列時：橫向緊湊預留上下工具列空間，確保拍立得依然保持最大化尺寸
-        let topInset: CGFloat = isChromeHidden ? 0 : (isLandscape ? 42 : 98)
-        let bottomInset: CGFloat = isChromeHidden ? 0 : (isLandscape ? 58 : 138)
-        let horizontalInset: CGFloat = isChromeHidden ? 0 : (isLandscape ? 20 : 18)
+        // 固定基準可用尺寸（以顯示工具列時的預留空間為固定基準 Frame，全螢幕放大與位移完全透過 GPU scaleEffect / offset 漸進漸出驅動，根除 Frame 重算造成的單擊抖動）
+        let baseTopInset: CGFloat = isLandscape ? 42 : 98
+        let baseBottomInset: CGFloat = isLandscape ? 58 : 138
+        let baseHorizontalInset: CGFloat = isLandscape ? 20 : 18
+        let normalVerticalOffset: CGFloat = (baseTopInset - baseBottomInset) / 2.0
 
-        let availableSize = CGSize(
-            width: max(120, fullScreenSize.width - horizontalInset * 2),
-            height: max(120, fullScreenSize.height - topInset - bottomInset)
+        let baseAvailableSize = CGSize(
+            width: max(120, fullScreenSize.width - baseHorizontalInset * 2),
+            height: max(120, fullScreenSize.height - baseTopInset - baseBottomInset)
         )
+        let fullScreenAvailableSize = CGSize(
+            width: max(120, fullScreenSize.width - (isLandscape ? 16 : 0)),
+            height: max(120, fullScreenSize.height - (isLandscape ? 12 : 0))
+        )
+
         // 仿照 iOS 原生相簿：相鄰兩張照片之間保留 24pt 黑色間距，隨手指 1:1 水平推動
         let pageStride: CGFloat = fullScreenSize.width + 24
         let items = filmstripItems
@@ -432,34 +445,97 @@ struct ChekiDetailView: View {
                     singleCardPageView(
                         for: pageItem,
                         isCurrent: isCurrent,
-                        availableSize: availableSize,
+                        baseAvailableSize: baseAvailableSize,
+                        fullScreenAvailableSize: fullScreenAvailableSize,
+                        normalVerticalOffset: normalVerticalOffset,
                         isLandscape: isLandscape
                     )
-                    .frame(width: fullScreenSize.width, height: availableSize.height)
+                    .frame(width: fullScreenSize.width, height: fullScreenSize.height)
                     .offset(x: CGFloat(index - activeIndex) * pageStride + horizontalDragOffset)
                 }
             }
         }
         .frame(width: fullScreenSize.width, height: fullScreenSize.height)
-        .padding(.top, topInset)
-        .padding(.bottom, bottomInset)
-        .frame(width: fullScreenSize.width, height: fullScreenSize.height)
         .clipped()
         .contentShape(Rectangle())
-        .gesture(cardMagnifyGesture)
-        .simultaneousGesture(cardDragAndSwipeGesture(pageStride: pageStride))
+        .gesture(
+            cardMagnifyGesture(
+                baseAvailableSize: baseAvailableSize,
+                fullScreenAvailableSize: fullScreenAvailableSize
+            )
+        )
+        .simultaneousGesture(
+            cardDragAndSwipeGesture(
+                pageStride: pageStride,
+                fullScreenSize: fullScreenSize
+            )
+        )
     }
 
-    /// 單張卡片頁面：透過 `Cheki3DFlipContainer` (Animatable) 驅動 0° ↔ 180° 連續 3D 翻轉、Z 軸浮起與慢進慢出減速強調
+    /// 計算指定卡片由一般模式放大至全畫面時的平滑倍率
+    private func fullScreenExpandScale(
+        for pageItem: ChekiItem,
+        baseAvailableSize: CGSize,
+        fullScreenAvailableSize: CGSize
+    ) -> CGFloat {
+        let activeData = (isShowingBack && pageItem.hasBothSides)
+            ? (pageItem.backImageData ?? pageItem.frontImageData)
+            : pageItem.frontImageData
+        let imgSize: CGSize
+        if let activeData, let uiImg = UIImage(data: activeData), uiImg.size.width > 0, uiImg.size.height > 0 {
+            imgSize = uiImg.size
+        } else {
+            imgSize = CGSize(width: 540, height: 860)
+        }
+        let baseSize = fittedCardSize(for: imgSize, in: baseAvailableSize)
+        let fullSize = fittedCardSize(for: imgSize, in: fullScreenAvailableSize)
+        return max(1.0, fullSize.width / max(1.0, baseSize.width))
+    }
+
+    /// 單張卡片頁面：透過 `Cheki3DFlipContainer` (Animatable) 驅動 0° ↔ 180° 連續 3D 翻轉、Z 軸浮起，以及零抖動全畫面漸進漸出放大
     @ViewBuilder
     private func singleCardPageView(
         for pageItem: ChekiItem,
         isCurrent: Bool,
-        availableSize: CGSize,
+        baseAvailableSize: CGSize,
+        fullScreenAvailableSize: CGSize,
+        normalVerticalOffset: CGFloat,
         isLandscape: Bool
     ) -> some View {
         let effectiveFlipProgress = isCurrent ? flipProgress : 0.0
-        let effectiveScale = isCurrent ? (zoomScale * activePinchScale) : 1.0
+        let expandScale = fullScreenExpandScale(
+            for: pageItem,
+            baseAvailableSize: baseAvailableSize,
+            fullScreenAvailableSize: fullScreenAvailableSize
+        )
+
+        // 當圖片已放大 (isImageZoomed) 時：單擊切換全畫面僅隱藏/顯示 icon，圖片本身的倍率與座標 100% 鎖定不跳動
+        // 當圖片未放大 (1.0x) 時：單擊切換全畫面以漸進漸出曲線平滑放大至 expandScale 並置中
+        let effectiveScale: CGFloat = {
+            guard isCurrent else {
+                return isChromeHidden ? expandScale : 1.0
+            }
+            if isImageZoomed {
+                return zoomScale * activePinchScale
+            } else {
+                return isChromeHidden ? expandScale : 1.0
+            }
+        }()
+
+        let effectiveOffset: CGSize = {
+            guard isCurrent else {
+                return CGSize(width: 0, height: isChromeHidden ? 0 : normalVerticalOffset)
+            }
+            if isImageZoomed {
+                let anchorY: CGFloat = isZoomedFromFullScreen ? 0 : normalVerticalOffset
+                return CGSize(
+                    width: zoomPanOffset.width + activeZoomPanDelta.width,
+                    height: anchorY + zoomPanOffset.height + activeZoomPanDelta.height
+                )
+            } else {
+                return CGSize(width: 0, height: isChromeHidden ? 0 : normalVerticalOffset)
+            }
+        }()
 
         Cheki3DFlipContainer(
             flipProgress: effectiveFlipProgress,
@@ -467,7 +543,7 @@ struct ChekiDetailView: View {
                 frontCardFace(
                     for: pageItem,
                     isCurrent: isCurrent,
-                    availableSize: availableSize,
+                    availableSize: baseAvailableSize,
                     isLandscape: isLandscape
                 )
             },
@@ -475,15 +551,16 @@ struct ChekiDetailView: View {
                 backCardFace(
                     for: pageItem,
                     isCurrent: isCurrent,
-                    availableSize: availableSize,
+                    availableSize: baseAvailableSize,
                     isLandscape: isLandscape
                 )
             }
         )
         .scaleEffect(effectiveScale)
+        .offset(x: effectiveOffset.width, y: effectiveOffset.height)
     }
 
-    /// 卡片右上角翻轉按鈕（正面與背面皆固定於各自畫面的右上角 `topTrailing`）
+    /// 卡片右上角翻轉按鈕（正面與背面皆固定於各自畫面的右上角 `topTrailing`；若圖片放大中則直接隱藏 icon）
     @ViewBuilder
     private func cardTopRightFlipButton(
         for pageItem: ChekiItem,
@@ -491,29 +568,29 @@ struct ChekiDetailView: View {
         isBackFace: Bool,
         isLandscape: Bool
     ) -> some View {
-        // 正面於顯示工具列時呈現；背面則固定顯示於右上角（即使全螢幕模式也能直接從右上角翻回正面）
-        if isCurrent && (!isChromeHidden || isBackFace) {
-            Button {
-                trigger3DFlip()
-            } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "rectangle.portrait.rotate")
-                        .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
-                    Text(isBackFace ? "背面 · 翻面" : (pageItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面"))
-                        .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, isLandscape ? 7 : 9)
-                .padding(.vertical, isLandscape ? 3 : 4.5)
-                .background(.black.opacity(0.62), in: Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
-                )
+        let shouldShow = isCurrent && !isImageZoomed && (!isChromeHidden || isBackFace)
+        Button {
+            trigger3DFlip()
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "rectangle.portrait.rotate")
+                    .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
+                Text(isBackFace ? "背面 · 翻面" : (pageItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面"))
+                    .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
             }
-            .buttonStyle(.plain)
-            .padding(isLandscape ? 6 : 8)
+            .foregroundStyle(.white)
+            .padding(.horizontal, isLandscape ? 7 : 9)
+            .padding(.vertical, isLandscape ? 3 : 4.5)
+            .background(.black.opacity(0.62), in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
+            )
         }
+        .buttonStyle(.plain)
+        .padding(isLandscape ? 6 : 8)
+        .opacity(shouldShow ? 1.0 : 0.0)
+        .allowsHitTesting(shouldShow)
     }
 
     /// 卡片本體的單擊（沉浸模式切換）與雙擊（3D 翻轉 / 重置縮放）手勢，綁定在底圖上以避免干擾右上角翻轉按鈕
@@ -521,16 +598,22 @@ struct ChekiDetailView: View {
         view
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
-                if zoomScale > 1.05 {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                if isImageZoomed {
+                    withAnimation(pageAndZoomAnimation) {
+                        let returnToFullScreen = isZoomedFromFullScreen
                         zoomScale = 1.0
+                        activePinchScale = 1.0
+                        zoomPanOffset = .zero
+                        activeZoomPanDelta = .zero
+                        isZoomedFromFullScreen = false
+                        isChromeHidden = returnToFullScreen
                     }
                 } else {
                     trigger3DFlip()
                 }
             }
             .onTapGesture(count: 1) {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(pageAndZoomAnimation) {
                     isChromeHidden.toggle()
                 }
             }
@@ -568,7 +651,7 @@ struct ChekiDetailView: View {
                         ChekiWatermarkOverlayView(compact: false)
                             .allowsHitTesting(false)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: isChromeHidden ? 6 : 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             )
             .overlay(alignment: .topTrailing) {
                 cardTopRightFlipButton(
@@ -616,7 +699,7 @@ struct ChekiDetailView: View {
                         ChekiWatermarkOverlayView(compact: false)
                             .allowsHitTesting(false)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: isChromeHidden ? 6 : 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             )
             .overlay(alignment: .topTrailing) {
                 cardTopRightFlipButton(
@@ -939,24 +1022,69 @@ struct ChekiDetailView: View {
 
     // MARK: - 5. 手勢與互動動作 (Gestures & Actions)
 
-    private var cardMagnifyGesture: some Gesture {
+    private func cardMagnifyGesture(
+        baseAvailableSize: CGSize,
+        fullScreenAvailableSize: CGSize
+    ) -> some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                activePinchScale = max(0.8, min(3.0, value.magnification))
+                if activePinchScale == 1.0 && zoomScale <= 1.01 {
+                    isZoomedFromFullScreen = isChromeHidden
+                    if isChromeHidden {
+                        zoomScale = fullScreenExpandScale(
+                            for: currentItem,
+                            baseAvailableSize: baseAvailableSize,
+                            fullScreenAvailableSize: fullScreenAvailableSize
+                        )
+                    }
+                }
+                activePinchScale = max(0.75, min(3.5, value.magnification))
+                // 若圖片開始放大，直接取消顯示 icon（不觸發卡片位移或額外縮放）
+                if (zoomScale * activePinchScale) > 1.04 && !isChromeHidden {
+                    withAnimation(pageAndZoomAnimation) {
+                        isChromeHidden = true
+                    }
+                }
             }
             .onEnded { value in
-                let finalScale = max(1.0, min(3.0, zoomScale * value.magnification))
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                    zoomScale = finalScale
-                    activePinchScale = 1.0
+                let expandScale = fullScreenExpandScale(
+                    for: currentItem,
+                    baseAvailableSize: baseAvailableSize,
+                    fullScreenAvailableSize: fullScreenAvailableSize
+                )
+                let minBaseScale: CGFloat = isZoomedFromFullScreen ? expandScale : 1.0
+                let rawFinalScale = zoomScale * value.magnification
+                if rawFinalScale <= minBaseScale + 0.03 {
+                    withAnimation(pageAndZoomAnimation) {
+                        let returnToFullScreen = isZoomedFromFullScreen
+                        zoomScale = 1.0
+                        activePinchScale = 1.0
+                        zoomPanOffset = .zero
+                        activeZoomPanDelta = .zero
+                        isZoomedFromFullScreen = false
+                        isChromeHidden = returnToFullScreen
+                    }
+                } else {
+                    let finalScale = min(3.5, rawFinalScale)
+                    withAnimation(pageAndZoomAnimation) {
+                        zoomScale = finalScale
+                        activePinchScale = 1.0
+                    }
                 }
             }
     }
 
-    private func cardDragAndSwipeGesture(pageStride: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+    private func cardDragAndSwipeGesture(
+        pageStride: CGFloat,
+        fullScreenSize: CGSize
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 10, coordinateSpace: .local)
             .onChanged { value in
-                guard zoomScale <= 1.05 else { return }
+                if isImageZoomed {
+                    activeZoomPanDelta = value.translation
+                    return
+                }
+
                 let dx = value.translation.width
                 let dy = value.translation.height
 
@@ -982,8 +1110,15 @@ struct ChekiDetailView: View {
             }
             .onEnded { value in
                 defer { dragAxisLock = nil }
-                guard zoomScale <= 1.05 else {
-                    horizontalDragOffset = 0
+                if isImageZoomed {
+                    let maxPanX = max(40, (fullScreenSize.width * (zoomScale - 1.0)) * 0.52)
+                    let maxPanY = max(60, (fullScreenSize.height * (zoomScale - 1.0)) * 0.52)
+                    let targetX = min(max(zoomPanOffset.width + value.translation.width, -maxPanX), maxPanX)
+                    let targetY = min(max(zoomPanOffset.height + value.translation.height, -maxPanY), maxPanY)
+                    withAnimation(pageAndZoomAnimation) {
+                        zoomPanOffset = CGSize(width: targetX, height: targetY)
+                        activeZoomPanDelta = .zero
+                    }
                     return
                 }
 
@@ -993,7 +1128,7 @@ struct ChekiDetailView: View {
                 let activeAxis = dragAxisLock ?? (abs(dx) >= abs(dy) ? .horizontal : .vertical)
 
                 if activeAxis == .vertical {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
+                    withAnimation(pageAndZoomAnimation) {
                         horizontalDragOffset = 0
                     }
                     // 向上滑動 -> 呼出資訊與備忘面板 (Task 4.6)
@@ -1016,12 +1151,17 @@ struct ChekiDetailView: View {
                     } else if (dx > threshold || predictedDx > threshold * 1.6), idx - 1 >= 0 {
                         selectFilmstripItem(items[idx - 1])
                     } else {
-                        withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
+                        withAnimation(pageAndZoomAnimation) {
                             horizontalDragOffset = 0
                         }
                     }
                 }
             }
+    }
+
+    /// 全畫面放大與左右翻頁共用的平滑漸進漸出曲線（Ease-In-Ease-Out，慢進慢出無急跳）
+    private var pageAndZoomAnimation: Animation {
+        .timingCurve(0.26, 0.08, 0.22, 1.0, duration: 0.38)
     }
 
     /// 3D 翻轉曲線：慢進慢出（減速強調 / 減速を強調する），速度較先前放慢約 0.7 倍（時長 0.84 秒）
@@ -1041,19 +1181,23 @@ struct ChekiDetailView: View {
 
     private func selectFilmstripItem(_ targetItem: ChekiItem) {
         guard targetItem.id != currentItem.id else {
-            withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
+            withAnimation(pageAndZoomAnimation) {
                 horizontalDragOffset = 0
             }
             return
         }
         previousItemID = currentItem.id
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+        withAnimation(pageAndZoomAnimation) {
             currentItemID = targetItem.id
             horizontalDragOffset = 0
             isShowingBack = false
             flipProgress = 0.0
             zoomScale = 1.0
+            activePinchScale = 1.0
+            zoomPanOffset = .zero
+            activeZoomPanDelta = .zero
+            isZoomedFromFullScreen = false
         }
     }
 
