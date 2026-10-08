@@ -8,10 +8,10 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 * **最後更新時間**：2026-10-08
-* **當前所屬階段**：Phase 4 — UI 介面開發 (SwiftUI Views - iOS 18 HIG)
-* **當前進行中任務**：已完成 **Task 4.6**「06. 情報・備忘 上滑資訊面板 (`ChekiInfoView.swift`)」與配對工作台 UX 強化（首次顯示正反配對提示、點選外框配對正反、點選拍立得本體毛玻璃放大預覽、再點一下取消預覽、預覽畫面追加手動調整邊界按鈕）
-* **最新穩定 Git Commit**：feat(Pairing): 實作首次正反配對提示、外框配對與本體毛玻璃放大預覽及手動調整邊界
-* **下一動執行指示**：執行 **Task 4.7** 實作「07. 設定與 Pro 買斷」
+* **當前所屬階段**：Phase 4 — UI 介面開發 (SwiftUI Views - iOS 18 HIG) 全部完成
+* **當前進行中任務**：已完成 **Task 4.7**「07. 設定與 Pro 買斷 (`SettingsView.swift`)」（Apple 原生系統設定風格 5 大圓角卡片群組、頂部 ChekiLens Pro 終身買斷尊爵橫幅與購買面板、相簿雙向同步與時間軸策略、匯入與 OCR 手寫日期辨識偏好、照片儲存與輸出格式、掃描與影像處理偏好、外觀模式與恢復購買）
+* **最新穩定 Git Commit**：feat(Settings): 完成 Task 4.7 設定與 Pro 買斷介面實作
+* **下一動執行指示**：進入 Phase 5 執行 **Task 5.1** 封裝 `StoreKitManager.swift`（Non-Consumable NT$120 終身買斷商品）
 
 ---
 
@@ -231,25 +231,25 @@
   * 備忘輸入預設保持空白（不自動塞入系統匯入文字）
   * 匯入 10 張真實手寫日期拍立得（`DSCF0073.JPG`, `DSCF0010.JPG`, `193422_DSCF1405.JPG` 等）至 iOS 原生系統相簿供匯入日期辨識測試
   * 裁切照片全面改為**原地修改原圖（In-place Edit，絕不新增重複照片）**，透過 `originalFrontImageData` / `originalBackImageData` 與 Apple Photos `PHContentEditingInput` + `PHContentEditingOutput` 完整保留原始未裁切底圖，並提供「復原為原始圖片（取消裁切）」一鍵還原功能
-- [ ] **Task 4.7**: 實作「07. 設定與 Pro 買斷 (`SettingsView.swift`)」
-  * **iOS Inset Grouped 分組表格**：採用 Apple 原生 iOS 18 設定規格（卡片式分組、左側彩色 SF Symbol、右側原生控制項）
+- [x] **Task 4.7**: 實作「07. 設定與 Pro 買斷 (`SettingsView.swift`)」
+  * **Apple 原生系統設定風格（iOS 26+ HIG，5 大圓角卡片群組）**：比照 iOS「設定」App 之經典 Inset Grouped 規格，包含圓角卡片區塊、左側彩色背景 SF Symbol 圖示與右側原生控制項（開關、滑桿、選單）
   * **Pro 終身買斷卡片（頂部購買入口）**：漸層深藍紫尊爵橫幅（NT$120 / ¥600 終身買斷、4K 無限制、Mode B 雙角度去反光、去浮水印等權益說明與解鎖按鈕，為 Phase 5 商業化預留進入點與購買狀態回饋）
-  * **相簿雙向同步與時間軸策略 (Photos Sync & Timeline)**：
+  * **第 1 組：相簿雙向同步與時間軸策略 (Photos Sync & Timeline)**：
     * 相簿雙向同步總開關（`autoSyncToPhotos`）
     * 正反面時間軸排序策略（「正面與背面相同時間（同一秒）」緊密相鄰 vs 「背面自動延後 1 秒」確保正面永遠在左側）
     * 同步刪除偏好（在 App 內刪除拍立得時，是否詢問一併自 iOS 原生照片圖庫中刪除）
     * 手寫日期覆寫 EXIF 拍攝時間開關（`overwriteExifDateWithOCR`）
-  * **匯入與 OCR 手寫日期辨識偏好 (Import & Recognition)**：
+  * **第 2 組：匯入與 OCR 手寫日期辨識偏好 (Import & Recognition)**：
     * 匯入時自動辨識日期開關（Toggle：開啟時批次匯入/拍照後背景自動執行 OCR 填入，關閉時節省電力與處理資源）
     * 手寫日期預設年份補全規則（若拍立得僅寫 `9/17` 或 `'24.9.17`，當年份缺失時預設以「相片匯入當年度」或拍攝年度補全）
-  * **照片儲存格式偏好 (Storage & Export Format)**：
+  * **第 3 組：照片儲存格式偏好 (Storage & Export Format)**：
     * 儲存模式：保留原圖格式（固定原圖不轉換） vs 新建副檔（可自由選擇指定格式）
     * 支援格式切換：`原圖格式 (不轉換)` vs `HEIC (節省空間)` vs `JPEG (最佳相容性)` vs `無失真 PNG (典藏專用)`
-  * **相機與影像處理偏好 (Scan & Image Processing)**：
+  * **第 4 組：相機與影像處理偏好 (Scan & Image Processing)**：
     * 預設相紙規格（`Auto 智慧偵測` / `Instax Mini` / `Instax Square` / `Instax Wide`）
     * 自動邊界微調 (Inset / Outset) 滑桿與快速預設（`-2% 去陰影` / `0% 標準外框` / `+2% 完整留白`）
     * 反光對策模式（`Mode A 單張智慧抑制` / `Mode B 雙角度合成 (Pro 專屬)`）
-  * **一般與關於 (General & About)**：
+  * **第 5 組：一般與關於 (General & About)**：
     * 外觀模式（跟隨系統 / 深色 / 淺色）
     * 重新顯示新手導引教學按鈕
     * 版本資訊與「恢復購買項目 (Restore Purchases)」按鈕

@@ -11,26 +11,34 @@ enum MainLibraryTab: Hashable {
 /// App 根視圖 — 根據 onboarding 狀態決定顯示導引或主畫面
 struct ContentView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage("appAppearanceMode") private var appAppearanceModeRaw: String = AppAppearanceMode.system.rawValue
     @State private var selectedTab: MainLibraryTab = .allPhotos
 
+    private var preferredScheme: ColorScheme? {
+        (AppAppearanceMode(rawValue: appAppearanceModeRaw) ?? .system).resolvedColorScheme
+    }
+
     var body: some View {
-        if hasCompletedOnboarding {
-            TabView(selection: $selectedTab) {
-                Tab("全部", systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
-                    LibraryView()
-                }
+        Group {
+            if hasCompletedOnboarding {
+                TabView(selection: $selectedTab) {
+                    Tab("全部", systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
+                        LibraryView()
+                    }
 
-                Tab("相冊", systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
-                    AlbumsRootView()
-                }
+                    Tab("相冊", systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
+                        AlbumsRootView()
+                    }
 
-                Tab("搜尋", systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
-                    LibrarySearchView()
+                    Tab("搜尋", systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
+                        LibrarySearchView()
+                    }
                 }
+            } else {
+                OnboardingView()
             }
-        } else {
-            OnboardingView()
         }
+        .preferredColorScheme(preferredScheme)
     }
 }
 

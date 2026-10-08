@@ -2663,14 +2663,18 @@ struct BatchPairingView: View {
                         outputSize: cropRes.outputSize
                     )
 
-                    if let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
-                        ocrDate = ocrRes.date
-                    } else if let fallbackOCR = await visionManager.recognizeDate(from: cgImage) {
-                        ocrDate = fallbackOCR.date
+                    let shouldRunOCR = UserDefaults.standard.object(forKey: "autoRecognizeOCRDateOnImport") as? Bool ?? true
+                    if shouldRunOCR {
+                        if let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
+                            ocrDate = ocrRes.date
+                        } else if let fallbackOCR = await visionManager.recognizeDate(from: cgImage) {
+                            ocrDate = fallbackOCR.date
+                        }
                     }
                 }
             } else {
-                if let ocrRes = await visionManager.recognizeDate(from: cgImage) {
+                let shouldRunOCR = UserDefaults.standard.object(forKey: "autoRecognizeOCRDateOnImport") as? Bool ?? true
+                if shouldRunOCR, let ocrRes = await visionManager.recognizeDate(from: cgImage) {
                     ocrDate = ocrRes.date
                 }
             }
@@ -3325,11 +3329,19 @@ struct BatchPairingView: View {
 
             // 3. 若開啟系統相簿同步，直接原地修改系統相簿原圖（不新增重複照片，保留原始底圖可復原）
             if autoSyncToPhotos {
-                let syncDate = targetItem.displayDate
+                let overwriteExif = UserDefaults.standard.object(forKey: "overwriteExifDateWithOCR") as? Bool ?? true
+                let useGroupMemberAlbums = UserDefaults.standard.object(forKey: "createGroupMemberAlbumsInPhotos") as? Bool ?? true
+                let timelineStrategy = UserDefaults.standard.string(forKey: "backsideTimelineStrategy") ?? BacksideTimelineStrategy.sameSecond.rawValue
+
+                let frontSyncDate = overwriteExif ? targetItem.displayDate : itemTimestamp
+                let backSyncDate = (timelineStrategy == BacksideTimelineStrategy.plusOneSecond.rawValue)
+                    ? frontSyncDate.addingTimeInterval(1.0)
+                    : frontSyncDate
+
                 let membersToSync = slot.assignedMembers.isEmpty ? [nil as IdolMember?] : slot.assignedMembers.map { Optional($0) }
                 for (memberIdx, memberOpt) in membersToSync.enumerated() {
-                    let albumName = memberOpt?.stageName ?? "ChekiLens"
-                    let folderName = memberOpt?.group?.name
+                    let albumName = useGroupMemberAlbums ? (memberOpt?.stageName ?? "ChekiLens") : "ChekiLens"
+                    let folderName = useGroupMemberAlbums ? memberOpt?.group?.name : nil
                     if let album = try? await PhotoLibraryManager.shared.getOrCreateAlbum(
                         albumName: albumName,
                         inFolder: folderName
@@ -3339,7 +3351,7 @@ struct BatchPairingView: View {
                                 finalFrontUIImage,
                                 originalImageData: targetItem.originalFrontImageData,
                                 existingAssetIdentifier: targetItem.frontAssetIdentifier,
-                                creationDate: syncDate,
+                                creationDate: frontSyncDate,
                                 to: album
                             ) {
                                 targetItem.frontAssetIdentifier = updatedFrontId
@@ -3349,7 +3361,7 @@ struct BatchPairingView: View {
                                     backImg,
                                     originalImageData: targetItem.originalBackImageData,
                                     existingAssetIdentifier: targetItem.backAssetIdentifier,
-                                    creationDate: syncDate,
+                                    creationDate: backSyncDate,
                                     to: album
                                 ) {
                                     targetItem.backAssetIdentifier = updatedBackId
@@ -3359,20 +3371,20 @@ struct BatchPairingView: View {
                             if let frontId = targetItem.frontAssetIdentifier {
                                 try? await PhotoLibraryManager.shared.addExistingAsset(
                                     identifier: frontId,
-                                    creationDate: syncDate,
+                                    creationDate: frontSyncDate,
                                     to: album
                                 )
                             }
                             if let backId = targetItem.backAssetIdentifier {
                                 try? await PhotoLibraryManager.shared.addExistingAsset(
                                     identifier: backId,
-                                    creationDate: syncDate,
+                                    creationDate: backSyncDate,
                                     to: album
                                 )
                             }
                         }
                         targetItem.isSyncedToPhotoLibrary = true
-                        targetItem.isDateWrittenToAlbum = (targetItem.ocrDate != nil)
+                        targetItem.isDateWrittenToAlbum = overwriteExif && (targetItem.ocrDate != nil)
                     }
                 }
             }
