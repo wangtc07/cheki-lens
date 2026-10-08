@@ -732,77 +732,114 @@ struct ChekiDetailView: View {
     }
 
     private func standardFiveIconToolbar(isLandscape: Bool) -> some View {
-        let iconFontSize: CGFloat = isLandscape ? 13.5 : 18
-        let buttonHeight: CGFloat = isLandscape ? 22 : 36
+        let iconFontSize: CGFloat = isLandscape ? 14.5 : 19
+        let pillHeight: CGFloat = isLandscape ? 34 : 46
+        let centerButtonWidth: CGFloat = isLandscape ? 42 : 54
 
-        return HStack(spacing: 0) {
-            // 1. 分享 (Share)
+        return HStack(alignment: .center) {
+            // 左側獨立圓形膠囊：1. 分享 (Share)
             Button {
                 shareCurrentItem()
             } label: {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: iconFontSize, weight: .medium))
-                    .frame(maxWidth: .infinity, minHeight: buttonHeight)
+                    .foregroundStyle(.white)
+                    .frame(width: pillHeight, height: pillHeight)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(
+                        Circle()
+                            .strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
+                    )
+                    .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("分享拍立得")
 
-            // 2. 愛心 / 最愛 (Favorite)
-            Button {
-                toggleFavorite()
-            } label: {
-                Image(systemName: isFavorite ? "heart.fill" : "heart")
-                    .font(.system(size: iconFontSize, weight: .medium))
-                    .foregroundStyle(isFavorite ? .pink : .white)
-                    .symbolEffect(.bounce, value: isFavorite)
-                    .frame(maxWidth: .infinity, minHeight: buttonHeight)
-            }
-            .accessibilityLabel(isFavorite ? "取消最愛" : "加入最愛")
+            Spacer()
 
-            // 3. ℹ️ 資訊與特典會備忘 (Info & Memo Sheet)
-            Button {
-                hasSeenDetailCoachMark = true
-                showingInfoSheet = true
-            } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: showingInfoSheet ? "info.circle.fill" : "info.circle")
+            // 中央三合一膠囊：2. 愛心 (Favorite) + 3. 資訊 (Info) + 4. 調整 (Adjust)
+            HStack(spacing: isLandscape ? 4 : 6) {
+                // 2. 愛心 / 最愛 (Favorite)
+                Button {
+                    toggleFavorite()
+                } label: {
+                    Image(systemName: isFavorite ? "heart.fill" : "heart")
                         .font(.system(size: iconFontSize, weight: .medium))
-
-                    if let note = currentItem.memo?.noteText, !note.isEmpty {
-                        Circle()
-                            .fill(Color.cyan)
-                            .frame(width: isLandscape ? 4.5 : 6, height: isLandscape ? 4.5 : 6)
-                            .offset(x: 2.5, y: -1.5)
-                    }
+                        .foregroundStyle(isFavorite ? .pink : .white)
+                        .symbolEffect(.bounce, value: isFavorite)
+                        .frame(width: centerButtonWidth, height: pillHeight)
+                        .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, minHeight: buttonHeight)
-            }
-            .accessibilityLabel("檢視資訊與特典會備忘")
+                .buttonStyle(.plain)
+                .accessibilityLabel(isFavorite ? "取消最愛" : "加入最愛")
 
-            // 4. 調整 (Adjust Border Inset & Format)
-            Button {
-                showingAdjustmentSheet = true
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: iconFontSize, weight: .medium))
-                    .foregroundStyle(abs(currentItem.borderInsetRatio) > 0.001 ? .yellow : .white)
-                    .frame(maxWidth: .infinity, minHeight: buttonHeight)
-            }
-            .accessibilityLabel("調整拍立得邊界與比例")
+                // 3. ℹ️ 資訊與特典會備忘 (Info & Memo Sheet)
+                Button {
+                    hasSeenDetailCoachMark = true
+                    showingInfoSheet = true
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: showingInfoSheet ? "info.circle.fill" : "info.circle")
+                            .font(.system(size: iconFontSize, weight: .medium))
+                            .foregroundStyle(.white)
 
-            // 5. 垃圾桶 (Delete)
+                        if let note = currentItem.memo?.noteText, !note.isEmpty {
+                            Circle()
+                                .fill(Color.cyan)
+                                .frame(width: isLandscape ? 4.5 : 6, height: isLandscape ? 4.5 : 6)
+                                .offset(x: 2.5, y: -1.5)
+                        }
+                    }
+                    .frame(width: centerButtonWidth, height: pillHeight)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("檢視資訊與特典會備忘")
+
+                // 4. 調整 (Adjust Border Inset & Format)
+                Button {
+                    showingAdjustmentSheet = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: iconFontSize, weight: .medium))
+                        .foregroundStyle(abs(currentItem.borderInsetRatio) > 0.001 ? .yellow : .white)
+                        .frame(width: centerButtonWidth, height: pillHeight)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("調整拍立得邊界與比例")
+            }
+            .padding(.horizontal, isLandscape ? 6 : 8)
+            .frame(height: pillHeight)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
+            )
+            .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+
+            Spacer()
+
+            // 右側獨立圓形膠囊：5. 垃圾桶 (Delete)
             Button(role: .destructive) {
                 showDeleteConfirm = true
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: iconFontSize, weight: .medium))
                     .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: buttonHeight)
+                    .frame(width: pillHeight, height: pillHeight)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(
+                        Circle()
+                            .strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
+                    )
+                    .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("刪除拍立得")
         }
-        .foregroundStyle(.white)
-        .frame(maxWidth: isLandscape ? 260 : 420)
-        .padding(.horizontal, 12)
+        .frame(maxWidth: isLandscape ? 320 : 420)
+        .padding(.horizontal, isLandscape ? 16 : 24)
     }
 
     // MARK: - 5. 手勢與互動動作 (Gestures & Actions)
