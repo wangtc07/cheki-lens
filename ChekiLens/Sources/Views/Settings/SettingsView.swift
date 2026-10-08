@@ -544,7 +544,7 @@ struct SettingsView: View {
                 .font(.title3.weight(.heavy))
                 .foregroundStyle(.white)
 
-            Text("4K 無限制輸出 · 高精度 Lanczos 透視重採樣 · 反光消除 Mode B · 完全移除浮水印。一次買斷，無訂閱制。")
+            Text("原畫質無損輸出 · 雙角度去反光合成 · 完全移除浮水印")
                 .font(.footnote)
                 .foregroundStyle(.white.opacity(0.84))
                 .lineSpacing(2)
@@ -694,9 +694,8 @@ private struct ProLifetimePaywallSheet: View {
     @State private var isPurchasing: Bool = false
 
     private let features: [(icon: String, color: Color, title: String, desc: String)] = [
-        ("4k.tv.fill", .indigo, "4K 高畫質無限制導出", "解除每日免費張數限制，批次匯入百張拍立得皆以最高解析度保存"),
-        ("wand.and.rays", .purple, "高精度 Lanczos 透視重採樣", "完整保留偶像五官細節、簽名筆觸與立可白光澤"),
-        ("sun.max.trianglebadge.exclamationmark.fill", .pink, "Mode B 雙角度去反光合成", "透過兩張微傾角度自動消除塑膠保護套強光反射"),
+        ("4k.tv.fill", .indigo, "原畫質無損輸出", "解除每日免費張數限制，批次匯入與導出拍立得皆以最高原始畫質無損保存"),
+        ("sun.max.trianglebadge.exclamationmark.fill", .pink, "雙角度去反光合成", "透過 Mode B 兩張微傾角度自動消除塑膠保護套強光反射"),
         ("sparkles.rectangle.stack.fill", .orange, "完全移除浮水印 · 終身買斷", "一次付費永久解鎖所有 Pro 權益，絕無月費或年費訂閱")
     ]
 
