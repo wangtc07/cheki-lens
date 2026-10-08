@@ -26,6 +26,7 @@ extension VisionManager {
         format: ChekiFilmFormat,
         preserveCornerOrder: Bool = false
     ) throws -> CropResult {
+        let imgW = CGFloat(image.width)
         let imgH = CGFloat(image.height)
 
         // 四角点を正順（TL, TR, BR, BL）に並び替え（手動四頂點編輯器則直接保留 [TL, TR, BR, BL] 索引順序）
@@ -42,7 +43,27 @@ extension VisionManager {
             CIVector(x: pt.x, y: imgH - pt.y)
         }
 
-        let ciImage = CIImage(cgImage: image)
+        let baseCIImage = CIImage(cgImage: image)
+        // 若手動調整的四個頂點超出原始相片範圍（例如傾斜拍立得的白邊尖角稍微超出畫面左/右緣），
+        // 透過 clampedToExtent() 延伸邊緣像素（自動延續相紙白邊色澤，避免超出區域變成黑色三角缺角）
+        let ciPts = [finalTL, finalTR, finalBR, finalBL].map { CGPoint(x: $0.x, y: imgH - $0.y) }
+        let minCIX = min(0, ciPts.map(\.x).min() ?? 0)
+        let maxCIX = max(imgW, ciPts.map(\.x).max() ?? imgW)
+        let minCIY = min(0, ciPts.map(\.y).min() ?? 0)
+        let maxCIY = max(imgH, ciPts.map(\.y).max() ?? imgH)
+
+        let ciImage: CIImage
+        if minCIX < 0 || maxCIX > imgW || minCIY < 0 || maxCIY > imgH {
+            let expandedExtent = CGRect(
+                x: floor(minCIX) - 8,
+                y: floor(minCIY) - 8,
+                width: ceil(maxCIX - minCIX) + 16,
+                height: ceil(maxCIY - minCIY) + 16
+            )
+            ciImage = baseCIImage.clampedToExtent().cropped(to: expandedExtent)
+        } else {
+            ciImage = baseCIImage
+        }
 
         // CIFilter の inputTopLeft は Core Image 座標系（左下原點，以像素為單位）
         guard let filter = CIFilter(name: "CIPerspectiveCorrection") else {

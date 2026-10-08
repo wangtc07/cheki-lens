@@ -188,26 +188,26 @@ extension ChekiItem {
         }
     }
 
-    /// 將像素座標四角點 [TL, TR, BR, BL] 轉為正規化 (0.0~1.0) JSON 字串
+    /// 將像素座標四角點 [TL, TR, BR, BL] 轉為正規化 (-0.5~1.5，支援移出相片邊界外) JSON 字串
     static func encodeNormalizedCorners(_ pixelCorners: [CGPoint], imageSize: CGSize) -> String? {
         guard pixelCorners.count == 4, imageSize.width > 0, imageSize.height > 0 else { return nil }
         let normalized: [[Double]] = pixelCorners.map { pt in
             [
-                max(0.0, min(1.0, Double(pt.x / imageSize.width))),
-                max(0.0, min(1.0, Double(pt.y / imageSize.height)))
+                max(-0.5, min(1.5, Double(pt.x / imageSize.width))),
+                max(-0.5, min(1.5, Double(pt.y / imageSize.height)))
             ]
         }
         guard let data = try? JSONEncoder().encode(normalized) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    /// 將已正規化 (0.0~1.0) 的四角點 [TL, TR, BR, BL] 轉為 JSON 字串
+    /// 將已正規化 (-0.5~1.5，支援移出相片邊界外) 的四角點 [TL, TR, BR, BL] 轉為 JSON 字串
     static func encodeNormalizedCorners(_ normalizedCorners: [CGPoint]) -> String? {
         guard normalizedCorners.count == 4 else { return nil }
         let pairs: [[Double]] = normalizedCorners.map { pt in
             [
-                max(0.0, min(1.0, Double(pt.x))),
-                max(0.0, min(1.0, Double(pt.y)))
+                max(-0.5, min(1.5, Double(pt.x))),
+                max(-0.5, min(1.5, Double(pt.y)))
             ]
         }
         guard let data = try? JSONEncoder().encode(pairs) else { return nil }

@@ -1526,7 +1526,7 @@ private struct ChekiQuadCropEditorView: View {
     }
 
     private var effectiveZoom: CGFloat {
-        max(1.0, min(4.5, zoomScale * activePinchScale))
+        max(0.65, min(4.5, zoomScale * activePinchScale))
     }
 
     private var hasUnsavedChanges: Bool {
@@ -1634,8 +1634,8 @@ private struct ChekiQuadCropEditorView: View {
                 Spacer()
             }
 
-            // 縮放倍率重置標籤（當雙指放大時顯示）
-            if effectiveZoom > 1.02 {
+            // 縮放倍率重置標籤（當雙指縮放時顯示）
+            if abs(effectiveZoom - 1.0) > 0.03 {
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
                         resetZoomAndPan()
@@ -1671,13 +1671,14 @@ private struct ChekiQuadCropEditorView: View {
         .padding(.bottom, 8)
     }
 
-    // MARK: - 2. 中央互動畫布（透明灰色切除遮罩 + 四頂點拖曳 + 雙指縮放 + 放大鏡）
+    // MARK: - 2. 中央互動畫布（透明灰色切除遮罩 + 四頂點可移出相片外拖曳 + 雙指縮放 + 放大鏡）
 
     private var cropCanvasArea: some View {
         GeometryReader { geo in
             let viewportSize = geo.size
             if let uiImage = sourceUIImage {
-                let baseRect = Self.aspectFitRect(imageSize: uiImage.size, in: viewportSize, padding: 26)
+                // 預留充足畫布邊距 (44pt)，方便將四個頂點直接拉到相片邊界外
+                let baseRect = Self.aspectFitRect(imageSize: uiImage.size, in: viewportSize, padding: 44)
                 let transformedRect = Self.transformedImageRect(
                     baseRect: baseRect,
                     viewportSize: viewportSize,
@@ -1695,14 +1696,21 @@ private struct ChekiQuadCropEditorView: View {
                 }
 
                 ZStack {
-                    // 底層：原始圖片（支援雙指縮放與平移）
+                    // 底層：原始圖片（支援雙指縮放與平移，並繪製細虛線標示相片原始邊界）
                     Image(uiImage: uiImage)
                         .resizable()
                         .interpolation(.high)
+                        .overlay(
+                            Rectangle()
+                                .strokeBorder(
+                                    Color.white.opacity(0.28),
+                                    style: StrokeStyle(lineWidth: 1.0, dash: [4, 4])
+                                )
+                        )
                         .frame(width: transformedRect.width, height: transformedRect.height)
                         .position(x: transformedRect.midX, y: transformedRect.midY)
 
-                    // 切除的部分用透明灰色 (Even-Odd Fill：圖片外框減去四頂點多邊形內部)
+                    // 切除的部分用透明灰色 (Even-Odd Fill 並裁切於 transformedRect 內，避免頂點拉出相片外時產生反向灰塊)
                     Path { path in
                         path.addRect(transformedRect)
                         if screenCorners.count == 4 {
@@ -1714,6 +1722,7 @@ private struct ChekiQuadCropEditorView: View {
                         }
                     }
                     .fill(Color(white: 0.22).opacity(0.66), style: FillStyle(eoFill: true))
+                    .clipShape(Rectangle().path(in: transformedRect))
                     .allowsHitTesting(false)
 
                     // 雙指縮放與單指空白處拖曳平移手勢層
@@ -1722,26 +1731,27 @@ private struct ChekiQuadCropEditorView: View {
                         .gesture(canvasPanAndPinchGesture(baseRect: baseRect, viewportSize: viewportSize))
                         .onTapGesture(count: 2) {
                             withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
-                                if effectiveZoom > 1.05 {
+                                if abs(effectiveZoom - 1.0) > 0.05 {
                                     resetZoomAndPan()
                                 } else {
-                                    zoomScale = 2.2
+                                    zoomScale = 2.0
                                 }
                             }
                         }
 
-                    // 四邊形白色邊框 + 3x3 透視九宮格輔助線
+                    // 四邊形白色邊框 + 3x3 透視九宮格輔助線（可延伸至相片外）
                     if screenCorners.count == 4 {
                         quadGridAndBorderOverlay(screenCorners: screenCorners)
                             .allowsHitTesting(false)
                     }
 
-                    // 四個可獨立移動的頂點控制柄 (TL, TR, BR, BL)
+                    // 四個可獨立移動的頂點控制柄 (TL, TR, BR, BL)，支援拉出相片外
                     ForEach(0..<min(4, screenCorners.count), id: \.self) { index in
                         vertexHandle(
                             index: index,
                             screenPoint: screenCorners[index],
-                            transformedRect: transformedRect
+                            transformedRect: transformedRect,
+                            viewportSize: viewportSize
                         )
                     }
 
@@ -1773,7 +1783,7 @@ private struct ChekiQuadCropEditorView: View {
                                 Image(systemName: "hand.point.up.left.and.text")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.yellow)
-                                Text("拖曳四個頂點調整裁切範圍・雙指可縮放畫面")
+                                Text("四個頂點可拖曳至相片外・雙指可縮放畫面")
                                     .font(.caption2.weight(.medium))
                                     .foregroundStyle(.white.opacity(0.85))
                             }
@@ -1837,12 +1847,13 @@ private struct ChekiQuadCropEditorView: View {
         }
     }
 
-    // MARK: - 單一頂點控制柄 (Apple Photos L 型角標 + 圓形精準錨點)
+    // MARK: - 單一頂點控制柄 (Apple Photos L 型角標 + 圓形精準錨點，支援移出相片邊界外)
 
     private func vertexHandle(
         index: Int,
         screenPoint: CGPoint,
-        transformedRect: CGRect
+        transformedRect: CGRect,
+        viewportSize: CGSize
     ) -> some View {
         let isDragging = (activeDraggingCornerIndex == index)
 
@@ -1874,11 +1885,14 @@ private struct ChekiQuadCropEditorView: View {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     }
                     guard transformedRect.width > 10, transformedRect.height > 10 else { return }
-                    let nx = (value.location.x - transformedRect.minX) / transformedRect.width
-                    let ny = (value.location.y - transformedRect.minY) / transformedRect.height
+                    let safeScreenX = min(max(value.location.x, 12), max(12, viewportSize.width - 12))
+                    let safeScreenY = min(max(value.location.y, 12), max(12, viewportSize.height - 12))
+                    let nx = (safeScreenX - transformedRect.minX) / transformedRect.width
+                    let ny = (safeScreenY - transformedRect.minY) / transformedRect.height
+                    // 允許頂點移出相片範圍外 (-0.45 ~ 1.45)，方便處理邊角稍微超出畫面的傾斜拍立得
                     let clamped = CGPoint(
-                        x: min(max(nx, 0.01), 0.99),
-                        y: min(max(ny, 0.01), 0.99)
+                        x: min(max(nx, -0.45), 1.45),
+                        y: min(max(ny, -0.45), 1.45)
                     )
                     normalizedCorners[index] = clamped
                 }
@@ -1916,10 +1930,17 @@ private struct ChekiQuadCropEditorView: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .interpolation(.high)
+                    .overlay(
+                        Rectangle()
+                            .strokeBorder(
+                                Color.white.opacity(0.45),
+                                style: StrokeStyle(lineWidth: 1.0, dash: [3, 3])
+                            )
+                    )
                     .frame(width: displayedW, height: displayedH)
                     .offset(x: offsetX, y: offsetY)
                     .frame(width: loupeDiameter, height: loupeDiameter)
-                    .background(Color.black)
+                    .background(Color(white: 0.10))
                     .clipShape(Circle())
                     .overlay {
                         // 放大鏡中心標記（十字準星 + 黑色高對比描邊，確保在白邊/深色背景皆清晰可見）
@@ -2116,9 +2137,9 @@ private struct ChekiQuadCropEditorView: View {
                 activePinchScale = value.magnification
             }
             .onEnded { value in
-                zoomScale = max(1.0, min(4.5, zoomScale * value.magnification))
+                zoomScale = max(0.65, min(4.5, zoomScale * value.magnification))
                 activePinchScale = 1.0
-                if zoomScale <= 1.02 {
+                if abs(zoomScale - 1.0) <= 0.03 {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
                         zoomScale = 1.0
                         panOffset = .zero
@@ -2135,11 +2156,11 @@ private struct ChekiQuadCropEditorView: View {
 
         let pan = DragGesture(minimumDistance: 8)
             .onChanged { value in
-                guard effectiveZoom > 1.01 else { return }
+                guard abs(effectiveZoom - 1.0) > 0.01 else { return }
                 activePanDelta = value.translation
             }
             .onEnded { value in
-                guard effectiveZoom > 1.01 else {
+                guard abs(effectiveZoom - 1.0) > 0.01 else {
                     activePanDelta = .zero
                     return
                 }
@@ -2240,8 +2261,8 @@ private struct ChekiQuadCropEditorView: View {
             withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
                 normalizedCorners = adjusted.map { pt in
                     CGPoint(
-                        x: min(max(pt.x / max(1, imgSize.width), 0.01), 0.99),
-                        y: min(max(pt.y / max(1, imgSize.height), 0.01), 0.99)
+                        x: min(max(pt.x / max(1, imgSize.width), -0.45), 1.45),
+                        y: min(max(pt.y / max(1, imgSize.height), -0.45), 1.45)
                     )
                 }
             }
@@ -2263,8 +2284,8 @@ private struct ChekiQuadCropEditorView: View {
             withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
                 normalizedCorners = adjusted.map { pt in
                     CGPoint(
-                        x: min(max(pt.x / max(1, imgSize.width), 0.01), 0.99),
-                        y: min(max(pt.y / max(1, imgSize.height), 0.01), 0.99)
+                        x: min(max(pt.x / max(1, imgSize.width), -0.45), 1.45),
+                        y: min(max(pt.y / max(1, imgSize.height), -0.45), 1.45)
                     )
                 }
             }
