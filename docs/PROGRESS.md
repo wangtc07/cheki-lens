@@ -31,7 +31,11 @@
      - **首張固定四邊 + 陀螺儀平滑位移 (`CMMotionManager`)**：拍下第 1 張照片瞬間立即呼叫 `lockQuadAndStartGyro()` 固定四邊位置並停止即時 `VNDetectRectanglesRequest` 矩形偵測 (`isQuadDetectionLocked = true`)，改由 `CMMotionManager` 60fps 姿態傾角 (`CMAttitude.multiply(byInverseOf:)`) 搭配阻尼加速度平移驅動四邊與 4 個角點圓圈平滑移動，徹底解決移動時四邊跳動問題。
      - **四角分別手動按快門（取消到點自動觸發）**：移除自動倒數觸發快門計時器 (`photoScanDwellTimer`)，改為由使用者移動至四個角點後分別手動按下快門（`1/4` → `2/4` → `3/4` → `4/4`）或直接點選角點圓圈拍攝；同時防護 `AVCapturePhotoOutput` 的 `photoContinuation` 重入與取消釋放。
      - **極速合成（`< 0.35s`）與跳出不中斷存檔**：消除 Debug `-Onone` 下 7.2 億次 `Array` 雙層迴圈 (`maxFilterFloatFast`) 與重型 CoreML Fallback 造成的數分鐘卡死，改以 $O(1)$ 滑動視窗 Box Filter 搭配 `1280px` 快速正位與共用 Metal `CIContext`，並將合成與相簿同步置於獨立非取消 `Task` 中執行，確保瞬間完成且跳出畫面也不會中斷。
-* **最新穩定 Git Commit**：feat(Camera): 四角防反光改為首張固定四邊搭配陀螺儀移動並支援四角手動快門與極速合成
+  10. **按下快門零卡頓秒存原圖、正位裁切與 OCR 全面移至背景執行 (`CameraScannerView.swift`, `UIImage+Normalized.swift`)**：
+     - **硬體快門直出 JPEG 封包 (`CapturedPhotoPacket`)**：`CameraSessionController.capturePhotoPacket` 設定 `photoQualityPrioritization = .speed`，於 `photoOutput(_:didFinishProcessingPhoto:)` 直接回傳硬體 ISP `fileDataRepresentation()` 原始 JPEG `Data` 與輕量 `UIImage`（移除原先在主執行緒重繪 12MP `4032×3024` `.normalizedImage` 的阻塞）。
+     - **先秒存原圖並立即結束 Loading (`isProcessingCapture = false`)**：無論「拍照」、「正反雙面」或「防反光」，快門拍下瞬間立即將原始圖片寫入 SwiftData `ChekiItem`（左下角預覽縮圖即時更新）並立刻解除快門 Loading 狀態，讓使用者可零延遲連續操作。
+     - **正位裁切、手寫日期 OCR、四角防反光合成與系統相簿同步全背景化**：於獨立背景 `Task` 中使用降採樣 `normalizedImage(maxDimension: 2048)` 執行四角偵測、透視正位裁切、OCR 日期辨識與防反光合成，完成後自動原地更新 `ChekiItem` 並同步至 iOS 系統相簿。
+* **最新穩定 Git Commit**：perf(Camera): 快門先秒存原圖並立即結束Loading，將正位裁切與OCR移至背景執行
 * **下一動執行指示**：執行 **Task 6.2**（支援深色/淺色模式與動態字級 Dynamic Type）
 
 ---
