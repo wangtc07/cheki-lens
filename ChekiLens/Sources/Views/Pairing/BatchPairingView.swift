@@ -1858,9 +1858,9 @@ struct BatchPairingView: View {
                         } label: {
                             Image(systemName: "crop")
                                 .font(.system(size: 17, weight: .bold))
-                                .foregroundStyle(.black)
+                                .foregroundStyle(.white)
                                 .frame(width: 44, height: 44)
-                                .background(Color.yellow, in: Circle())
+                                .background(Color.white.opacity(0.18), in: Circle())
                                 .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
                         }
                         .buttonStyle(.plain)
@@ -4214,7 +4214,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                         Text(abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "邊界 %+.1f%%", defaultBorderInsetPercentage) : "邊界設定")
                             .font(.system(size: 10, weight: .semibold))
                     }
-                    .foregroundStyle(abs(defaultBorderInsetPercentage) > 0.05 ? .yellow : .white)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                 }
             }

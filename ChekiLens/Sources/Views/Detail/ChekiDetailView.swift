@@ -1035,7 +1035,7 @@ struct ChekiDetailView: View {
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: iconFontSize, weight: .medium))
-                        .foregroundStyle(abs(currentItem.borderInsetRatio) > 0.001 ? .yellow : .white)
+                        .foregroundStyle(.white)
                         .frame(width: centerButtonWidth, height: pillHeight)
                         .contentShape(Rectangle())
                 }
@@ -2354,7 +2354,7 @@ private struct ChekiQuadCropEditorView: View {
                         Text(abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "邊界 %+.1f%%", defaultBorderInsetPercentage) : "邊界設定")
                             .font(.system(size: 10, weight: .semibold))
                     }
-                    .foregroundStyle(abs(defaultBorderInsetPercentage) > 0.05 ? .yellow : .white)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                 }
 
