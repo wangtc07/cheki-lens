@@ -162,7 +162,6 @@ struct SettingsView: View {
     @AppStorage("createGroupMemberAlbumsInPhotos") private var createGroupMemberAlbums: Bool = true
     @AppStorage("overwriteExifDateWithOCR") private var overwriteExifDateWithOCR: Bool = true
     @AppStorage("backsideTimelineStrategy") private var backsideTimelineStrategyRaw: String = BacksideTimelineStrategy.sameSecond.rawValue
-    @AppStorage("confirmDeleteFromPhotosLibrary") private var confirmDeleteFromPhotosLibrary: Bool = true
 
     // MARK: 第 2 組：匯入與 OCR 手寫日期辨識偏好
     @AppStorage("autoRecognizeOCRDateOnImport") private var autoRecognizeOCRDateOnImport: Bool = true
@@ -251,22 +250,13 @@ struct SettingsView: View {
                             iconColor: .indigo
                         )
                     }
-
-                    Toggle(isOn: $confirmDeleteFromPhotosLibrary) {
-                        SettingsRowLabel(
-                            title: "刪除時詢問自系統相簿移除",
-                            subtitle: nil,
-                            systemImage: "trash.fill",
-                            iconColor: .red
-                        )
-                    }
                 } header: {
                     Text("iOS 相簿雙向同步與時間軸")
                 } footer: {
                     Text(
                         isProLifetimeUnlocked
-                            ? "Pro 版已啟用：系統相簿採用非破壞性原地修改（In-place Edit），不新增重複照片並保留原始未裁切底圖供隨時復原。"
-                            : "免費版：原生相簿不裁切（保留未裁切原圖），但可同步相簿分類與拍攝時間軸；裁切後照片僅在 App 內（加上浮水印）查看，分享或輸出時亦加上浮水印。"
+                            ? "Pro 版已啟用：系統相簿採用非破壞性原地修改（In-place Edit），不新增重複照片並保留原始未裁切底圖供隨時復原；開啟同步時刪除照片亦會自系統相簿刪除。"
+                            : "免費版：原生相簿不裁切（保留未裁切原圖），但可同步相簿分類與拍攝時間軸；開啟同步時刪除照片亦會自系統相簿刪除。"
                     )
                 }
 

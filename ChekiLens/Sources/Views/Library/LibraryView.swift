@@ -158,7 +158,11 @@ struct LibraryView: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("此操作會將拍立得從 ChekiLens 典藏庫移除，且無法復原。")
+                Text(
+                    autoSyncToPhotos
+                        ? "此操作會將拍立得從 ChekiLens 典藏庫與 iOS 系統相簿中一併刪除。"
+                        : "此操作會將拍立得從 ChekiLens 典藏庫移除，且無法復原。"
+                )
             }
             .sheet(isPresented: $showingQuickCreateSheet) {
                 QuickCreateIdolSheet()
@@ -563,8 +567,7 @@ struct LibraryView: View {
                 Divider()
 
                 Button(role: .destructive) {
-                    modelContext.delete(item)
-                    try? modelContext.save()
+                    PhotoLibraryManager.shared.deleteItems([item], modelContext: modelContext)
                 } label: {
                     Label("刪除此拍立得", systemImage: "trash")
                 }
@@ -639,10 +642,8 @@ struct LibraryView: View {
     }
 
     private func deleteSelectedItems() {
-        for item in chekiItems where selectedItemIDs.contains(item.persistentModelID) {
-            modelContext.delete(item)
-        }
-        try? modelContext.save()
+        let itemsToDelete = chekiItems.filter { selectedItemIDs.contains($0.persistentModelID) }
+        PhotoLibraryManager.shared.deleteItems(itemsToDelete, modelContext: modelContext)
         withAnimation {
             isSelectionMode = false
             selectedItemIDs.removeAll()
@@ -653,6 +654,8 @@ struct LibraryView: View {
     private func processImportedPhotos(_ items: [PhotosPickerItem]) async {
         isProcessing = true
         defer { isProcessing = false }
+
+        var affectedItems: [ChekiItem] = []
 
         for item in items {
             guard let data = try? await item.loadTransferable(type: Data.self),
@@ -668,6 +671,7 @@ struct LibraryView: View {
                     existingItem.originalFrontImageData = normalizedData
                 }
                 await VisionPhotoProcessor.process(existingItem, image: uiImage)
+                affectedItems.append(existingItem)
             } else {
                 let newItem = ChekiItem(
                     frontImageData: normalizedData,
@@ -678,10 +682,19 @@ struct LibraryView: View {
                 )
                 modelContext.insert(newItem)
                 await VisionPhotoProcessor.process(newItem, image: uiImage)
+                affectedItems.append(newItem)
             }
         }
 
         try? modelContext.save()
+
+        if autoSyncToPhotos && !affectedItems.isEmpty {
+            await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                affectedItems,
+                modelContext: modelContext,
+                onlyAlbumAndDateIfAlreadySynced: false
+            )
+        }
     }
 }
 
@@ -1461,14 +1474,18 @@ struct AlbumHeroDetailView: View {
             titleVisibility: .visible
         ) {
             Button("刪除 \(selectedItemIDs.count) 張拍立得", role: .destructive) {
-                for item in displayedItems where selectedItemIDs.contains(item.persistentModelID) {
-                    modelContext.delete(item)
-                }
-                try? modelContext.save()
+                let itemsToDelete = displayedItems.filter { selectedItemIDs.contains($0.persistentModelID) }
+                PhotoLibraryManager.shared.deleteItems(itemsToDelete, modelContext: modelContext)
                 isSelectionMode = false
                 selectedItemIDs.removeAll()
             }
             Button("取消", role: .cancel) {}
+        } message: {
+            Text(
+                autoSyncToPhotos
+                    ? "此操作會將拍立得從 ChekiLens 典藏庫與 iOS 系統相簿中一併刪除。"
+                    : "此操作會將拍立得從 ChekiLens 典藏庫移除，且無法復原。"
+            )
         }
         .sheet(isPresented: $showingSettingsSheet, onDismiss: {
             if autoSyncToPhotos {
@@ -1699,8 +1716,7 @@ struct AlbumHeroDetailView: View {
                 Divider()
 
                 Button(role: .destructive) {
-                    modelContext.delete(item)
-                    try? modelContext.save()
+                    PhotoLibraryManager.shared.deleteItems([item], modelContext: modelContext)
                 } label: {
                     Label("刪除拍立得", systemImage: "trash")
                 }

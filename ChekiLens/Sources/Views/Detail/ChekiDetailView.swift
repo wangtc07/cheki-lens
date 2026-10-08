@@ -230,7 +230,11 @@ struct ChekiDetailView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("此拍立得（含背面與特典會備忘）將從典藏庫永久移除。")
+            Text(
+                PhotoLibraryManager.shouldSyncDeleteFromSystemPhotoLibrary(for: currentItem)
+                    ? "此拍立得（含正反面與特典會備忘）將從典藏庫與 iOS 系統相簿中一併刪除。"
+                    : "此拍立得（含背面與特典會備忘）將從典藏庫永久移除。"
+            )
         }
     }
 
@@ -331,12 +335,14 @@ struct ChekiDetailView: View {
                         }
 
                         Button(role: .destructive) {
-                            currentItem.backImageData = nil
+                            PhotoLibraryManager.shared.removeBackside(
+                                from: currentItem,
+                                modelContext: modelContext
+                            )
                             isShowingBack = false
                             withAnimation(flipAnimation) {
                                 flipProgress = 0.0
                             }
-                            try? modelContext.save()
                         } label: {
                             Label("移除背面照片", systemImage: "trash")
                         }
@@ -1345,6 +1351,17 @@ struct ChekiDetailView: View {
         withAnimation(flipAnimation) {
             flipProgress = 1.0
         }
+
+        if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
+            let target = currentItem
+            Task {
+                await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                    [target],
+                    modelContext: modelContext,
+                    onlyAlbumAndDateIfAlreadySynced: false
+                )
+            }
+        }
     }
 
     /// Task 5.4 & 6.1: 從相簿選取第 2 張不同傾斜角度的照片，與當前照片進行極速 Mode B 雙角度去反光合成
@@ -1578,8 +1595,7 @@ struct ChekiDetailView: View {
             }
         }
 
-        modelContext.delete(targetToDelete)
-        try? modelContext.save()
+        PhotoLibraryManager.shared.deleteItems([targetToDelete], modelContext: modelContext)
 
         if let nextID {
             withAnimation(.snappy(duration: 0.25)) {

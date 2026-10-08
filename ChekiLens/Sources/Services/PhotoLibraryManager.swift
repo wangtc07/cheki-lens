@@ -375,6 +375,119 @@ final class PhotoLibraryManager {
         return syncedCount
     }
 
+    // MARK: - Delete Sync with System Photo Library
+
+    /// 判斷刪除指定拍立得時是否應一併自 iOS 系統相簿 (`Photos.app`) 刪除對應照片：
+    /// - 當「同步至 iOS 系統相簿 (`autoSyncToPhotosLibrary`)」開啟時，一律同步刪除系統相簿中的正反面照片
+    /// - 若使用者尚未手動關閉同步開關，但該項目已由相機預設同步至系統相簿 (`isSyncedToPhotoLibrary == true`)，亦同步刪除
+    static func shouldSyncDeleteFromSystemPhotoLibrary(for item: ChekiItem? = nil) -> Bool {
+        if let explicit = UserDefaults.standard.object(forKey: "autoSyncToPhotosLibrary") as? Bool {
+            return explicit
+        }
+        if let legacyExplicit = UserDefaults.standard.object(forKey: "autoSyncToPhotos") as? Bool {
+            return legacyExplicit
+        }
+        return item?.isSyncedToPhotoLibrary ?? false
+    }
+
+    /// 刪除指定的 `ChekiItem` 陣列，並在啟用「系統相簿同步」時一併自 iOS 系統相簿 (`Photos.app`) 刪除對應的正反面照片
+    @MainActor
+    func deleteItems(
+        _ items: [ChekiItem],
+        modelContext: ModelContext
+    ) {
+        guard !items.isEmpty else { return }
+
+        let deletingIDs = Set(items.map(\.id))
+        let allItems = (try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? []
+        var retainedAssetIDs = Set<String>()
+        for existing in allItems where !deletingIDs.contains(existing.id) {
+            if let f = existing.frontAssetIdentifier, !f.isEmpty {
+                retainedAssetIDs.insert(f)
+            }
+            if let b = existing.backAssetIdentifier, !b.isEmpty {
+                retainedAssetIDs.insert(b)
+            }
+        }
+
+        var assetIDsToDelete: [String] = []
+        for item in items {
+            if Self.shouldSyncDeleteFromSystemPhotoLibrary(for: item) {
+                if let frontID = item.frontAssetIdentifier,
+                   !frontID.isEmpty,
+                   !retainedAssetIDs.contains(frontID),
+                   !assetIDsToDelete.contains(frontID) {
+                    assetIDsToDelete.append(frontID)
+                }
+                if let backID = item.backAssetIdentifier,
+                   !backID.isEmpty,
+                   !retainedAssetIDs.contains(backID),
+                   !assetIDsToDelete.contains(backID) {
+                    assetIDsToDelete.append(backID)
+                }
+            }
+            modelContext.delete(item)
+        }
+        try? modelContext.save()
+
+        if !assetIDsToDelete.isEmpty {
+            Task {
+                await deleteAssetsFromSystemPhotoLibrary(identifiers: assetIDsToDelete)
+            }
+        }
+    }
+
+    /// 移除單張拍立得的背面照片，並在啟用「系統相簿同步」時一併自 iOS 系統相簿刪除該背面照片
+    @MainActor
+    func removeBackside(
+        from item: ChekiItem,
+        modelContext: ModelContext
+    ) {
+        let removedBackAssetID = item.backAssetIdentifier
+        let shouldDeleteFromPhotos = Self.shouldSyncDeleteFromSystemPhotoLibrary(for: item)
+
+        item.backImageData = nil
+        item.originalBackImageData = nil
+        item.backPerspectivePointsJSON = nil
+        item.backAssetIdentifier = nil
+        try? modelContext.save()
+
+        guard shouldDeleteFromPhotos,
+              let backID = removedBackAssetID,
+              !backID.isEmpty else {
+            return
+        }
+
+        let allItems = (try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? []
+        let isStillReferenced = allItems.contains { existing in
+            existing.frontAssetIdentifier == backID || existing.backAssetIdentifier == backID
+        }
+        guard !isStillReferenced else { return }
+
+        Task {
+            await deleteAssetsFromSystemPhotoLibrary(identifiers: [backID])
+        }
+    }
+
+    /// 自 iOS 系統相簿 (`Photos.app`) 刪除指定 `localIdentifier` 的照片 (`PHAsset`)
+    func deleteAssetsFromSystemPhotoLibrary(identifiers: [String]) async {
+        let validIDs = identifiers.filter { !$0.isEmpty }
+        guard !validIDs.isEmpty else { return }
+        guard await requestAuthorization() else { return }
+
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: validIDs, options: nil)
+        guard fetchResult.count > 0 else { return }
+
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.deleteAssets(fetchResult)
+            }
+            logger.info("已同步自 iOS 系統相簿刪除 \(fetchResult.count) 張照片")
+        } catch {
+            logger.error("自 iOS 系統相簿刪除照片失敗或使用者取消：\(error.localizedDescription)")
+        }
+    }
+
     /// 將系統相簿中的 `PHAsset` 復原為未裁切的原始圖片 (`revertAssetContentToOriginal`)
     func revertAssetToOriginal(assetIdentifier: String) async throws {
         guard !assetIdentifier.isEmpty,
