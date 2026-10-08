@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import StoreKit
 
 // MARK: - 設定選項列舉定義 (Task 4.7)
@@ -149,6 +150,8 @@ enum AppAppearanceMode: String, CaseIterable, Identifiable {
 /// - 5 大圓角卡片群組 + 左側彩色圓角方塊 SF Symbol 圖示 + 右側原生控制項
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var allChekiItems: [ChekiItem]
 
     // MARK: Pro 買斷狀態與每日免費額度 (與 Phase 5 StoreKitManager 雙向綁定)
     @AppStorage("isProLifetimeUnlocked") private var isProLifetimeUnlocked: Bool = false
@@ -182,6 +185,7 @@ struct SettingsView: View {
 
     @State private var showingProPurchaseSheet: Bool = false
     @State private var isRestoringPurchases: Bool = false
+    @State private var isSyncingAlbumsToPhotos: Bool = false
     @State private var alertTitle: String = ""
     @State private var alertMessage: String? = nil
 
@@ -567,9 +571,45 @@ struct SettingsView: View {
             .task {
                 await StoreKitManager.shared.initializeStore()
             }
+            .onChange(of: autoSyncToPhotos) { _, isEnabled in
+                guard isEnabled else { return }
+                Task {
+                    await syncAllItemsToPhotosLibrary(onlyAlbumAndDateIfAlreadySynced: false)
+                }
+            }
+            .onChange(of: createGroupMemberAlbums) { _, _ in
+                guard autoSyncToPhotos else { return }
+                Task {
+                    await syncAllItemsToPhotosLibrary(onlyAlbumAndDateIfAlreadySynced: true)
+                }
+            }
+            .onChange(of: overwriteExifDateWithOCR) { _, _ in
+                guard autoSyncToPhotos else { return }
+                Task {
+                    await syncAllItemsToPhotosLibrary(onlyAlbumAndDateIfAlreadySynced: true)
+                }
+            }
+            .onChange(of: backsideTimelineStrategyRaw) { _, _ in
+                guard autoSyncToPhotos else { return }
+                Task {
+                    await syncAllItemsToPhotosLibrary(onlyAlbumAndDateIfAlreadySynced: true)
+                }
+            }
         }
         .preferredColorScheme(
             (AppAppearanceMode(rawValue: appAppearanceModeRaw) ?? .system).resolvedColorScheme
+        )
+    }
+
+    @MainActor
+    private func syncAllItemsToPhotosLibrary(onlyAlbumAndDateIfAlreadySynced: Bool) async {
+        guard !allChekiItems.isEmpty, !isSyncingAlbumsToPhotos else { return }
+        isSyncingAlbumsToPhotos = true
+        defer { isSyncingAlbumsToPhotos = false }
+        await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+            allChekiItems,
+            modelContext: modelContext,
+            onlyAlbumAndDateIfAlreadySynced: onlyAlbumAndDateIfAlreadySynced
         )
     }
 

@@ -27,6 +27,7 @@ struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var chekiItems: [ChekiItem]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
+    @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = false
 
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var processingItems: [PhotosPickerItem] = []
@@ -162,13 +163,42 @@ struct LibraryView: View {
             .sheet(isPresented: $showingQuickCreateSheet) {
                 QuickCreateIdolSheet()
             }
-            .sheet(isPresented: $showingSettingsSheet) {
+            .sheet(isPresented: $showingSettingsSheet, onDismiss: {
+                if autoSyncToPhotos {
+                    Task {
+                        await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                            chekiItems,
+                            modelContext: modelContext,
+                            onlyAlbumAndDateIfAlreadySynced: false
+                        )
+                    }
+                }
+            }) {
                 SettingsView()
             }
             .sheet(isPresented: $showingBatchPairingSheet, onDismiss: {
                 processingItems = []
+                if autoSyncToPhotos {
+                    Task {
+                        await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                            chekiItems,
+                            modelContext: modelContext,
+                            onlyAlbumAndDateIfAlreadySynced: true
+                        )
+                    }
+                }
             }) {
                 BatchPairingView(initialPickerItems: processingItems)
+            }
+            .onChange(of: autoSyncToPhotos) { _, isEnabled in
+                guard isEnabled else { return }
+                Task {
+                    await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                        chekiItems,
+                        modelContext: modelContext,
+                        onlyAlbumAndDateIfAlreadySynced: false
+                    )
+                }
             }
             .fullScreenCover(isPresented: $showingCameraScanner) {
                 CameraScannerView()
@@ -499,6 +529,14 @@ struct LibraryView: View {
                     Button {
                         item.idolMember = nil
                         try? modelContext.save()
+                        if autoSyncToPhotos {
+                            Task {
+                                await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                                    [item],
+                                    modelContext: modelContext
+                                )
+                            }
+                        }
                     } label: {
                         Label("設為未分類", systemImage: "tray")
                     }
@@ -506,6 +544,14 @@ struct LibraryView: View {
                         Button {
                             item.idolMember = member
                             try? modelContext.save()
+                            if autoSyncToPhotos {
+                                Task {
+                                    await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                                        [item],
+                                        modelContext: modelContext
+                                    )
+                                }
+                            }
                         } label: {
                             if let groupName = member.group?.name {
                                 Text("\(member.stageName)（\(groupName)）")
@@ -1137,6 +1183,9 @@ struct AlbumHeroDetailView: View {
     let defaultMember: IdolMember?
 
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var allChekiItems: [ChekiItem]
+    @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
+    @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = false
 
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var processingItems: [PhotosPickerItem] = []
@@ -1156,8 +1205,32 @@ struct AlbumHeroDetailView: View {
     @State private var columnCount: Int = 5
     @State private var pinchBaselineColumnCount: Int? = nil
 
+    /// 即時從 SwiftData 查詢目前所在相簿的所有拍立得項目，確保從相簿追加或配對歸檔後立即更新目前所在的相簿
+    private var liveItems: [ChekiItem] {
+        if let defaultMember {
+            return allChekiItems.filter { $0.idolMember?.id == defaultMember.id }
+        } else {
+            return allChekiItems.filter { $0.idolMember == nil }
+        }
+    }
+
+    private var effectivePrimaryTitle: String {
+        if let defaultMember {
+            return defaultMember.group?.name ?? defaultMember.stageName
+        }
+        return primaryTitle
+    }
+
+    private var effectiveSecondaryTitle: String? {
+        if let defaultMember {
+            return defaultMember.group != nil ? "(\(defaultMember.stageName))" : nil
+        }
+        return secondaryTitle
+    }
+
     private var displayedItems: [ChekiItem] {
-        let filtered = filterDualSideOnly ? items.filter(\.hasBothSides) : items
+        let source = liveItems
+        let filtered = filterDualSideOnly ? source.filter(\.hasBothSides) : source
         return filtered.sorted {
             sortAscending ? ($0.displayDate < $1.displayDate) : ($0.displayDate > $1.displayDate)
         }
@@ -1168,7 +1241,7 @@ struct AlbumHeroDetailView: View {
     }
 
     private var heroCoverData: Data? {
-        items.first?.frontImageData
+        displayedItems.first?.frontImageData ?? liveItems.first?.frontImageData ?? items.first?.frontImageData
     }
 
     var body: some View {
@@ -1180,7 +1253,7 @@ struct AlbumHeroDetailView: View {
                     ContentUnavailableView {
                         Label("尚無拍立得項目", systemImage: "photo.on.rectangle")
                     } description: {
-                        Text("點擊右上角「⋯」匯入或拍攝拍立得至此相冊。")
+                        Text("點擊右上角「＋」或「⋯」匯入或拍攝拍立得至此相冊。")
                     }
                     .padding(.vertical, 48)
                 } else {
@@ -1233,6 +1306,23 @@ struct AlbumHeroDetailView: View {
                         }
                         .buttonStyle(.plain)
                     } else {
+                        PhotosPicker(
+                            selection: $selectedPhotos,
+                            maxSelectionCount: nil,
+                            matching: .images,
+                            preferredItemEncoding: .automatic,
+                            photoLibrary: .shared()
+                        ) {
+                            Image(systemName: "plus")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .fixedSize()
+                        .accessibilityLabel("從相簿追加拍立得至此相冊")
+
                         Menu {
                             Button {
                                 showingCameraScanner = true
@@ -1347,6 +1437,12 @@ struct AlbumHeroDetailView: View {
             selectedPhotos = []
             showingBatchPairingSheet = true
         }
+        .onChange(of: autoSyncToPhotos) { _, isEnabled in
+            guard isEnabled else { return }
+            Task {
+                await syncCurrentAlbumToPhotosLibrary(forceFullSync: true)
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             if isSelectionMode {
                 ApplePhotosSelectionBottomBar(
@@ -1377,15 +1473,32 @@ struct AlbumHeroDetailView: View {
             }
             Button("取消", role: .cancel) {}
         }
-        .sheet(isPresented: $showingSettingsSheet) {
+        .sheet(isPresented: $showingSettingsSheet, onDismiss: {
+            if autoSyncToPhotos {
+                Task {
+                    await syncCurrentAlbumToPhotosLibrary(forceFullSync: true)
+                }
+            }
+        }) {
             SettingsView()
         }
         .sheet(isPresented: $showingBatchPairingSheet, onDismiss: {
             processingItems = []
+            if autoSyncToPhotos {
+                Task {
+                    await syncCurrentAlbumToPhotosLibrary(forceFullSync: false)
+                }
+            }
         }) {
             BatchPairingView(initialPickerItems: processingItems, defaultMember: defaultMember)
         }
-        .fullScreenCover(isPresented: $showingCameraScanner) {
+        .fullScreenCover(isPresented: $showingCameraScanner, onDismiss: {
+            if autoSyncToPhotos {
+                Task {
+                    await syncCurrentAlbumToPhotosLibrary(forceFullSync: false)
+                }
+            }
+        }) {
             CameraScannerView(defaultMember: defaultMember)
         }
         .overlay {
@@ -1398,6 +1511,18 @@ struct AlbumHeroDetailView: View {
                 }
             }
         }
+    }
+
+    /// 確保目前所在相簿的所有項目已歸入 `defaultMember`，並在開啟「相簿同步」時同步至 iOS 系統相簿
+    @MainActor
+    private func syncCurrentAlbumToPhotosLibrary(forceFullSync: Bool) async {
+        let currentItems = liveItems
+        guard !currentItems.isEmpty else { return }
+        await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+            currentItems,
+            modelContext: modelContext,
+            onlyAlbumAndDateIfAlreadySynced: !forceFullSync
+        )
     }
 
     private var pinchZoomGesture: some Gesture {
@@ -1470,12 +1595,12 @@ struct AlbumHeroDetailView: View {
 
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(primaryTitle)
+                        Text(effectivePrimaryTitle)
                             .font(.title.weight(.bold))
                             .foregroundStyle(.white)
 
-                        if let secondaryTitle {
-                            Text(secondaryTitle)
+                        if let effectiveSecondaryTitle {
+                            Text(effectiveSecondaryTitle)
                                 .font(.title2.weight(.bold))
                                 .foregroundStyle(.white)
                         }
@@ -1539,6 +1664,53 @@ struct AlbumHeroDetailView: View {
                 AlbumSquareThumbnailCell(item: item)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Menu("指派推角成員") {
+                    Button {
+                        item.idolMember = nil
+                        try? modelContext.save()
+                        if autoSyncToPhotos {
+                            Task {
+                                await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                                    [item],
+                                    modelContext: modelContext
+                                )
+                            }
+                        }
+                    } label: {
+                        Label("未分類", systemImage: item.idolMember == nil ? "checkmark" : "tray")
+                    }
+
+                    ForEach(idolMembers) { member in
+                        Button {
+                            item.idolMember = member
+                            try? modelContext.save()
+                            if autoSyncToPhotos {
+                                Task {
+                                    await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                                        [item],
+                                        modelContext: modelContext
+                                    )
+                                }
+                            }
+                        } label: {
+                            let labelText = member.group != nil
+                                ? "\(member.stageName)（\(member.group!.name)）"
+                                : member.stageName
+                            Label(labelText, systemImage: item.idolMember?.id == member.id ? "checkmark" : "person")
+                        }
+                    }
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    modelContext.delete(item)
+                    try? modelContext.save()
+                } label: {
+                    Label("刪除拍立得", systemImage: "trash")
+                }
+            }
         }
     }
 
@@ -1546,6 +1718,8 @@ struct AlbumHeroDetailView: View {
     private func processImportedPhotos(_ pickerItems: [PhotosPickerItem]) async {
         isProcessing = true
         defer { isProcessing = false }
+
+        var affectedItems: [ChekiItem] = []
 
         for pickerItem in pickerItems {
             guard let data = try? await pickerItem.loadTransferable(type: Data.self),
@@ -1556,11 +1730,13 @@ struct AlbumHeroDetailView: View {
 
             if let assetId = pickerItem.itemIdentifier,
                !assetId.isEmpty,
-               let existingItem = items.first(where: { $0.frontAssetIdentifier == assetId }) {
+               let existingItem = allChekiItems.first(where: { $0.frontAssetIdentifier == assetId }) {
                 if existingItem.originalFrontImageData == nil {
                     existingItem.originalFrontImageData = normalizedData
                 }
+                existingItem.idolMember = defaultMember
                 await VisionPhotoProcessor.process(existingItem, image: uiImage)
+                affectedItems.append(existingItem)
             } else {
                 let newItem = ChekiItem(
                     frontImageData: normalizedData,
@@ -1572,10 +1748,19 @@ struct AlbumHeroDetailView: View {
                 )
                 modelContext.insert(newItem)
                 await VisionPhotoProcessor.process(newItem, image: uiImage)
+                affectedItems.append(newItem)
             }
         }
 
         try? modelContext.save()
+
+        if autoSyncToPhotos && !affectedItems.isEmpty {
+            await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                affectedItems,
+                modelContext: modelContext,
+                onlyAlbumAndDateIfAlreadySynced: false
+            )
+        }
     }
 }
 

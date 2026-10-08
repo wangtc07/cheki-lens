@@ -284,6 +284,7 @@ struct BatchPairingView: View {
         self.initialPickerItems = initialPickerItems
         self.defaultMember = defaultMember
         _defaultFallbackMember = State(initialValue: defaultMember)
+        _selectedTargetMembers = State(initialValue: defaultMember.map { [$0] } ?? [])
     }
 
     private var pairedCount: Int {
@@ -481,11 +482,9 @@ struct BatchPairingView: View {
                 formatAndDateEditorSheetContent
             }
             .onChange(of: idolMembers.count) { oldCount, newCount in
-                // 當使用者透過「新增成員」建立新成員後，自動將最新建立的成員加入上方多選目標中
+                // 當使用者透過「新增成員」建立新成員後，自動將最新建立的成員選為目標相簿並同步更新卡片歸檔成員
                 if newCount > oldCount, let newestMember = idolMembers.last {
-                    if !selectedTargetMembers.contains(where: { $0.id == newestMember.id }) {
-                        selectedTargetMembers.append(newestMember)
-                    }
+                    selectTargetMember(newestMember, replacingAt: nil)
                 }
             }
             .alert(
@@ -504,8 +503,8 @@ struct BatchPairingView: View {
             .task {
                 guard !hasInitialized else { return }
                 hasInitialized = true
-                defaultFallbackMember = nil
-                selectedTargetMembers = []
+                defaultFallbackMember = defaultMember
+                selectedTargetMembers = defaultMember.map { [$0] } ?? []
                 if !initialPickerItems.isEmpty {
                     isUsingSimulatedSample = false
                     await appendPickerItems(initialPickerItems)
@@ -2181,6 +2180,7 @@ struct BatchPairingView: View {
 
     private func selectTargetMember(_ member: IdolMember, replacingAt index: Int?) {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        let previousTargetIDs = Set(selectedTargetMembers.map(\.id))
         withAnimation(.snappy(duration: 0.2)) {
             if let idx = index, selectedTargetMembers.indices.contains(idx) {
                 // 直接點選已選成員膠囊重選成員：替換該位置的成員，並移除可能重複的項目
@@ -2195,6 +2195,19 @@ struct BatchPairingView: View {
                 }
             }
             defaultFallbackMember = selectedTargetMembers.first
+            // 若未處於「選擇套用」模式，上方選擇歸檔成員時預設同步更新目前尚未單獨指定成員、或原本跟隨上方預設成員的卡片
+            if !isSelectingPhotosToApply {
+                for idx in slots.indices {
+                    let currentSlotIDs = Set(slots[idx].assignedMembers.map(\.id))
+                    if slots[idx].assignedMembers.isEmpty || currentSlotIDs == previousTargetIDs {
+                        slots[idx].assignedMembers = selectedTargetMembers
+                        photoMemberAssignment[slots[idx].frontPhoto.id] = selectedTargetMembers
+                        if let backID = slots[idx].backPhoto?.id {
+                            photoMemberAssignment[backID] = selectedTargetMembers
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -2267,10 +2280,13 @@ struct BatchPairingView: View {
     }
 
     private func resolvedMembers(for photo: StagingChekiPhoto, slotIndex: Int) -> [IdolMember] {
-        if let existing = photoMemberAssignment[photo.id] {
+        if let existing = photoMemberAssignment[photo.id], !existing.isEmpty {
             return existing
         }
-        return []
+        if !selectedTargetMembers.isEmpty {
+            return selectedTargetMembers
+        }
+        return defaultFallbackMember.map { [$0] } ?? []
     }
 
     private func handleCellTap(on slot: ChekiPairingSlot) {
@@ -2353,6 +2369,24 @@ struct BatchPairingView: View {
                         frontPhoto: photo,
                         backPhoto: nil,
                         assignedMembers: resolvedMembers(for: photo, slotIndex: idx)
+                    )
+                }
+            } else {
+                var existingPhotoIDs = Set<UUID>()
+                for slot in slots {
+                    existingPhotoIDs.insert(slot.frontPhoto.id)
+                    if let back = slot.backPhoto {
+                        existingPhotoIDs.insert(back.id)
+                    }
+                }
+                for (idx, photo) in orderedPhotos.enumerated() where !existingPhotoIDs.contains(photo.id) {
+                    slots.append(
+                        ChekiPairingSlot(
+                            id: UUID(),
+                            frontPhoto: photo,
+                            backPhoto: nil,
+                            assignedMembers: resolvedMembers(for: photo, slotIndex: idx)
+                        )
                     )
                 }
             }
@@ -2559,14 +2593,18 @@ struct BatchPairingView: View {
 
     private func collectAllPhotosInOrder() -> [StagingChekiPhoto] {
         var collected: [StagingChekiPhoto] = []
+        var seenIDs = Set<UUID>()
         for slot in slots {
             collected.append(slot.frontPhoto)
+            seenIDs.insert(slot.frontPhoto.id)
             if let back = slot.backPhoto {
                 collected.append(back)
+                seenIDs.insert(back.id)
             }
         }
-        if collected.isEmpty {
-            return allPhotos.sorted { $0.sequenceNumber < $1.sequenceNumber }
+        for photo in allPhotos where !seenIDs.contains(photo.id) {
+            collected.append(photo)
+            seenIDs.insert(photo.id)
         }
         return collected.sorted { $0.sequenceNumber < $1.sequenceNumber }
     }
@@ -2600,7 +2638,10 @@ struct BatchPairingView: View {
                 isDetectingBoundary: true,
                 hasCompletedBoundaryDetection: false
             )
-            photoMemberAssignment[staging.id] = []
+            let initialAssigned = !selectedTargetMembers.isEmpty
+                ? selectedTargetMembers
+                : (defaultFallbackMember.map { [$0] } ?? [])
+            photoMemberAssignment[staging.id] = initialAssigned
             newlyLoaded.append(staging)
             nextSequence += 1
         }
@@ -3149,7 +3190,16 @@ struct BatchPairingView: View {
         for (index, slot) in slots.enumerated() {
             // 同一組拍立得的正反面賦予完全相同的秒數 (Task 3.3)
             let itemTimestamp = baseTimestamp.addingTimeInterval(TimeInterval(-index))
-            let targetMember = slot.assignedMembers.first
+            let effectiveMembers: [IdolMember] = {
+                if !slot.assignedMembers.isEmpty {
+                    return slot.assignedMembers
+                }
+                if !selectedTargetMembers.isEmpty {
+                    return selectedTargetMembers
+                }
+                return defaultFallbackMember.map { [$0] } ?? []
+            }()
+            let targetMember = effectiveMembers.first
             var concreteFormat: FilmFormat = slot.concreteFilmFormat
             let chekiFormat = Self.toChekiFilmFormat(concreteFormat)
             let userExplicitlyModifiedDate = slot.frontPhoto.hasManuallyModifiedDate || (slot.backPhoto?.hasManuallyModifiedDate ?? false)
@@ -3341,7 +3391,7 @@ struct BatchPairingView: View {
                     ? frontSyncDate.addingTimeInterval(1.0)
                     : frontSyncDate
 
-                let membersToSync = slot.assignedMembers.isEmpty ? [nil as IdolMember?] : slot.assignedMembers.map { Optional($0) }
+                let membersToSync = effectiveMembers.isEmpty ? [nil as IdolMember?] : effectiveMembers.map { Optional($0) }
                 for (memberIdx, memberOpt) in membersToSync.enumerated() {
                     let albumName = useGroupMemberAlbums ? (memberOpt?.stageName ?? "ChekiLens") : "ChekiLens"
                     let folderName = useGroupMemberAlbums ? memberOpt?.group?.name : nil

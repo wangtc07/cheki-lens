@@ -1527,7 +1527,9 @@ struct CameraScannerView: View {
     /// 將相機新拍攝的拍立得自動同步寫入 iOS 原生系統相簿 (`Photos.app`)
     @MainActor
     private func syncCapturedItemToPhotoLibrary(_ item: ChekiItem) async {
-        let autoSync = UserDefaults.standard.object(forKey: "autoSyncToPhotos") as? Bool ?? true
+        let autoSync = (UserDefaults.standard.object(forKey: "autoSyncToPhotosLibrary") as? Bool)
+            ?? (UserDefaults.standard.object(forKey: "autoSyncToPhotos") as? Bool)
+            ?? true
         guard autoSync else { return }
 
         let overwriteExif = UserDefaults.standard.object(forKey: "overwriteExifDateWithOCR") as? Bool ?? true

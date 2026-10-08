@@ -18,7 +18,11 @@
   3. **手動四頂點裁切編輯器支援移出相片邊界外 (`ChekiDetailView.swift`, `VisionManager+PerspectiveCorrect.swift`, `ChekiItem.swift`)**：放寬頂點拖曳與儲存範圍至 `-0.45 ~ 1.45`、加寬畫布預設邊距 (`padding: 44`) 並支援雙指縮小至 `0.65x`，且於透視校正超出相片邊界時透過 `clampedToExtent()` 自動延續相紙白邊色澤，避免傾斜超出畫面的拍立得邊角產生黑邊缺角。
   4. **單張全螢幕檢視單擊全畫面平滑漸進漸出與放大防跳動 (`ChekiDetailView.swift`)**：固定卡片基準 Layout Frame 並移除會觸發系統 Safe Area 重排的 `.statusBarHidden` 與 `if !isChromeHidden` 視圖銷毀重建，改以 GPU `scaleEffect` + `offset` 搭配翻頁同款漸進漸出曲線 (`pageAndZoomAnimation`) 驅動全畫面放大；當圖片處於放大狀態 (`isImageZoomed`) 時自動隱藏 icon，且單擊畫面僅切換 icon 顯示而不改變圖片倍率與座標，徹底消除畫面跳動與抖動。
   5. **相簿與相冊多選模式支援 Apple 原生拖選多選與底部左圓分享／右圓刪除操作列 (`LibraryView.swift`)**：於「全部」與「相冊詳情」進入選取模式時自動隱藏底部主 `TabView` 導覽列，並對齊 iOS 原生相簿 (`Photos.app`) 改為左下圓形毛玻璃「分享 (`square.and.arrow.up`)」、中央「已選取 N 張照片」、右下圓形毛玻璃「刪除 (`trash`)」操作列（右上角為「全選」與圓形「✕」完成按鈕）；同時加入 `ApplePhotosDragSelectOverlay`，支援手指橫向滑動跨格連續範圍拖選／取消勾選（啟動後可繼續跨多列上下滑動批次選取，純垂直滑動則維持 `ScrollView` 原生順暢捲動）。
-* **最新穩定 Git Commit**：feat(Library): 支援 Apple 原生相簿拖選多選與選取模式底部分享刪除介面
+  6. **從相簿追加後即時更新目前所在相簿，並於開啟「相簿同步」或變更成員時自動同步至 iOS 系統相簿 (`BatchPairingView.swift`, `LibraryView.swift`, `SettingsView.swift`, `PhotoLibraryManager.swift`, `ChekiDetailView.swift`, `ChekiInfoView.swift`)**：
+     - 修復 `BatchPairingView` 初始化與 `appendPickerItems` / `collectAllPhotosInOrder` 會遺失 `defaultMember`（目前所在相簿）或漏掉工作台二次追加照片的問題，確保在某個成員相冊內追加匯入照片時自動套用該成員相冊。
+     - 將 `AlbumHeroDetailView` 改為以 `@Query` 動態計算 `liveItems`，使從相簿追加照片或變更成員後立即更新目前所在的相簿畫面與張數。
+     - 新增 `PhotoLibraryManager.syncItemsToSystemPhotoLibrary` 批次同步機制：當使用者先從相簿追加匯入照片、事後再打開「同步至 iOS 系統相簿 (`autoSyncToPhotosLibrary`)」，或於相冊／詳情頁變更所屬成員時，立即更新目前所在的相簿並同步寫入 iOS 原生相簿 (`ChekiLens › 團體 › 成員`)。
+* **最新穩定 Git Commit**：feat(Library): 支援從相簿追加後即時更新目前所在相簿並於開啟相簿同步時自動同步
 * **下一動執行指示**：執行 **Task 6.2**（支援深色/淺色模式與動態字級 Dynamic Type）
 
 ---

@@ -2,6 +2,7 @@ import Foundation
 import Photos
 import UIKit
 import SwiftUI
+import SwiftData
 import OSLog
 
 @Observable
@@ -154,12 +155,24 @@ final class PhotoLibraryManager {
            let existingAsset = PHAsset.fetchAssets(withLocalIdentifiers: [existingId], options: nil).firstObject {
             if isPro {
                 // Pro 版：直接以 PHContentEditingOutput 非破壞性修改原圖為裁切後拍立得（不新增照片，且保留原始底圖可復原）
-                try await modifyAssetInPlace(
-                    asset: existingAsset,
-                    croppedImage: image,
-                    creationDate: creationDate,
-                    album: album
-                )
+                // 若因權限或系統取消原地修改，仍確保將該張照片歸入對應系統相簿與時間軸
+                do {
+                    try await modifyAssetInPlace(
+                        asset: existingAsset,
+                        croppedImage: image,
+                        creationDate: creationDate,
+                        album: album
+                    )
+                } catch {
+                    try? await PHPhotoLibrary.shared().performChanges {
+                        let changeRequest = PHAssetChangeRequest(for: existingAsset)
+                        changeRequest.creationDate = creationDate
+                        if let album {
+                            let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
+                            albumChangeRequest?.addAssets([existingAsset] as NSArray)
+                        }
+                    }
+                }
             } else {
                 // 免費版：原生相簿不裁切（維持未裁切原圖），但同步寫入拍攝時間軸與相簿分類
                 try await PHPhotoLibrary.shared().performChanges {
@@ -268,7 +281,100 @@ final class PhotoLibraryManager {
             albumChangeRequest?.addAssets([asset] as NSArray)
         }
     }
-    
+
+    /// 批次將指定拍立得項目 (`ChekiItem`) 同步並歸入其目前所在的系統相簿 (`ChekiLens › 團體 › 成員` 或 `ChekiLens`)
+    /// - 支援「先從相簿追加匯入、事後再打開相簿同步」以及「變更所屬相冊後即時更新系統相簿」
+    @MainActor
+    @discardableResult
+    func syncItemsToSystemPhotoLibrary(
+        _ items: [ChekiItem],
+        modelContext: ModelContext,
+        onlyAlbumAndDateIfAlreadySynced: Bool = true
+    ) async -> Int {
+        guard !items.isEmpty else { return 0 }
+        guard await requestAuthorization() else { return 0 }
+
+        let overwriteExif = UserDefaults.standard.object(forKey: "overwriteExifDateWithOCR") as? Bool ?? true
+        let useGroupMemberAlbums = UserDefaults.standard.object(forKey: "createGroupMemberAlbumsInPhotos") as? Bool ?? true
+        let timelineStrategy = UserDefaults.standard.string(forKey: "backsideTimelineStrategy") ?? "sameSecond"
+
+        var syncedCount = 0
+
+        for item in items {
+            let albumName = useGroupMemberAlbums ? (item.idolMember?.stageName ?? "ChekiLens") : "ChekiLens"
+            let folderName = useGroupMemberAlbums ? item.idolMember?.group?.name : nil
+            let frontSyncDate = overwriteExif ? item.displayDate : item.capturedAt
+            let backSyncDate = (timelineStrategy == "plusOneSecond")
+                ? frontSyncDate.addingTimeInterval(1.0)
+                : frontSyncDate
+
+            guard let album = try? await getOrCreateAlbum(albumName: albumName, inFolder: folderName) else {
+                continue
+            }
+
+            var didSyncItem = false
+
+            // 1. 正面同步
+            if onlyAlbumAndDateIfAlreadySynced,
+               item.isSyncedToPhotoLibrary,
+               let existingFrontID = item.frontAssetIdentifier,
+               !existingFrontID.isEmpty,
+               PHAsset.fetchAssets(withLocalIdentifiers: [existingFrontID], options: nil).firstObject != nil {
+                try? await addExistingAsset(
+                    identifier: existingFrontID,
+                    creationDate: frontSyncDate,
+                    to: album
+                )
+                didSyncItem = true
+            } else if let frontData = item.frontImageData,
+                      let frontUI = UIImage(data: frontData) {
+                if let updatedFrontID = try? await updateOrSaveImage(
+                    frontUI,
+                    originalImageData: item.originalFrontImageData,
+                    existingAssetIdentifier: item.frontAssetIdentifier,
+                    creationDate: frontSyncDate,
+                    to: album
+                ) {
+                    item.frontAssetIdentifier = updatedFrontID
+                    didSyncItem = true
+                }
+            }
+
+            // 2. 背面同步（若有背面）
+            if onlyAlbumAndDateIfAlreadySynced,
+               item.isSyncedToPhotoLibrary,
+               let existingBackID = item.backAssetIdentifier,
+               !existingBackID.isEmpty,
+               PHAsset.fetchAssets(withLocalIdentifiers: [existingBackID], options: nil).firstObject != nil {
+                try? await addExistingAsset(
+                    identifier: existingBackID,
+                    creationDate: backSyncDate,
+                    to: album
+                )
+            } else if let backData = item.backImageData,
+                      let backUI = UIImage(data: backData) {
+                if let updatedBackID = try? await updateOrSaveImage(
+                    backUI,
+                    originalImageData: item.originalBackImageData,
+                    existingAssetIdentifier: item.backAssetIdentifier,
+                    creationDate: backSyncDate,
+                    to: album
+                ) {
+                    item.backAssetIdentifier = updatedBackID
+                }
+            }
+
+            if didSyncItem {
+                item.isSyncedToPhotoLibrary = true
+                item.isDateWrittenToAlbum = overwriteExif && (item.ocrDate != nil)
+                syncedCount += 1
+            }
+        }
+
+        try? modelContext.save()
+        return syncedCount
+    }
+
     /// 將系統相簿中的 `PHAsset` 復原為未裁切的原始圖片 (`revertAssetContentToOriginal`)
     func revertAssetToOriginal(assetIdentifier: String) async throws {
         guard !assetIdentifier.isEmpty,

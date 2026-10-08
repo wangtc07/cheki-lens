@@ -153,6 +153,14 @@ struct ChekiInfoView: View {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 item.idolMember = nil
                                 try? modelContext.save()
+                                if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
+                                    Task {
+                                        await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                                            [item],
+                                            modelContext: modelContext
+                                        )
+                                    }
+                                }
                             } label: {
                                 Label("未分類", systemImage: item.idolMember == nil ? "checkmark" : "tray")
                             }
@@ -164,6 +172,14 @@ struct ChekiInfoView: View {
                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                     item.idolMember = member
                                     try? modelContext.save()
+                                    if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
+                                        Task {
+                                            await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                                                [item],
+                                                modelContext: modelContext
+                                            )
+                                        }
+                                    }
                                 } label: {
                                     let title = member.group != nil
                                         ? "\(member.stageName)（\(member.group!.name)）"

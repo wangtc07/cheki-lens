@@ -330,8 +330,17 @@ struct ChekiDetailView: View {
 
                 Menu {
                     Button {
-                        currentItem.idolMember = nil
+                        let target = currentItem
+                        target.idolMember = nil
                         try? modelContext.save()
+                        if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
+                            Task {
+                                await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                                    [target],
+                                    modelContext: modelContext
+                                )
+                            }
+                        }
                     } label: {
                         Label("未分類", systemImage: currentItem.idolMember == nil ? "checkmark" : "tray")
                     }
@@ -340,8 +349,17 @@ struct ChekiDetailView: View {
 
                     ForEach(idolMembers) { member in
                         Button {
-                            currentItem.idolMember = member
+                            let target = currentItem
+                            target.idolMember = member
                             try? modelContext.save()
+                            if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
+                                Task {
+                                    await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                                        [target],
+                                        modelContext: modelContext
+                                    )
+                                }
+                            }
                         } label: {
                             let title = member.group != nil
                                 ? "\(member.stageName)（\(member.group!.name)）"
