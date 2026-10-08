@@ -12,6 +12,15 @@ extension VisionManager {
 
     // MARK: - Perspective Correct
 
+    private static let sharedPerspectiveCIContext: CIContext = {
+        let sRGB = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        return CIContext(options: [
+            .workingColorSpace: sRGB,
+            .outputColorSpace: sRGB,
+            .cacheIntermediates: false
+        ])
+    }()
+
     /// CIPerspectiveCorrection で透視拉直し、比率ロック + 4K リサイズ
     ///
     /// - Parameters:
@@ -89,8 +98,8 @@ extension VisionManager {
             throw VisionError.perspectiveCorrectionFailed
         }
 
-        let ctx = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
-        guard let finalCG = ctx.createCGImage(scaled, from: scaled.extent) else {
+        let ctx = Self.sharedPerspectiveCIContext
+        guard let finalCG = ctx.createCGImage(scaled, from: scaled.extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!) else {
             throw VisionError.perspectiveCorrectionFailed
         }
 

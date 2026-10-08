@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import Combine
 @preconcurrency import AVFoundation
+import CoreMotion
 import Vision
 import UIKit
 
@@ -64,6 +65,7 @@ final class CameraSessionController: NSObject, ObservableObject {
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let videoSampleQueue = DispatchQueue(label: "com.chekilens.camera.videoSampleQueue", qos: .userInteractive)
+    private let motionManager = CMMotionManager()
 
     @Published var isCameraAvailable: Bool = false
     @Published var isAuthorized: Bool = false
@@ -80,6 +82,14 @@ final class CameraSessionController: NSObject, ObservableObject {
     nonisolated(unsafe) private var sampleFrameCounter: Int = 0
     nonisolated(unsafe) private var missedQuadFrameCount: Int = 0
     nonisolated(unsafe) var isPausedForProcessing: Bool = false
+
+    /// 四角合成防反光：拍下第 1 張後立即鎖定四邊位置並停止 Vision 矩形偵測，改由陀螺儀平滑位移
+    nonisolated(unsafe) var isQuadDetectionLocked: Bool = false
+    private var lockedInitialQuad: [CGPoint]? = nil
+    private var initialAttitude: CMAttitude? = nil
+    private var gyroVelocity: CGPoint = .zero
+    private var gyroAccelOffset: CGPoint = .zero
+    @Published var gyroScreenOffset: CGPoint = .zero
 
     func start() async {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
@@ -102,7 +112,12 @@ final class CameraSessionController: NSObject, ObservableObject {
     }
 
     func stop() {
+        unlockQuadAndStopGyro()
         setTorch(enabled: false)
+        if let pending = photoContinuation {
+            photoContinuation = nil
+            pending.resume(returning: nil)
+        }
         guard isSessionRunning else { return }
         let captureSession = session
         DispatchQueue.global(qos: .userInitiated).async {
@@ -111,6 +126,76 @@ final class CameraSessionController: NSObject, ObservableObject {
             }
         }
         isSessionRunning = false
+    }
+
+    /// 鎖定第 1 張拍立得四邊座標並停止 Vision 即時偵測，改用陀螺儀 (`CMMotionManager`) 追蹤移動至四個角落
+    @discardableResult
+    func lockQuadAndStartGyro() -> [CGPoint] {
+        let baseQuad = trackedQuadPoints ?? [
+            CGPoint(x: 0.23, y: 0.14),
+            CGPoint(x: 0.77, y: 0.14),
+            CGPoint(x: 0.79, y: 0.86),
+            CGPoint(x: 0.21, y: 0.86)
+        ]
+        isQuadDetectionLocked = true
+        lockedInitialQuad = baseQuad
+        trackedQuadPoints = baseQuad
+        initialAttitude = nil
+        gyroVelocity = .zero
+        gyroAccelOffset = .zero
+        gyroScreenOffset = .zero
+
+        guard motionManager.isDeviceMotionAvailable else { return baseQuad }
+        motionManager.deviceMotionUpdateInterval = 1.0 / 60.0
+        motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] motion, _ in
+            guard let self, self.isQuadDetectionLocked, let motion else { return }
+            guard let initial = self.initialAttitude else {
+                self.initialAttitude = motion.attitude.copy() as? CMAttitude
+                return
+            }
+            guard let relAttitude = motion.attitude.copy() as? CMAttitude,
+                  let base = self.lockedInitialQuad else { return }
+            relAttitude.multiply(byInverseOf: initial)
+
+            // 1. 陀螺儀姿態傾角位移 (Roll 對應左右平移視角、Pitch 對應上下俯仰視角)
+            let tiltDx = CGFloat(tan(relAttitude.roll)) * 1.15
+            let tiltDy = CGFloat(tan(relAttitude.pitch)) * 0.95
+
+            // 2. 輔助結合線性加速度阻尼積分，讓純水平移動手機時也能平滑帶動四角
+            let dt: CGFloat = 1.0 / 60.0
+            let ax = CGFloat(motion.userAcceleration.x)
+            let ay = CGFloat(motion.userAcceleration.y)
+            self.gyroVelocity.x = (self.gyroVelocity.x - ax * dt * 1.8) * 0.90
+            self.gyroVelocity.y = (self.gyroVelocity.y + ay * dt * 1.8) * 0.90
+            self.gyroAccelOffset.x = max(-0.22, min(0.22, (self.gyroAccelOffset.x + self.gyroVelocity.x * dt * 12.0) * 0.985))
+            self.gyroAccelOffset.y = max(-0.22, min(0.22, (self.gyroAccelOffset.y + self.gyroVelocity.y * dt * 12.0) * 0.985))
+
+            let rawDx = max(-0.48, min(0.48, tiltDx + self.gyroAccelOffset.x))
+            let rawDy = max(-0.48, min(0.48, tiltDy + self.gyroAccelOffset.y))
+
+            let alpha: CGFloat = 0.28
+            let smoothDx = self.gyroScreenOffset.x * (1.0 - alpha) + rawDx * alpha
+            let smoothDy = self.gyroScreenOffset.y * (1.0 - alpha) + rawDy * alpha
+            self.gyroScreenOffset = CGPoint(x: smoothDx, y: smoothDy)
+
+            self.trackedQuadPoints = base.map { pt in
+                CGPoint(x: pt.x + smoothDx, y: pt.y + smoothDy)
+            }
+        }
+        return baseQuad
+    }
+
+    /// 解除四邊鎖定並停止陀螺儀更新，恢復一般 Vision 即時偵測
+    func unlockQuadAndStopGyro() {
+        isQuadDetectionLocked = false
+        lockedInitialQuad = nil
+        initialAttitude = nil
+        gyroVelocity = .zero
+        gyroAccelOffset = .zero
+        gyroScreenOffset = .zero
+        if motionManager.isDeviceMotionActive {
+            motionManager.stopDeviceMotionUpdates()
+        }
     }
 
     /// Google フォトスキャン 模式：自動開啟或關閉 iPhone 背面常亮補光燈 (LED Torch) 與閃光燈
@@ -222,11 +307,17 @@ final class CameraSessionController: NSObject, ObservableObject {
         isBacksideSimulated: Bool = false,
         simulatedGlareAngleStep: Int = 0
     ) async -> UIImage? {
-        guard isCameraAvailable else {
+        guard isCameraAvailable, isSessionRunning else {
             return makeSimulatedCaptureImage(
                 isBackside: isBacksideSimulated,
                 glareAngleStep: simulatedGlareAngleStep
             )
+        }
+
+        // 若前一次快門 continuation 尚未完成，先安全釋放避免 CheckedContinuation 卡死
+        if let existing = self.photoContinuation {
+            self.photoContinuation = nil
+            existing.resume(returning: nil)
         }
 
         return await withCheckedContinuation { continuation in
@@ -327,8 +418,24 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
         // 在背景執行緒先行完成 12MP 影像方向正規化，避免阻塞 MainActor
         let normalizedImage = data.flatMap { UIImage(data: $0)?.normalizedImage }
         Task { @MainActor in
-            self.photoContinuation?.resume(returning: normalizedImage)
-            self.photoContinuation = nil
+            if let cont = self.photoContinuation {
+                self.photoContinuation = nil
+                cont.resume(returning: normalizedImage)
+            }
+        }
+    }
+
+    nonisolated func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+        error: Error?
+    ) {
+        guard error != nil else { return }
+        Task { @MainActor in
+            if let cont = self.photoContinuation {
+                self.photoContinuation = nil
+                cont.resume(returning: nil)
+            }
         }
     }
 
@@ -337,8 +444,8 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        // 當正在處理快門影像合成時暫停即時追蹤，避免與 Vision 搶佔 Neural Engine
-        guard !isPausedForProcessing else { return }
+        // 當正在處理快門影像合成、或四角防反光首張已固定四邊位置時，停止 Vision 即時偵測（不再跳動）
+        guard !isPausedForProcessing, !isQuadDetectionLocked else { return }
         sampleFrameCounter &+= 1
         guard sampleFrameCounter % 3 == 0 else { return }
 
@@ -364,6 +471,7 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
                 CGPoint(x: rect.bottomLeft.x, y: 1.0 - rect.bottomLeft.y)
             ]
             Task { @MainActor in
+                guard !self.isQuadDetectionLocked else { return }
                 withAnimation(.interpolatingSpring(stiffness: 200, damping: 24)) {
                     self.trackedQuadPoints = points
                 }
@@ -372,6 +480,7 @@ extension CameraSessionController: AVCapturePhotoCaptureDelegate, AVCaptureVideo
             missedQuadFrameCount &+= 1
             if missedQuadFrameCount >= 8 {
                 Task { @MainActor in
+                    guard !self.isQuadDetectionLocked else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
                         self.trackedQuadPoints = nil
                     }
@@ -437,18 +546,14 @@ struct CameraScannerView: View {
     @State private var pendingFrontOCRDate: Date? = nil
     @State private var pendingFrontFormat: FilmFormat = .mini
 
-    // Task 5.4 & 6.1: Google フォトスキャン (PhotoScan) 四邊閃光對準去反光連續拍攝狀態
+    // Task 5.4 & 6.1: Google フォトスキャン (PhotoScan) 四角合成防反光連續拍攝狀態（首張固定四邊 + 陀螺儀移動 + 四角手動按快門）
     @State private var isPhotoScanSessionActive: Bool = false
     @State private var photoScanCapturedImages: [UIImage] = []
     @State private var photoScanCapturedQuads: [[CGPoint]?] = []
     @State private var photoScanCornerCompleted: [Bool] = [false, false, false, false]
-    @State private var photoScanDwellCornerIndex: Int? = nil
-    @State private var photoScanDwellProgress: CGFloat = 0.0
     @State private var pendingModeBFirstRawJPEG: Data? = nil
     @State private var pendingModeBPreparedTask: Task<VisionManager.ModeBPreparedFirstAngle?, Never>? = nil
     @State private var statusBannerMessage: String? = nil
-
-    private let photoScanDwellTimer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
 
     // 點擊對焦黃框狀態
     @State private var focusIndicatorPoint: CGPoint? = nil
@@ -495,9 +600,6 @@ struct CameraScannerView: View {
         }
         .onDisappear {
             camera.stop()
-        }
-        .onReceive(photoScanDwellTimer) { _ in
-            handlePhotoScanAlignmentTick()
         }
         .sheet(isPresented: $showingLatestDetail) {
             if let latest = chekiItems.first {
@@ -639,7 +741,7 @@ struct CameraScannerView: View {
         .background(Color.white.opacity(0.08))
     }
 
-    // MARK: - 2. Center 4:3 Viewfinder (3×3 九宮格 + 拍立得追蹤框 + Google フォトスキャン 四角圓點導引 + 倍率切換圈)
+    // MARK: - 2. Center 4:3 Viewfinder (3×3 九宮格 + 拍立得追蹤框 + 四角陀螺儀對準導引 + 倍率切換圈)
 
     private var viewfinderContainer: some View {
         GeometryReader { geo in
@@ -659,19 +761,17 @@ struct CameraScannerView: View {
                     CameraGridLinesOverlay()
                 }
 
-                // 拍立得虛線追蹤框與四角 L 型錨點
+                // 拍立得虛線追蹤框與四角 L 型錨點（首張拍攝後即由陀螺儀平滑帶動，不再受 Vision 跳動影響）
                 if let quad = camera.trackedQuadPoints, quad.count == 4 {
                     ChekiQuadTrackingOverlay(normalizedPoints: quad)
                 }
 
-                // Google フォトスキャン (PhotoScan) 風格：四邊角點圓圈對準與中央進度環導引
+                // 四角合成防反光：陀螺儀追蹤之四個角落圓點與中央準星（移動至四角後分別手動按快門拍攝）
                 if captureMode == .dualGlare && isPhotoScanSessionActive {
                     PhotoScanFourCornerOverlay(
                         quadPoints: camera.trackedQuadPoints ?? Self.defaultPreviewQuad,
                         cornerCompleted: photoScanCornerCompleted,
-                        activeTargetIndex: nextUncapturedCornerIndex,
-                        dwellCornerIndex: photoScanDwellCornerIndex,
-                        dwellProgress: photoScanDwellProgress,
+                        activeTargetIndex: activePhotoScanCornerIndex,
                         onTapCorner: { cornerIdx in
                             Task { await capturePhotoScanCorner(index: cornerIdx) }
                         }
@@ -753,6 +853,28 @@ struct CameraScannerView: View {
         photoScanCornerCompleted.firstIndex(of: false)
     }
 
+    /// 根據陀螺儀移動後的四角位置，找出目前最接近取景器中央 `(0.5, 0.5)` 且尚未拍攝的角點；若未特別靠近則依序指向下一個未拍角點
+    private var activePhotoScanCornerIndex: Int? {
+        guard isPhotoScanSessionActive else { return nil }
+        let quad = camera.trackedQuadPoints ?? Self.defaultPreviewQuad
+        let targets = Self.computeFourCornerTargetPoints(from: quad)
+        let center = CGPoint(x: 0.5, y: 0.5)
+
+        var closestIdx: Int? = nil
+        var minDist: CGFloat = .greatestFiniteMagnitude
+        for idx in 0..<min(4, targets.count) where !photoScanCornerCompleted[idx] {
+            let d = hypot(targets[idx].x - center.x, targets[idx].y - center.y)
+            if d < minDist {
+                minDist = d
+                closestIdx = idx
+            }
+        }
+        if let closestIdx, minDist <= 0.24 {
+            return closestIdx
+        }
+        return nextUncapturedCornerIndex
+    }
+
     private func simulatedViewfinderBackground(size: CGSize) -> some View {
         ZStack {
             // 模擬木紋/深色桌面環境
@@ -821,8 +943,8 @@ struct CameraScannerView: View {
         } else if captureMode == .dualGlare {
             Text(
                 isPhotoScanSessionActive
-                    ? "⚡️ 請移動手機將中央圓環對準四邊白點 (\(completedCornerCount)/4) 或按快門"
-                    : "⚡️ フォトスキャン防反光：閃光燈已開啟，請按快門開始四邊對準"
+                    ? "⚡️ 四邊已固定：請移動至四個角，分別按快門 (\(completedCornerCount)/4)"
+                    : "⚡️ 四角防反光：請先對準拍立得按第 1 次快門固定四邊位置"
             )
             .font(.caption.weight(.semibold))
             .foregroundStyle(.black)
@@ -958,10 +1080,10 @@ struct CameraScannerView: View {
                                         .tint(.black)
                                 } else if isPhotoScanSessionActive {
                                     VStack(spacing: 1) {
-                                        Image(systemName: "viewfinder.circle.fill")
-                                            .font(.system(size: 18, weight: .bold))
+                                        Image(systemName: "camera.shutter.button.fill")
+                                            .font(.system(size: 16, weight: .bold))
                                         Text("\(completedCornerCount)/4")
-                                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                            .font(.system(size: 11, weight: .heavy, design: .rounded))
                                     }
                                     .foregroundStyle(.black)
                                 } else if pendingFrontImageData != nil {
@@ -984,7 +1106,7 @@ struct CameraScannerView: View {
                     if isPhotoScanSessionActive {
                         resetPhotoScanState()
                         withAnimation {
-                            statusBannerMessage = "已重設四邊防反光掃描，請重新按快門開始"
+                            statusBannerMessage = "已重設四邊防反光掃描，請重新按快門固定首張位置"
                         }
                     } else if pendingFrontImageData != nil {
                         withAnimation {
@@ -1013,9 +1135,10 @@ struct CameraScannerView: View {
         }
     }
 
-    // MARK: - Google フォトスキャン 四邊圓點對準與自動快門邏輯
+    // MARK: - 四角防反光：首張固定四邊 + 陀螺儀移動 + 四角手動按快門
 
     private func resetPhotoScanState() {
+        camera.unlockQuadAndStopGyro()
         pendingModeBPreparedTask?.cancel()
         pendingModeBPreparedTask = nil
         pendingModeBFirstRawJPEG = nil
@@ -1023,69 +1146,16 @@ struct CameraScannerView: View {
         photoScanCapturedImages.removeAll()
         photoScanCapturedQuads.removeAll()
         photoScanCornerCompleted = [false, false, false, false]
-        photoScanDwellCornerIndex = nil
-        photoScanDwellProgress = 0.0
-    }
-
-    /// 每 0.05 秒檢查取景器中央圓環 `(0.5, 0.5)` 是否已對準拍立得四邊任一尚未拍攝的目標圓點
-    @MainActor
-    private func handlePhotoScanAlignmentTick() {
-        guard captureMode == .dualGlare,
-              isPhotoScanSessionActive,
-              !isProcessingCapture,
-              let quad = camera.trackedQuadPoints,
-              quad.count == 4 else {
-            photoScanDwellCornerIndex = nil
-            photoScanDwellProgress = 0.0
-            return
-        }
-
-        let targetPoints = Self.computeFourCornerTargetPoints(from: quad)
-        let center = CGPoint(x: 0.5, y: 0.5)
-
-        // 找出距離中央對準環最近且尚未拍攝的角點圓點
-        var matchedCorner: Int? = nil
-        var minDistance: CGFloat = .greatestFiniteMagnitude
-
-        for idx in 0..<4 where !photoScanCornerCompleted[idx] {
-            let pt = targetPoints[idx]
-            let dist = hypot(pt.x - center.x, pt.y - center.y)
-            if dist < minDistance {
-                minDistance = dist
-                matchedCorner = idx
-            }
-        }
-
-        // 當中央圓環套入目標圓點 (正規化距離 <= 0.135) 時，累積進度環；約 0.35 秒填滿自動觸發拍攝！
-        if let cornerIdx = matchedCorner, minDistance <= 0.135 {
-            if photoScanDwellCornerIndex == cornerIdx {
-                photoScanDwellProgress = min(1.0, photoScanDwellProgress + 0.15)
-                if photoScanDwellProgress >= 1.0 {
-                    photoScanDwellProgress = 0.0
-                    photoScanDwellCornerIndex = nil
-                    Task {
-                        await capturePhotoScanCorner(index: cornerIdx)
-                    }
-                }
-            } else {
-                photoScanDwellCornerIndex = cornerIdx
-                photoScanDwellProgress = 0.15
-                UISelectionFeedbackGenerator().selectionChanged()
-            }
-        } else {
-            photoScanDwellCornerIndex = nil
-            photoScanDwellProgress = max(0.0, photoScanDwellProgress - 0.20)
-        }
     }
 
     /// 根據拍立得外框四角 `[TL, TR, BR, BL]` 雙線性內插出四個象限目標圓點位置 `(左上, 右上, 右下, 左下)`
     static func computeFourCornerTargetPoints(from quad: [CGPoint]) -> [CGPoint] {
         guard quad.count == 4 else { return defaultPreviewQuad }
         let uvCoords: [(CGFloat, CGFloat)] = [
-            (0.25, 0.24), // 0: 左上
-            (0.75, 0.24), // 1: 右上
-            (0.75, 0.76), // 2: 右下
-            (0.25, 0.76)  // 3: 左下
+            (0.30, 0.28), // 0: 左上
+            (0.70, 0.28), // 1: 右上
+            (0.70, 0.72), // 2: 右下
+            (0.30, 0.72)  // 3: 左下
         ]
         return uvCoords.map { (u, v) in
             let topX = quad[0].x + (quad[1].x - quad[0].x) * u
@@ -1117,12 +1187,12 @@ struct CameraScannerView: View {
 
     @MainActor
     private func handleShutterTap() async {
-        // Google フォトスキャン (PhotoScan) 防反光模式：開啟閃光燈 + 對準四邊角點合成
+        // 四角合成防反光模式：第 1 下快門先固定四邊並啟動陀螺儀追蹤；接著移動到四個角分別手動按快門
         if captureMode == .dualGlare {
             if !isPhotoScanSessionActive {
                 await startPhotoScanSession()
-            } else if let nextCorner = nextUncapturedCornerIndex {
-                await capturePhotoScanCorner(index: nextCorner)
+            } else if let targetCorner = activePhotoScanCornerIndex {
+                await capturePhotoScanCorner(index: targetCorner)
             } else {
                 await completePhotoScanMultiFrameCapture()
             }
@@ -1237,7 +1307,7 @@ struct CameraScannerView: View {
         }
     }
 
-    /// 啟動 Google フォトスキャン 四邊閃光掃描：先開啟閃光補光燈並拍下基準框，隨即浮現四個角點圓圈引導
+    /// 啟動四角防反光掃描：拍下第 1 張後立即固定四邊位置、停止 Vision 偵測並啟動陀螺儀追蹤，讓使用者移動到四個角分別按快門
     @MainActor
     private func startPhotoScanSession() async {
         if camera.flashSetting == .off {
@@ -1255,11 +1325,13 @@ struct CameraScannerView: View {
         }
 
         isProcessingCapture = true
-        let lockedQuad = camera.trackedQuadPoints
+        // 第一張快門瞬間立即鎖定當前四邊並停止 Vision 偵測，改由陀螺儀移動
+        let lockedQuad = camera.lockQuadAndStartGyro()
         guard let baseImage = await camera.capturePhoto(
             isBacksideSimulated: false,
             simulatedGlareAngleStep: 1
         ) else {
+            camera.unlockQuadAndStopGyro()
             isProcessingCapture = false
             return
         }
@@ -1268,8 +1340,6 @@ struct CameraScannerView: View {
         photoScanCapturedImages = [baseImage]
         photoScanCapturedQuads = [lockedQuad]
         photoScanCornerCompleted = [false, false, false, false]
-        photoScanDwellCornerIndex = nil
-        photoScanDwellProgress = 0.0
 
         let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
         let rawCG = baseImage.cgImage
@@ -1296,11 +1366,11 @@ struct CameraScannerView: View {
 
         withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
             isPhotoScanSessionActive = true
-            statusBannerMessage = "⚡️ 請移動手機將中央圓環對準 4 個角點圓圈 (0/4)"
+            statusBannerMessage = "⚡️ 四邊已固定！請移動至【左上 1】角點並按快門 (0/4)"
         }
     }
 
-    /// 拍攝 Google フォトスキャン 指定的第 `index` 個角落 (0:左上, 1:右上, 2:右下, 3:左下)
+    /// 手動按快門拍攝指定的第 `index` 個角落 (0:左上, 1:右上, 2:右下, 3:左下)
     @MainActor
     private func capturePhotoScanCorner(index: Int) async {
         guard isPhotoScanSessionActive,
@@ -1311,10 +1381,12 @@ struct CameraScannerView: View {
         isProcessingCapture = true
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         withAnimation(.easeInOut(duration: 0.06)) {
+            isShutterPressed = true
             showCaptureFlash = true
         }
         try? await Task.sleep(nanoseconds: 60_000_000)
         withAnimation(.easeInOut(duration: 0.10)) {
+            isShutterPressed = false
             showCaptureFlash = false
         }
 
@@ -1338,25 +1410,27 @@ struct CameraScannerView: View {
         if doneCount >= 4 {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation {
-                statusBannerMessage = "✨ 四邊角點 (4/4) 掃描完成！正在執行無反光合成..."
+                statusBannerMessage = "✨ 四角 (4/4) 拍攝完成！正在極速合成無反光照片..."
             }
             await completePhotoScanMultiFrameCapture()
         } else {
-            let cornerNames = ["左上", "右上", "右下", "左下"]
-            let nextIdx = nextUncapturedCornerIndex ?? 0
+            let cornerNames = ["左上 1", "右上 2", "右下 3", "左下 4"]
+            let nextIdx = activePhotoScanCornerIndex ?? nextUncapturedCornerIndex ?? 0
             withAnimation {
-                statusBannerMessage = "已鎖定\(cornerNames[index]) (\(doneCount)/4)！請對準【\(cornerNames[nextIdx])】圓點"
+                statusBannerMessage = "已拍 \(cornerNames[index]) (\(doneCount)/4)！請移至【\(cornerNames[nextIdx])】按快門"
             }
         }
     }
 
-    /// 執行 Google フォトスキャン 多視角無反光合成，並存入 SwiftData 與 iOS 原生相簿
+    /// 執行四角多視角無反光極速合成，並以獨立非取消 Task 存入 SwiftData 與 iOS 原生相簿（即使使用者離開畫面也不會中斷）
     @MainActor
     private func completePhotoScanMultiFrameCapture() async {
         let capturedImages = photoScanCapturedImages
         let capturedQuads = photoScanCapturedQuads
         let preparedTask = pendingModeBPreparedTask
         let cachedRawJPEGA = pendingModeBFirstRawJPEG
+        let context = modelContext
+        let member = defaultMember
 
         guard let firstImage = capturedImages.first else {
             resetPhotoScanState()
@@ -1365,111 +1439,128 @@ struct CameraScannerView: View {
 
         isProcessingCapture = true
         camera.isPausedForProcessing = true
-        defer {
-            isProcessingCapture = false
-            camera.isPausedForProcessing = false
-            resetPhotoScanState()
-        }
+
+        // 先行重設四角掃描狀態並解除陀螺儀鎖定，避免合成完畢後阻塞下一次拍攝
+        pendingModeBPreparedTask = nil
+        pendingModeBFirstRawJPEG = nil
+        isPhotoScanSessionActive = false
+        photoScanCapturedImages.removeAll()
+        photoScanCapturedQuads.removeAll()
+        photoScanCornerCompleted = [false, false, false, false]
+        camera.unlockQuadAndStopGyro()
 
         let cgImages = capturedImages.compactMap(\.cgImage)
-        guard cgImages.count >= 2 else { return }
+        guard cgImages.count >= 2 else {
+            isProcessingCapture = false
+            camera.isPausedForProcessing = false
+            return
+        }
 
         let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
         let now = Date()
-        let preparedFirstAngle = await preparedTask?.value
 
-        let synthesisOutcome: (
-            fusedJPEG: Data?,
-            rawJPEGA: Data?,
-            pointsJSON: String?,
-            ocrDate: Date?,
-            format: FilmFormat
-        )? = await Task.detached(priority: .userInitiated) {
-            let manager = VisionManager()
-            do {
-                let result = try await manager.synthesizePhotoScanMultiFrameAntiGlare(
-                    rawImages: cgImages,
-                    priorNormalizedQuads: capturedQuads,
-                    borderInsetRatio: defaultInsetRatio,
-                    preferredFormat: .auto,
-                    preparedFirstAngle: preparedFirstAngle
-                )
-                let fusedJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.92)
-                let rawJPEGA = cachedRawJPEGA ?? firstImage.jpegData(compressionQuality: 0.90)
-                let imageSizeA = CGSize(width: cgImages[0].width, height: cgImages[0].height)
-                let pointsJSON = ChekiItem.encodeNormalizedCorners(result.primaryDetection.corners, imageSize: imageSizeA)
+        // 使用獨立 Task 確保即使使用者跳出相機視圖，合成與存檔也絕不會被 View lifecycle 取消
+        await Task { @MainActor in
+            defer {
+                self.isProcessingCapture = false
+                self.camera.isPausedForProcessing = false
+            }
 
-                let ocrDate: Date?
-                if let preDate = result.preRecognizedDate {
-                    ocrDate = preDate
-                } else {
-                    ocrDate = await manager.recognizeDate(from: result.fusedCGImage)?.date
+            let preparedFirstAngle = await preparedTask?.value
+
+            let synthesisOutcome: (
+                fusedJPEG: Data?,
+                rawJPEGA: Data?,
+                pointsJSON: String?,
+                ocrDate: Date?,
+                format: FilmFormat
+            )? = await Task.detached(priority: .userInitiated) {
+                let manager = VisionManager()
+                do {
+                    let result = try await manager.synthesizePhotoScanMultiFrameAntiGlare(
+                        rawImages: cgImages,
+                        priorNormalizedQuads: capturedQuads,
+                        borderInsetRatio: defaultInsetRatio,
+                        preferredFormat: .auto,
+                        preparedFirstAngle: preparedFirstAngle
+                    )
+                    let fusedJPEG = UIImage(cgImage: result.fusedCGImage).jpegData(compressionQuality: 0.92)
+                    let rawJPEGA = cachedRawJPEGA ?? firstImage.jpegData(compressionQuality: 0.90)
+                    let imageSizeA = CGSize(width: cgImages[0].width, height: cgImages[0].height)
+                    let pointsJSON = ChekiItem.encodeNormalizedCorners(result.primaryDetection.corners, imageSize: imageSizeA)
+
+                    let ocrDate: Date?
+                    if let preDate = result.preRecognizedDate {
+                        ocrDate = preDate
+                    } else {
+                        ocrDate = await manager.recognizeDate(from: result.fusedCGImage)?.date
+                    }
+                    return (fusedJPEG, rawJPEGA, pointsJSON, ocrDate, result.resolvedFormat.concreteFormat)
+                } catch {
+                    return nil
                 }
-                return (fusedJPEG, rawJPEGA, pointsJSON, ocrDate, result.resolvedFormat.concreteFormat)
-            } catch {
-                return nil
+            }.value
+
+            if let outcome = synthesisOutcome, let fusedJPEG = outcome.fusedJPEG {
+                let captureDate = outcome.ocrDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
+                let format = outcome.format
+                let newItem = ChekiItem(
+                    frontImageData: fusedJPEG,
+                    backImageData: nil,
+                    originalFrontImageData: outcome.rawJPEGA ?? fusedJPEG,
+                    capturedAt: captureDate,
+                    ocrDate: outcome.ocrDate != nil ? captureDate : nil,
+                    filmFormat: format,
+                    detectedAspectRatio: format.aspectRatio,
+                    perspectivePointsJSON: outcome.pointsJSON,
+                    processingState: .completed,
+                    idolMember: member
+                )
+                context.insert(newItem)
+                try? context.save()
+
+                Task { @MainActor in
+                    await self.syncCapturedItemToPhotoLibrary(newItem)
+                }
+
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                withAnimation {
+                    self.statusBannerMessage = "✨ 四角去反光合成完成！已同步至系統相簿"
+                }
+            } else {
+                let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await self.processCapturedImage(
+                    firstImage,
+                    applyModeASuppression: true,
+                    isKnownFrontPhoto: true,
+                    priorNormalizedCorners: capturedQuads.first ?? nil
+                )
+                let captureDate = recognizedDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
+                let format = resolvedFormat.concreteFormat
+                let newItem = ChekiItem(
+                    frontImageData: processedData,
+                    backImageData: nil,
+                    originalFrontImageData: originalRawData ?? processedData,
+                    capturedAt: captureDate,
+                    ocrDate: recognizedDate != nil ? captureDate : nil,
+                    filmFormat: format,
+                    detectedAspectRatio: format.aspectRatio,
+                    perspectivePointsJSON: pointsJSON,
+                    processingState: .completed,
+                    idolMember: member
+                )
+                context.insert(newItem)
+                try? context.save()
+
+                Task { @MainActor in
+                    await self.syncCapturedItemToPhotoLibrary(newItem)
+                }
+
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                withAnimation {
+                    self.statusBannerMessage = "已透過反光抑制正位並存入系統相簿"
+                }
             }
         }.value
-
-        if let outcome = synthesisOutcome, let fusedJPEG = outcome.fusedJPEG {
-            let captureDate = outcome.ocrDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
-            let format = outcome.format
-            let newItem = ChekiItem(
-                frontImageData: fusedJPEG,
-                backImageData: nil,
-                originalFrontImageData: outcome.rawJPEGA ?? fusedJPEG,
-                capturedAt: captureDate,
-                ocrDate: outcome.ocrDate != nil ? captureDate : nil,
-                filmFormat: format,
-                detectedAspectRatio: format.aspectRatio,
-                perspectivePointsJSON: outcome.pointsJSON,
-                processingState: .completed,
-                idolMember: defaultMember
-            )
-            modelContext.insert(newItem)
-            try? modelContext.save()
-
-            Task { @MainActor in
-                await syncCapturedItemToPhotoLibrary(newItem)
-            }
-
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            withAnimation {
-                statusBannerMessage = "✨ フォトスキャン四邊去反光合成完成！已同步至系統相簿"
-            }
-        } else {
-            let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await processCapturedImage(
-                firstImage,
-                applyModeASuppression: true,
-                isKnownFrontPhoto: true,
-                priorNormalizedCorners: capturedQuads.first ?? nil
-            )
-            let captureDate = recognizedDate.map { ChekiItem.mergeRecognizedDate($0, into: now) } ?? now
-            let format = resolvedFormat.concreteFormat
-            let newItem = ChekiItem(
-                frontImageData: processedData,
-                backImageData: nil,
-                originalFrontImageData: originalRawData ?? processedData,
-                capturedAt: captureDate,
-                ocrDate: recognizedDate != nil ? captureDate : nil,
-                filmFormat: format,
-                detectedAspectRatio: format.aspectRatio,
-                perspectivePointsJSON: pointsJSON,
-                processingState: .completed,
-                idolMember: defaultMember
-            )
-            modelContext.insert(newItem)
-            try? modelContext.save()
-
-            Task { @MainActor in
-                await syncCapturedItemToPhotoLibrary(newItem)
-            }
-
-            UINotificationFeedbackGenerator().notificationOccurred(.warning)
-            withAnimation {
-                statusBannerMessage = "已透過反光抑制正位並存入系統相簿"
-            }
-        }
     }
 
     private func processCapturedImage(
@@ -1584,14 +1675,12 @@ struct CameraScannerView: View {
     }
 }
 
-// MARK: - Google フォトスキャン 四邊角點圓圈對準與中央進度環 (PhotoScanFourCornerOverlay)
+// MARK: - 四角合成防反光：陀螺儀移動四角圓點與中央準星導引 (PhotoScanFourCornerOverlay)
 
 private struct PhotoScanFourCornerOverlay: View {
     let quadPoints: [CGPoint]
     let cornerCompleted: [Bool]
     let activeTargetIndex: Int?
-    let dwellCornerIndex: Int?
-    let dwellProgress: CGFloat
     let onTapCorner: (Int) -> Void
 
     var body: some View {
@@ -1603,7 +1692,7 @@ private struct PhotoScanFourCornerOverlay: View {
             let centerPoint = CGPoint(x: w * 0.5, y: h * 0.5)
 
             ZStack {
-                // 1. 中央對準目標方向虛線（由畫面中央指向下一個待拍攝的角點圓圈）
+                // 1. 中央對準目標方向虛線（由畫面中央指向目前待按下快門的角點圓圈）
                 if let activeIdx = activeTargetIndex, activeIdx < screenTargets.count {
                     let targetPt = screenTargets[activeIdx]
                     Path { path in
@@ -1616,11 +1705,10 @@ private struct PhotoScanFourCornerOverlay: View {
                     )
                 }
 
-                // 2. 四個角落目標圓點（仿照 Google フォトスキャン 白色實心圓點 -> 完成後變為綠色打勾圓點；也支援直接點擊觸發該角拍攝）
+                // 2. 四個角落目標圓點（隨陀螺儀平滑位移；移動到該角後按底部快門或直接點選圓點即可拍攝）
                 ForEach(0..<min(4, screenTargets.count), id: \.self) { idx in
                     let isDone = cornerCompleted[idx]
                     let isCurrentTarget = (activeTargetIndex == idx)
-                    let isDwelling = (dwellCornerIndex == idx)
 
                     Button {
                         if !isDone {
@@ -1630,13 +1718,13 @@ private struct PhotoScanFourCornerOverlay: View {
                         ZStack {
                             if isCurrentTarget && !isDone {
                                 Circle()
-                                    .strokeBorder(Color.cyan.opacity(0.85), lineWidth: 2.5)
-                                    .frame(width: 44, height: 44)
+                                    .strokeBorder(Color.cyan, lineWidth: 2.5)
+                                    .frame(width: 46, height: 46)
                             }
 
                             Circle()
-                                .fill(isDone ? Color.green : (isDwelling ? Color.cyan : Color.white))
-                                .frame(width: 28, height: 28)
+                                .fill(isDone ? Color.green : (isCurrentTarget ? Color.cyan : Color.white))
+                                .frame(width: 30, height: 30)
                                 .shadow(color: .black.opacity(0.45), radius: 5, x: 0, y: 2)
 
                             if isDone {
@@ -1645,8 +1733,8 @@ private struct PhotoScanFourCornerOverlay: View {
                                     .foregroundStyle(.white)
                             } else {
                                 Text("\(idx + 1)")
-                                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.black.opacity(0.75))
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.black.opacity(0.85))
                             }
                         }
                     }
@@ -1654,22 +1742,15 @@ private struct PhotoScanFourCornerOverlay: View {
                     .position(screenTargets[idx])
                 }
 
-                // 3. 取景器正中央 Google フォトスキャン 空心對準圓環 + 自動快門進度弧
+                // 3. 取景器正中央對準圓環（對準角點後手動按下快門）
                 ZStack {
                     Circle()
-                        .strokeBorder(Color.white.opacity(0.65), lineWidth: 3.0)
+                        .strokeBorder(Color.white.opacity(0.75), lineWidth: 3.0)
                         .frame(width: 58, height: 58)
 
-                    if dwellProgress > 0.01 {
-                        Circle()
-                            .trim(from: 0, to: dwellProgress)
-                            .stroke(
-                                Color.cyan,
-                                style: StrokeStyle(lineWidth: 4.5, lineCap: .round)
-                            )
-                            .rotationEffect(.degrees(-90))
-                            .frame(width: 58, height: 58)
-                    }
+                    Circle()
+                        .fill(Color.cyan.opacity(0.85))
+                        .frame(width: 6, height: 6)
                 }
                 .position(centerPoint)
                 .allowsHitTesting(false)
