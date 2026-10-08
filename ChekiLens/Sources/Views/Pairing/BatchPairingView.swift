@@ -252,6 +252,20 @@ struct BatchPairingView: View {
     /// 點選照片格右上角的「相紙規格 / 判斷日期」時彈出的單張規格與日期修改面板目標 Slot ID
     @State private var editingSlotForFormatAndDateID: UUID? = nil
 
+    enum PreviewPhotoSide {
+        case front
+        case back
+    }
+
+    /// 點選拍立得本體時彈出的模糊背景放大預覽目標 Slot ID 與正反面
+    @State private var previewingSlotID: UUID? = nil
+    @State private var previewingSide: PreviewPhotoSide = .front
+    @State private var previewZoomScale: CGFloat = 1.0
+    @State private var previewPinchScale: CGFloat = 1.0
+
+    /// 在放大預覽中點選「手動調整」開啟四頂點手動邊界裁切編輯器的目標 Photo ID
+    @State private var manualCropEditingPhotoID: UUID? = nil
+
     // 載入與處理狀態
     @State private var isLoadingPhotos: Bool = false
     @State private var isAnalyzingSides: Bool = false
@@ -465,6 +479,14 @@ struct BatchPairingView: View {
             ) {
                 formatAndDateEditorSheetContent
             }
+            .fullScreenCover(
+                isPresented: Binding(
+                    get: { manualCropEditingPhotoID != nil },
+                    set: { if !$0 { manualCropEditingPhotoID = nil } }
+                )
+            ) {
+                manualCropEditorFullScreenContent
+            }
             .onChange(of: idolMembers.count) { oldCount, newCount in
                 // 當使用者透過「新增成員」建立新成員後，自動將最新建立的成員加入上方多選目標中
                 if newCount > oldCount, let newestMember = idolMembers.last {
@@ -523,6 +545,9 @@ struct BatchPairingView: View {
                 }
             }
         }
+        .overlay {
+            magnifiedPreviewOverlayContent
+        }
     }
 
     @ViewBuilder
@@ -557,6 +582,32 @@ struct BatchPairingView: View {
         }
     }
 
+    @ViewBuilder
+    private var manualCropEditorFullScreenContent: some View {
+        if let targetPhotoID = manualCropEditingPhotoID,
+           let photo = findPhoto(by: targetPhotoID) {
+            StagingPhotoQuadCropEditorView(
+                photo: photo,
+                onApplyManualCrop: { croppedData, croppedImage, cornersJSON, ocrDate, resolvedFormat, rotatedOriginalImage in
+                    applyManualCropToStagingPhoto(
+                        photoID: targetPhotoID,
+                        croppedData: croppedData,
+                        croppedImage: croppedImage,
+                        cornersJSON: cornersJSON,
+                        ocrDate: ocrDate,
+                        resolvedFormat: resolvedFormat,
+                        rotatedOriginalImage: rotatedOriginalImage
+                    )
+                },
+                onRevertToOriginal: {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        setPhotoRevertedToOriginal(photoID: targetPhotoID, isReverted: true)
+                    }
+                }
+            )
+        }
+    }
+
     // MARK: - 1. 格狀配對工作台主視圖 (Album-Style Grid + Playing-Card Fan)
 
     private var slotGridWorkbenchView: some View {
@@ -575,10 +626,10 @@ struct BatchPairingView: View {
                         warningBannerCard
                     }
 
-                    // 3. 「選擇套用（多選照片）」或「手動配對」指引列
+                    // 3. 「選擇套用（多選照片）」、主動配對中、或「首次使用正反配對提示」指引列
                     if isSelectingPhotosToApply {
                         photoMultiSelectApplyBanner
-                    } else if pairingMode == .manualPair || selectedFirstSlotID != nil {
+                    } else if selectedFirstSlotID != nil || !hasSeenCoachMark {
                         manualPairingInstructionBanner
                     }
 
@@ -947,13 +998,15 @@ struct BatchPairingView: View {
     }
 
     /// 撲克牌兩張展開樣式 (Playing-Card Fan)：左前為「正面」、右後扇形展開為「背面」
+    /// - 點選拍立得本體：開啟模糊背景放大預覽（確認邊界與手寫日期、可手動調整）
+    /// - 點選外側白色框區域：進行配對／選取操作
     private func playingCardFanView(
         slot: ChekiPairingSlot,
         frontPhoto: StagingChekiPhoto,
         backPhoto: StagingChekiPhoto
     ) -> some View {
         ZStack {
-            // 1. 右後扇形展開：背面卡片 (Back Card — 向右旋轉展開如撲克牌，優先顯示背景已裁切預覽圖)
+            // 1. 右後扇形展開：背面卡片 (Back Card — 向右旋轉展開如撲克牌，點選本體放大預覽背面)
             ZStack(alignment: .topTrailing) {
                 Image(uiImage: backPhoto.displayUIImage)
                     .resizable()
@@ -980,10 +1033,18 @@ struct BatchPairingView: View {
                     )
                     .padding(5)
             }
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onTapGesture {
+                if isSelectingPhotosToApply {
+                    handleCellTap(on: slot)
+                } else {
+                    openMagnifiedPreview(slotID: slot.id, side: .back)
+                }
+            }
             .rotationEffect(.degrees(11), anchor: .bottom)
             .offset(x: 20, y: 2)
 
-            // 2. 左前扇形展開：正面卡片 (Front Card — 向左微傾疊於前側，優先顯示背景已裁切預覽圖)
+            // 2. 左前扇形展開：正面卡片 (Front Card — 向左微傾疊於前側，點選本體放大預覽正面)
             ZStack(alignment: .topLeading) {
                 Image(uiImage: frontPhoto.displayUIImage)
                     .resizable()
@@ -1011,6 +1072,14 @@ struct BatchPairingView: View {
                 .padding(.vertical, 2)
                 .background(Color.blue.opacity(0.88), in: Capsule())
                 .padding(5)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onTapGesture {
+                if isSelectingPhotosToApply {
+                    handleCellTap(on: slot)
+                } else {
+                    openMagnifiedPreview(slotID: slot.id, side: .front)
+                }
             }
             .rotationEffect(.degrees(-8), anchor: .bottom)
             .offset(x: -16, y: 0)
@@ -1127,6 +1196,8 @@ struct BatchPairingView: View {
     }
 
     /// 單張直立拍立得樣式 (Single Card Stage — 優先顯示背景已裁切預覽圖)
+    /// - 點選拍立得本體 (`Image`)：開啟放大預覽（背景模糊、確認邊界與手寫日期、可手動調整）
+    /// - 點選框框外側白色部分：配對正反面
     private func singleCardStageView(
         slot: ChekiPairingSlot,
         photo: StagingChekiPhoto,
@@ -1146,6 +1217,14 @@ struct BatchPairingView: View {
                         )
                 )
                 .shadow(color: .black.opacity(0.22), radius: 7, x: 0, y: 3)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .onTapGesture {
+                    if isSelectingPhotosToApply {
+                        handleCellTap(on: slot)
+                    } else {
+                        openMagnifiedPreview(slotID: slot.id, side: .front)
+                    }
+                }
 
             VStack {
                 HStack(alignment: .top) {
@@ -1189,14 +1268,15 @@ struct BatchPairingView: View {
 
                 Spacer()
 
-                if pairingMode != .singleOnly && !isSelectingPhotosToApply {
+                // 正反配對提示僅在「第一次使用 (!hasSeenCoachMark)」或「目前正選中此張作為第一張待配對正面 (isSelectedFirst)」時顯示
+                if pairingMode != .singleOnly && !isSelectingPhotosToApply && (isSelectedFirst || !hasSeenCoachMark) {
                     Button {
                         handleManualTap(on: slot)
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: isSelectedFirst ? "checkmark.circle.fill" : "link.badge.plus")
                                 .font(.system(size: 10, weight: .bold))
-                            Text(isSelectedFirst ? "已選為正面 · 點另一張配對" : "點選配對背面")
+                            Text(isSelectedFirst ? "已選為正面 · 點另一張外框配對" : "點選外框配對正反")
                                 .font(.system(size: 10, weight: .semibold))
                         }
                         .foregroundStyle(isSelectedFirst ? .white : .primary)
@@ -1391,6 +1471,26 @@ struct BatchPairingView: View {
     @ViewBuilder
     private func slotContextMenu(for slot: ChekiPairingSlot) -> some View {
         Button {
+            openMagnifiedPreview(slotID: slot.id, side: .front)
+        } label: {
+            Label("放大預覽（確認邊界與日期）", systemImage: "plus.magnifyingglass")
+        }
+
+        Button {
+            manualCropEditingPhotoID = slot.frontPhoto.id
+        } label: {
+            Label("手動調整邊界（正面）…", systemImage: "crop")
+        }
+
+        if let backPhoto = slot.backPhoto {
+            Button {
+                manualCropEditingPhotoID = backPhoto.id
+            } label: {
+                Label("手動調整邊界（背面）…", systemImage: "crop.rotate")
+            }
+        }
+
+        Button {
             editingSlotForFormatAndDateID = slot.id
         } label: {
             Label("修改相紙規格與日期…", systemImage: "calendar.badge.clock")
@@ -1492,6 +1592,276 @@ struct BatchPairingView: View {
         }
     }
 
+    private func setPhotoRevertedToOriginal(photoID: UUID, isReverted: Bool) {
+        if let idx = allPhotos.firstIndex(where: { $0.id == photoID }) {
+            allPhotos[idx].isRevertedToOriginal = isReverted
+        }
+        for i in slots.indices {
+            if slots[i].frontPhoto.id == photoID {
+                slots[i].frontPhoto.isRevertedToOriginal = isReverted
+            }
+            if slots[i].backPhoto?.id == photoID {
+                slots[i].backPhoto?.isRevertedToOriginal = isReverted
+            }
+        }
+    }
+
+    // MARK: - 3.5 點選拍立得本體：模糊背景放大預覽 (確認邊界與手寫日期 + 再點一下取消預覽 + 手動調整按鈕)
+
+    private func openMagnifiedPreview(slotID: UUID, side: PreviewPhotoSide) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        previewZoomScale = 1.0
+        previewPinchScale = 1.0
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+            previewingSide = side
+            previewingSlotID = slotID
+        }
+    }
+
+    private func dismissMagnifiedPreview() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            previewingSlotID = nil
+            previewZoomScale = 1.0
+            previewPinchScale = 1.0
+        }
+    }
+
+    @ViewBuilder
+    private var magnifiedPreviewOverlayContent: some View {
+        if let slotID = previewingSlotID,
+           let slot = slots.first(where: { $0.id == slotID }) {
+            let activePhoto: StagingChekiPhoto = {
+                if previewingSide == .back, let back = slot.backPhoto {
+                    return back
+                }
+                return slot.frontPhoto
+            }()
+            let effectiveScale = max(1.0, min(3.8, previewZoomScale * previewPinchScale))
+
+            ZStack {
+                // 1. 模糊背景遮罩（再點一下背景即取消預覽）
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(Color.black.opacity(0.38))
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dismissMagnifiedPreview()
+                    }
+
+                // 2. 預覽主體內容（頂部資訊列 ＋ 中央放大拍立得 ＋ 底部手動調整按鈕列）
+                VStack(spacing: 14) {
+                    // 頂部：左側序號与正反面切換、右側相紙規格與判斷日期按鈕
+                    HStack(spacing: 10) {
+                        HStack(spacing: 6) {
+                            Text("#\(activePhoto.sequenceNumber)")
+                                .font(.subheadline.weight(.bold).monospacedDigit())
+                                .foregroundStyle(.white)
+
+                            if slot.isPaired {
+                                HStack(spacing: 2) {
+                                    Button {
+                                        UISelectionFeedbackGenerator().selectionChanged()
+                                        withAnimation(.snappy(duration: 0.2)) {
+                                            previewingSide = .front
+                                            previewZoomScale = 1.0
+                                        }
+                                    } label: {
+                                        Text("正面")
+                                            .font(.caption.weight(.bold))
+                                            .foregroundStyle(previewingSide == .front ? .black : .white.opacity(0.85))
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 4)
+                                            .background(
+                                                previewingSide == .front ? Color.yellow : Color.clear,
+                                                in: Capsule()
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Button {
+                                        UISelectionFeedbackGenerator().selectionChanged()
+                                        withAnimation(.snappy(duration: 0.2)) {
+                                            previewingSide = .back
+                                            previewZoomScale = 1.0
+                                        }
+                                    } label: {
+                                        Text("背面")
+                                            .font(.caption.weight(.bold))
+                                            .foregroundStyle(previewingSide == .back ? .black : .white.opacity(0.85))
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 4)
+                                            .background(
+                                                previewingSide == .back ? Color.yellow : Color.clear,
+                                                in: Capsule()
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(3)
+                                .background(Color.white.opacity(0.16), in: Capsule())
+                            } else {
+                                Text(activePhoto.detectedSide.rawValue)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3.5)
+                                    .background(Color.white.opacity(0.18), in: Capsule())
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.45), in: Capsule())
+
+                        Spacer()
+
+                        // 右上角：點選可直接修改相紙規格與拍攝日期
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            editingSlotForFormatAndDateID = slot.id
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(slot.shortFormatBadgeText)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.black)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 2.5)
+                                    .background(Color.yellow, in: Capsule())
+
+                                if let dateStr = slot.formattedDetectedDateString {
+                                    Text(dateStr)
+                                        .font(.caption.monospacedDigit().weight(.bold))
+                                        .foregroundStyle(.white)
+                                } else {
+                                    Text("無日期")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.white.opacity(0.65))
+                                }
+
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.75))
+                            }
+                            .padding(.leading, 6)
+                            .padding(.trailing, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.50), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+
+                    Spacer(minLength: 0)
+
+                    // 中央：放大拍立得本體（確認邊界與手寫日期，再點一下拍立得本體即取消預覽，支援雙指縮放）
+                    Image(uiImage: activePhoto.displayUIImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.45), lineWidth: 1.0)
+                        )
+                        .shadow(color: .black.opacity(0.45), radius: 22, x: 0, y: 10)
+                        .padding(.horizontal, 24)
+                        .scaleEffect(effectiveScale)
+                        .gesture(
+                            MagnifyGesture()
+                                .onChanged { value in
+                                    previewPinchScale = value.magnification
+                                }
+                                .onEnded { value in
+                                    let nextScale = max(1.0, min(3.8, previewZoomScale * value.magnification))
+                                    previewPinchScale = 1.0
+                                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                        previewZoomScale = nextScale <= 1.05 ? 1.0 : nextScale
+                                    }
+                                }
+                        )
+                        .onTapGesture {
+                            dismissMagnifiedPreview()
+                        }
+
+                    Spacer(minLength: 0)
+
+                    // 提示文字：再點一下畫面取消預覽
+                    Text("再點一下拍立得或背景即可關閉預覽 · 雙指可縮放檢視")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
+
+                    // 底部操作列：追加「手動調整」按鈕 ＋「規格與日期」按鈕 ＋「復原原圖」切換
+                    HStack(spacing: 10) {
+                        // 1. 手動調整邊界按鈕（主要操作）
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            manualCropEditingPhotoID = activePhoto.id
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "crop")
+                                    .font(.system(size: 14, weight: .bold))
+                                Text("手動調整邊界")
+                                    .font(.subheadline.weight(.bold))
+                            }
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 11)
+                            .background(Color.yellow, in: Capsule())
+                            .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
+                        }
+                        .buttonStyle(.plain)
+
+                        // 2. 修改規格與日期按鈕
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            editingSlotForFormatAndDateID = slot.id
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text("規格與日期")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 15)
+                            .padding(.vertical, 11)
+                            .background(Color.white.opacity(0.18), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+
+                        // 3. 若已有預裁切結果，可快速切換原圖／裁切圖比對邊界
+                        if activePhoto.croppedImageData != nil {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                withAnimation(.snappy(duration: 0.2)) {
+                                    togglePhotoRevertToOriginal(photoID: activePhoto.id)
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: activePhoto.isRevertedToOriginal ? "crop" : "arrow.uturn.backward")
+                                        .font(.system(size: 12, weight: .bold))
+                                    Text(activePhoto.isRevertedToOriginal ? "套用裁切" : "看原圖")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 11)
+                                .background(Color.white.opacity(0.14), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 18)
+                }
+            }
+            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            .zIndex(50)
+        }
+    }
+
     // MARK: - 4. 警示橫幅與「選擇套用（多選照片）」確認列
 
     private var warningBannerCard: some View {
@@ -1581,7 +1951,7 @@ struct BatchPairingView: View {
 
             if let firstID = selectedFirstSlotID,
                let firstSlot = slots.first(where: { $0.id == firstID }) {
-                Text("已選取 **#\(firstSlot.frontPhoto.sequenceNumber)** 為正面，請點選另一張單面卡片合成撲克牌正反組")
+                Text("已選取 **#\(firstSlot.frontPhoto.sequenceNumber)** 為正面，請點選另一張卡片的「外框白色部分」合成正反組")
                     .font(.caption)
                 Spacer()
                 Button("取消") {
@@ -1592,10 +1962,22 @@ struct BatchPairingView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
             } else {
-                Text("點選任兩張單面卡片即可合成「正反撲克牌展開組」；點選已配對卡片右上角「拆開」可解除綁定")
+                Text("點選「外框白色部分」可配對正反面；點選「拍立得本體」可放大預覽與手動調整邊界")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Spacer()
+                Spacer(minLength: 4)
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.snappy(duration: 0.2)) {
+                        hasSeenCoachMark = true
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("關閉操作提示")
             }
         }
         .padding(10)
@@ -1994,6 +2376,7 @@ struct BatchPairingView: View {
         guard let index = slots.firstIndex(where: { $0.id == id }),
               let backPhoto = slots[index].backPhoto else { return }
 
+        hasSeenCoachMark = true
         let frontPhoto = slots[index].frontPhoto
         let currentMembers = slots[index].assignedMembers
         let backMembers = photoMemberAssignment[backPhoto.id] ?? currentMembers
@@ -2009,6 +2392,7 @@ struct BatchPairingView: View {
         guard let index = slots.firstIndex(where: { $0.id == id }),
               let backPhoto = slots[index].backPhoto else { return }
 
+        hasSeenCoachMark = true
         let oldFront = slots[index].frontPhoto
         slots[index].frontPhoto = backPhoto
         slots[index].backPhoto = oldFront
@@ -2024,10 +2408,11 @@ struct BatchPairingView: View {
         allPhotos = collectAllPhotosInOrder()
     }
 
-    /// 手動點擊兩張單面相片進行配對（第 1 下指定正面，第 2 下指定背面）
+    /// 手動點擊兩張單面相片的外框白色區域進行配對（第 1 下指定正面，第 2 下指定背面）
     private func handleManualTap(on tappedSlot: ChekiPairingSlot) {
         guard !tappedSlot.isPaired else { return }
 
+        hasSeenCoachMark = true
         if pairingMode != .manualPair {
             pairingMode = .manualPair
         }
@@ -2071,6 +2456,77 @@ struct BatchPairingView: View {
         } else {
             withAnimation(.snappy(duration: 0.2)) {
                 selectedFirstSlotID = tappedSlot.id
+            }
+        }
+    }
+
+    /// 在放大預覽中執行「手動調整邊界」完成後，即時更新 StagingChekiPhoto 的預裁切影像、四頂點座標、相紙規格與 OCR 日期
+    @MainActor
+    private func applyManualCropToStagingPhoto(
+        photoID: UUID,
+        croppedData: Data,
+        croppedImage: UIImage,
+        cornersJSON: String,
+        ocrDate: Date?,
+        resolvedFormat: FilmFormat,
+        rotatedOriginalImage: UIImage?
+    ) {
+        withAnimation(.snappy(duration: 0.22)) {
+            if let idx = allPhotos.firstIndex(where: { $0.id == photoID }) {
+                if let rotatedOrig = rotatedOriginalImage,
+                   let rotatedData = rotatedOrig.jpegData(compressionQuality: 0.92) {
+                    allPhotos[idx].uiImage = rotatedOrig
+                    allPhotos[idx].imageData = rotatedData
+                }
+                allPhotos[idx].croppedImageData = croppedData
+                allPhotos[idx].croppedUIImage = croppedImage
+                allPhotos[idx].normalizedCornersJSON = cornersJSON
+                allPhotos[idx].resolvedFilmFormat = resolvedFormat.concreteFormat
+                allPhotos[idx].hasManuallyModifiedFormat = true
+                allPhotos[idx].isRevertedToOriginal = false
+                allPhotos[idx].isDetectingBoundary = false
+                allPhotos[idx].hasCompletedBoundaryDetection = true
+                if !allPhotos[idx].hasManuallyModifiedDate, let ocrDate {
+                    allPhotos[idx].detectedOCRDate = ocrDate
+                }
+            }
+            for i in slots.indices {
+                if slots[i].frontPhoto.id == photoID {
+                    if let rotatedOrig = rotatedOriginalImage,
+                       let rotatedData = rotatedOrig.jpegData(compressionQuality: 0.92) {
+                        slots[i].frontPhoto.uiImage = rotatedOrig
+                        slots[i].frontPhoto.imageData = rotatedData
+                    }
+                    slots[i].frontPhoto.croppedImageData = croppedData
+                    slots[i].frontPhoto.croppedUIImage = croppedImage
+                    slots[i].frontPhoto.normalizedCornersJSON = cornersJSON
+                    slots[i].frontPhoto.resolvedFilmFormat = resolvedFormat.concreteFormat
+                    slots[i].frontPhoto.hasManuallyModifiedFormat = true
+                    slots[i].frontPhoto.isRevertedToOriginal = false
+                    slots[i].frontPhoto.isDetectingBoundary = false
+                    slots[i].frontPhoto.hasCompletedBoundaryDetection = true
+                    if !slots[i].frontPhoto.hasManuallyModifiedDate, let ocrDate {
+                        slots[i].frontPhoto.detectedOCRDate = ocrDate
+                    }
+                }
+                if slots[i].backPhoto?.id == photoID {
+                    if let rotatedOrig = rotatedOriginalImage,
+                       let rotatedData = rotatedOrig.jpegData(compressionQuality: 0.92) {
+                        slots[i].backPhoto?.uiImage = rotatedOrig
+                        slots[i].backPhoto?.imageData = rotatedData
+                    }
+                    slots[i].backPhoto?.croppedImageData = croppedData
+                    slots[i].backPhoto?.croppedUIImage = croppedImage
+                    slots[i].backPhoto?.normalizedCornersJSON = cornersJSON
+                    slots[i].backPhoto?.resolvedFilmFormat = resolvedFormat.concreteFormat
+                    slots[i].backPhoto?.hasManuallyModifiedFormat = true
+                    slots[i].backPhoto?.isRevertedToOriginal = false
+                    slots[i].backPhoto?.isDetectingBoundary = false
+                    slots[i].backPhoto?.hasCompletedBoundaryDetection = true
+                    if !(slots[i].backPhoto?.hasManuallyModifiedDate ?? false), let ocrDate {
+                        slots[i].backPhoto?.detectedOCRDate = ocrDate
+                    }
+                }
             }
         }
     }
@@ -3143,6 +3599,859 @@ private struct SlotFormatAndDateEditorSheet: View {
         case .wide: return "108 × 86 mm"
         case .auto: return "54 × 86 mm"
         }
+    }
+}
+
+// MARK: - 批次配對工作台專屬「四頂點手動邊界裁切編輯器」(透明灰色切除遮罩 + 放大鏡中心十字準星 + 雙指縮放)
+
+private struct StagingPhotoQuadCropEditorView: View {
+    let photo: StagingChekiPhoto
+    let onApplyManualCrop: (Data, UIImage, String, Date?, FilmFormat, UIImage?) -> Void
+    let onRevertToOriginal: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("defaultBorderInsetPercentage") private var defaultBorderInsetPercentage: Double = 0.0
+
+    @State private var sourceUIImage: UIImage
+    @State private var didRotateSourceImage: Bool = false
+    @State private var normalizedCorners: [CGPoint] = Self.defaultQuadCorners
+    @State private var initialCornersSnapshot: [CGPoint] = Self.defaultQuadCorners
+    @State private var selectedFormat: FilmFormat
+    @State private var activeDraggingCornerIndex: Int? = nil
+
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var activePinchScale: CGFloat = 1.0
+    @State private var panOffset: CGSize = .zero
+    @State private var activePanDelta: CGSize = .zero
+
+    @State private var isProcessingCrop: Bool = false
+    @State private var statusBannerText: String? = nil
+    @State private var showingSettingsSheet: Bool = false
+
+    private let cornerNames = ["左上", "右上", "右下", "左下"]
+
+    init(
+        photo: StagingChekiPhoto,
+        onApplyManualCrop: @escaping (Data, UIImage, String, Date?, FilmFormat, UIImage?) -> Void,
+        onRevertToOriginal: @escaping () -> Void
+    ) {
+        self.photo = photo
+        self.onApplyManualCrop = onApplyManualCrop
+        self.onRevertToOriginal = onRevertToOriginal
+        _sourceUIImage = State(initialValue: photo.uiImage)
+        _selectedFormat = State(initialValue: photo.resolvedFilmFormat.concreteFormat)
+    }
+
+    private var effectiveZoom: CGFloat {
+        max(1.0, min(4.5, zoomScale * activePinchScale))
+    }
+
+    private var hasUnsavedChanges: Bool {
+        guard initialCornersSnapshot.count == 4, normalizedCorners.count == 4 else { return true }
+        for i in 0..<4 {
+            if hypot(normalizedCorners[i].x - initialCornersSnapshot[i].x,
+                     normalizedCorners[i].y - initialCornersSnapshot[i].y) > 0.002 {
+                return true
+            }
+        }
+        return didRotateSourceImage || selectedFormat != photo.resolvedFilmFormat.concreteFormat
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                topNavigationToolbar
+
+                cropCanvasArea
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                bottomAdjustmentToolbar
+            }
+
+            if isProcessingCrop {
+                ZStack {
+                    Color.black.opacity(0.45).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.large)
+                            .tint(.white)
+                        Text("正在套用四頂點透視裁切...")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 18)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .transition(.opacity)
+            }
+        }
+        .preferredColorScheme(.dark)
+        .statusBarHidden(true)
+        .sheet(isPresented: $showingSettingsSheet) {
+            SettingsView()
+        }
+        .onAppear {
+            loadInitialCorners()
+        }
+    }
+
+    // MARK: - 1. 頂部工具列
+
+    private var topNavigationToolbar: some View {
+        HStack(spacing: 10) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Color.white.opacity(0.14), in: Circle())
+            }
+            .accessibilityLabel("取消裁切")
+
+            Button {
+                withAnimation(.snappy(duration: 0.24)) {
+                    if initialCornersSnapshot.count == 4 {
+                        normalizedCorners = initialCornersSnapshot
+                    }
+                    resetZoomAndPan()
+                }
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } label: {
+                Text("還原")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(hasUnsavedChanges || effectiveZoom > 1.01 ? Color.yellow : Color.white.opacity(0.38))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.10), in: Capsule())
+            }
+            .disabled(!hasUnsavedChanges && effectiveZoom <= 1.01)
+
+            if photo.croppedImageData != nil {
+                Button {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    onRevertToOriginal()
+                    dismiss()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("復原原圖")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.16), in: Capsule())
+                }
+            }
+
+            Spacer()
+
+            Text("#\(photo.sequenceNumber) 手動邊界調整")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
+
+            Spacer()
+
+            if effectiveZoom > 1.02 {
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        resetZoomAndPan()
+                    }
+                } label: {
+                    Text(String(format: "%.1fx", effectiveZoom))
+                        .font(.caption.monospacedDigit().weight(.bold))
+                        .foregroundStyle(.yellow)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.14), in: Capsule())
+                }
+            }
+
+            Button {
+                Task {
+                    await applyManualQuadCrop()
+                }
+            } label: {
+                Text("完成")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.yellow, in: Capsule())
+            }
+            .disabled(isProcessingCrop)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+    }
+
+    // MARK: - 2. 中央互動畫布（透明灰色切除遮罩 + 四頂點拖曳 + 雙指縮放 + 放大鏡十字準星）
+
+    private var cropCanvasArea: some View {
+        GeometryReader { geo in
+            let viewportSize = geo.size
+            let baseRect = Self.aspectFitRect(imageSize: sourceUIImage.size, in: viewportSize, padding: 26)
+            let transformedRect = Self.transformedImageRect(
+                baseRect: baseRect,
+                viewportSize: viewportSize,
+                scale: effectiveZoom,
+                pan: CGSize(
+                    width: panOffset.width + activePanDelta.width,
+                    height: panOffset.height + activePanDelta.height
+                )
+            )
+            let screenCorners = normalizedCorners.map { pt in
+                CGPoint(
+                    x: transformedRect.minX + pt.x * transformedRect.width,
+                    y: transformedRect.minY + pt.y * transformedRect.height
+                )
+            }
+
+            ZStack {
+                Image(uiImage: sourceUIImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: transformedRect.width, height: transformedRect.height)
+                    .position(x: transformedRect.midX, y: transformedRect.midY)
+
+                // 切除的部分用透明灰色 (Even-Odd Fill)
+                Path { path in
+                    path.addRect(transformedRect)
+                    if screenCorners.count == 4 {
+                        path.move(to: screenCorners[0])
+                        path.addLine(to: screenCorners[1])
+                        path.addLine(to: screenCorners[2])
+                        path.addLine(to: screenCorners[3])
+                        path.closeSubpath()
+                    }
+                }
+                .fill(Color(white: 0.22).opacity(0.66), style: FillStyle(eoFill: true))
+                .allowsHitTesting(false)
+
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(canvasPanAndPinchGesture(baseRect: baseRect, viewportSize: viewportSize))
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                            if effectiveZoom > 1.05 {
+                                resetZoomAndPan()
+                            } else {
+                                zoomScale = 2.2
+                            }
+                        }
+                    }
+
+                if screenCorners.count == 4 {
+                    quadGridAndBorderOverlay(screenCorners: screenCorners)
+                        .allowsHitTesting(false)
+                }
+
+                ForEach(0..<min(4, screenCorners.count), id: \.self) { index in
+                    vertexHandle(
+                        index: index,
+                        screenPoint: screenCorners[index],
+                        transformedRect: transformedRect
+                    )
+                }
+
+                if let activeIdx = activeDraggingCornerIndex,
+                   activeIdx < normalizedCorners.count {
+                    vertexLoupeView(
+                        uiImage: sourceUIImage,
+                        normalizedPoint: normalizedCorners[activeIdx],
+                        cornerIndex: activeIdx
+                    )
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+                }
+
+                VStack {
+                    if let banner = statusBannerText {
+                        Text(banner)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(.top, 6)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    } else if activeDraggingCornerIndex == nil {
+                        HStack(spacing: 6) {
+                            Image(systemName: "hand.point.up.left.and.text")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.yellow)
+                            Text("拖曳四個頂點調整裁切範圍・雙指可縮放畫面")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Color.black.opacity(0.55), in: Capsule())
+                        .padding(.top, 6)
+                    }
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+            }
+            .coordinateSpace(name: "StagingQuadCropViewport")
+            .clipped()
+        }
+    }
+
+    private func quadGridAndBorderOverlay(screenCorners: [CGPoint]) -> some View {
+        ZStack {
+            Path { path in
+                let tl = screenCorners[0]
+                let tr = screenCorners[1]
+                let br = screenCorners[2]
+                let bl = screenCorners[3]
+
+                for step in 1...2 {
+                    let t = CGFloat(step) / 3.0
+                    let topPt = CGPoint(x: tl.x + (tr.x - tl.x) * t, y: tl.y + (tr.y - tl.y) * t)
+                    let botPt = CGPoint(x: bl.x + (br.x - bl.x) * t, y: bl.y + (br.y - bl.y) * t)
+                    path.move(to: topPt)
+                    path.addLine(to: botPt)
+
+                    let leftPt = CGPoint(x: tl.x + (bl.x - tl.x) * t, y: tl.y + (bl.y - tl.y) * t)
+                    let rightPt = CGPoint(x: tr.x + (br.x - tr.x) * t, y: tr.y + (br.y - tr.y) * t)
+                    path.move(to: leftPt)
+                    path.addLine(to: rightPt)
+                }
+            }
+            .stroke(
+                Color.white.opacity(activeDraggingCornerIndex != nil ? 0.58 : 0.30),
+                style: StrokeStyle(lineWidth: 0.85)
+            )
+
+            Path { path in
+                path.move(to: screenCorners[0])
+                path.addLine(to: screenCorners[1])
+                path.addLine(to: screenCorners[2])
+                path.addLine(to: screenCorners[3])
+                path.closeSubpath()
+            }
+            .stroke(Color.white, style: StrokeStyle(lineWidth: 1.8, lineJoin: .round))
+        }
+    }
+
+    private func vertexHandle(
+        index: Int,
+        screenPoint: CGPoint,
+        transformedRect: CGRect
+    ) -> some View {
+        let isDragging = (activeDraggingCornerIndex == index)
+
+        return ZStack {
+            Circle()
+                .fill(isDragging ? Color.yellow.opacity(0.28) : Color.black.opacity(0.28))
+                .frame(width: isDragging ? 42 : 30, height: isDragging ? 42 : 30)
+
+            Circle()
+                .strokeBorder(isDragging ? Color.yellow : Color.white, lineWidth: 3.0)
+                .background(Circle().fill(Color.white.opacity(0.18)))
+                .frame(width: 22, height: 22)
+                .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
+
+            Circle()
+                .fill(isDragging ? Color.yellow : Color.white)
+                .frame(width: 6, height: 6)
+        }
+        .frame(width: 52, height: 52)
+        .contentShape(Circle())
+        .position(screenPoint)
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .named("StagingQuadCropViewport"))
+                .onChanged { value in
+                    if activeDraggingCornerIndex != index {
+                        activeDraggingCornerIndex = index
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                    guard transformedRect.width > 10, transformedRect.height > 10 else { return }
+                    let nx = (value.location.x - transformedRect.minX) / transformedRect.width
+                    let ny = (value.location.y - transformedRect.minY) / transformedRect.height
+                    let clamped = CGPoint(
+                        x: min(max(nx, 0.01), 0.99),
+                        y: min(max(ny, 0.01), 0.99)
+                    )
+                    normalizedCorners[index] = clamped
+                }
+                .onEnded { _ in
+                    activeDraggingCornerIndex = nil
+                    UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+                }
+        )
+        .accessibilityLabel("移動\(cornerNames[index])頂點")
+    }
+
+    private func vertexLoupeView(
+        uiImage: UIImage,
+        normalizedPoint: CGPoint,
+        cornerIndex: Int
+    ) -> some View {
+        let loupeDiameter: CGFloat = 108
+        let zoomFactor: CGFloat = 2.8
+        let displayedW = loupeDiameter * zoomFactor
+        let displayedH = displayedW * (uiImage.size.height / max(1, uiImage.size.width))
+        let offsetX = (0.5 - normalizedPoint.x) * displayedW
+        let offsetY = (0.5 - normalizedPoint.y) * displayedH
+        let center = loupeDiameter / 2.0
+        let armLength: CGFloat = 18.0
+
+        return VStack {
+            HStack {
+                if cornerIndex == 0 || cornerIndex == 3 {
+                    Spacer()
+                }
+
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: displayedW, height: displayedH)
+                    .offset(x: offsetX, y: offsetY)
+                    .frame(width: loupeDiameter, height: loupeDiameter)
+                    .background(Color.black)
+                    .clipShape(Circle())
+                    .overlay {
+                        ZStack {
+                            Path { path in
+                                path.move(to: CGPoint(x: center, y: 0))
+                                path.addLine(to: CGPoint(x: center, y: loupeDiameter))
+                                path.move(to: CGPoint(x: 0, y: center))
+                                path.addLine(to: CGPoint(x: loupeDiameter, y: center))
+                            }
+                            .stroke(Color.white.opacity(0.32), lineWidth: 0.75)
+
+                            Path { path in
+                                path.move(to: CGPoint(x: center - armLength, y: center))
+                                path.addLine(to: CGPoint(x: center + armLength, y: center))
+                                path.move(to: CGPoint(x: center, y: center - armLength))
+                                path.addLine(to: CGPoint(x: center, y: center + armLength))
+                            }
+                            .stroke(Color.black.opacity(0.78), style: StrokeStyle(lineWidth: 3.4, lineCap: .round))
+
+                            Path { path in
+                                path.move(to: CGPoint(x: center - armLength, y: center))
+                                path.addLine(to: CGPoint(x: center + armLength, y: center))
+                                path.move(to: CGPoint(x: center, y: center - armLength))
+                                path.addLine(to: CGPoint(x: center, y: center + armLength))
+                            }
+                            .stroke(Color.yellow, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+
+                            Circle()
+                                .strokeBorder(Color.black.opacity(0.75), lineWidth: 2.2)
+                                .frame(width: 7, height: 7)
+
+                            Circle()
+                                .strokeBorder(Color.yellow, lineWidth: 1.2)
+                                .frame(width: 7, height: 7)
+                        }
+                        .frame(width: loupeDiameter, height: loupeDiameter)
+                        .clipShape(Circle())
+                    }
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.yellow, lineWidth: 2.5)
+                    )
+                    .overlay(alignment: .bottom) {
+                        Text(cornerNames[cornerIndex])
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.yellow, in: Capsule())
+                            .offset(y: 8)
+                    }
+                    .shadow(color: .black.opacity(0.65), radius: 10, y: 4)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+
+                if cornerIndex == 1 || cornerIndex == 2 {
+                    Spacer()
+                }
+            }
+            Spacer()
+        }
+        .allowsHitTesting(false)
+    }
+
+    // MARK: - 3. 底部控制面板
+
+    private var bottomAdjustmentToolbar: some View {
+        VStack(spacing: 12) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(FilmFormat.concreteFormats, id: \.rawValue) { format in
+                        formatPillButton(for: format)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+
+            HStack(spacing: 16) {
+                Button {
+                    Task {
+                        await runAutoDetectCorners()
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "viewfinder.rectangular")
+                            .font(.system(size: 18, weight: .semibold))
+                        Text("自動吸附")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                }
+
+                Button {
+                    rotateSourceImage90DegreesCounterClockwise()
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "rotate.left")
+                            .font(.system(size: 18, weight: .semibold))
+                        Text("旋轉 90°")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                }
+
+                Button {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        normalizedCorners = [
+                            CGPoint(x: 0.04, y: 0.04),
+                            CGPoint(x: 0.96, y: 0.04),
+                            CGPoint(x: 0.96, y: 0.96),
+                            CGPoint(x: 0.04, y: 0.96)
+                        ]
+                    }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text("展開四點")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                }
+
+                Button {
+                    showingSettingsSheet = true
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "slider.horizontal.below.square.and.square.filled")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text(abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "邊界 %+.1f%%", defaultBorderInsetPercentage) : "邊界設定")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(abs(defaultBorderInsetPercentage) > 0.05 ? .yellow : .white)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 12)
+        }
+        .padding(.top, 10)
+        .background(Color(white: 0.08).opacity(0.96))
+    }
+
+    private func formatPillButton(for format: FilmFormat) -> some View {
+        let isSelected = (selectedFormat == format)
+        return Button {
+            withAnimation(.snappy(duration: 0.22)) {
+                selectedFormat = format
+            }
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: format == .square ? "square" : (format == .wide ? "rectangle" : "rectangle.portrait"))
+                    .font(.system(size: 11, weight: .semibold))
+                Text(format.displayName)
+                    .font(.caption.weight(.bold))
+            }
+            .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.85))
+            .padding(.horizontal, 13)
+            .padding(.vertical, 7)
+            .background(
+                isSelected ? Color.yellow : Color.white.opacity(0.12),
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 4. 手勢與自動偵測／套用裁切邏輯
+
+    private func canvasPanAndPinchGesture(baseRect: CGRect, viewportSize: CGSize) -> some Gesture {
+        let magnify = MagnifyGesture()
+            .onChanged { value in
+                activePinchScale = value.magnification
+            }
+            .onEnded { value in
+                zoomScale = max(1.0, min(4.5, zoomScale * value.magnification))
+                activePinchScale = 1.0
+                if zoomScale <= 1.02 {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        zoomScale = 1.0
+                        panOffset = .zero
+                    }
+                } else {
+                    panOffset = Self.clampedPanOffset(
+                        panOffset,
+                        baseRect: baseRect,
+                        viewportSize: viewportSize,
+                        scale: zoomScale
+                    )
+                }
+            }
+
+        let pan = DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                guard effectiveZoom > 1.01 else { return }
+                activePanDelta = value.translation
+            }
+            .onEnded { value in
+                guard effectiveZoom > 1.01 else {
+                    activePanDelta = .zero
+                    return
+                }
+                let rawPan = CGSize(
+                    width: panOffset.width + value.translation.width,
+                    height: panOffset.height + value.translation.height
+                )
+                panOffset = Self.clampedPanOffset(
+                    rawPan,
+                    baseRect: baseRect,
+                    viewportSize: viewportSize,
+                    scale: zoomScale
+                )
+                activePanDelta = .zero
+            }
+
+        return SimultaneousGesture(magnify, pan)
+    }
+
+    private func resetZoomAndPan() {
+        zoomScale = 1.0
+        activePinchScale = 1.0
+        panOffset = .zero
+        activePanDelta = .zero
+    }
+
+    private func loadInitialCorners() {
+        if let saved = ChekiItem.decodeNormalizedCorners(from: photo.normalizedCornersJSON),
+           saved.count == 4 {
+            normalizedCorners = saved
+            initialCornersSnapshot = saved
+        } else {
+            Task {
+                await runAutoDetectCorners(silent: true)
+                initialCornersSnapshot = normalizedCorners
+            }
+        }
+    }
+
+    @MainActor
+    private func runAutoDetectCorners(silent: Bool = false) async {
+        guard let cgImage = sourceUIImage.cgImage else { return }
+        let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let visionManager = VisionManager()
+        let defaultInsetRatio = defaultBorderInsetPercentage / 100.0
+
+        if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: imgSize),
+           detection.corners.count == 4 {
+            let ordered = VisionManager.orderPoints(detection.corners)
+            let adjusted = await visionManager.applyBorderInset(
+                corners: ordered,
+                imageSize: imgSize,
+                ratio: defaultInsetRatio
+            )
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+                normalizedCorners = adjusted.map { pt in
+                    CGPoint(
+                        x: min(max(pt.x / max(1, imgSize.width), 0.01), 0.99),
+                        y: min(max(pt.y / max(1, imgSize.height), 0.01), 0.99)
+                    )
+                }
+            }
+            if !silent {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                showBanner("已自動吸附拍立得四個頂點")
+            }
+        } else if !silent {
+            showBanner("已重設為標準拍立得四頂點範圍")
+        }
+    }
+
+    private func rotateSourceImage90DegreesCounterClockwise() {
+        let currentImg = sourceUIImage
+        let newSize = CGSize(width: currentImg.size.height, height: currentImg.size.width)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let rotated = renderer.image { ctx in
+            ctx.cgContext.translateBy(x: newSize.width / 2, y: newSize.height / 2)
+            ctx.cgContext.rotate(by: -.pi / 2)
+            currentImg.draw(in: CGRect(
+                x: -currentImg.size.width / 2,
+                y: -currentImg.size.height / 2,
+                width: currentImg.size.width,
+                height: currentImg.size.height
+            ))
+        }
+        sourceUIImage = rotated
+        didRotateSourceImage = true
+        let rotatedPts = normalizedCorners.map { pt in
+            CGPoint(x: pt.y, y: 1.0 - pt.x)
+        }
+        normalizedCorners = VisionManager.orderPoints(rotatedPts)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    @MainActor
+    private func applyManualQuadCrop() async {
+        guard let cgImage = sourceUIImage.cgImage else {
+            dismiss()
+            return
+        }
+
+        isProcessingCrop = true
+        defer { isProcessingCrop = false }
+
+        let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let manualNorm = normalizedCorners.count == 4 ? normalizedCorners : Self.defaultQuadCorners
+        let pixelCorners = manualNorm.map { pt in
+            CGPoint(x: pt.x * imgSize.width, y: pt.y * imgSize.height)
+        }
+
+        let visionManager = VisionManager()
+        let chekiFormat: ChekiFilmFormat = {
+            switch selectedFormat {
+            case .mini: return .mini
+            case .square: return .square
+            case .wide: return .wide
+            case .auto: return .mini
+            }
+        }()
+
+        let manualDetection = DetectionResult(
+            corners: pixelCorners,
+            method: .visionNative,
+            confidence: 1.0,
+            imageSize: imgSize
+        )
+
+        if let cropResult = try? await visionManager.perspectiveCorrect(
+            image: cgImage,
+            corners: pixelCorners,
+            detection: manualDetection,
+            format: chekiFormat,
+            preserveCornerOrder: true
+        ) {
+            let croppedUIImage = UIImage(cgImage: cropResult.cgImage)
+            if let croppedJPEG = croppedUIImage.jpegData(compressionQuality: 0.92),
+               let encodedJSON = ChekiItem.encodeNormalizedCorners(manualNorm) {
+                var recognizedDate = photo.detectedOCRDate
+                if !photo.hasManuallyModifiedDate && recognizedDate == nil {
+                    recognizedDate = await visionManager.recognizeDate(from: cropResult.cgImage)?.date
+                }
+                let resolvedFormat = FilmFormat.resolvedConcreteFormat(
+                    preferred: selectedFormat,
+                    specName: cropResult.filmSpecification?.format.rawValue,
+                    outputSize: cropResult.outputSize
+                )
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                onApplyManualCrop(
+                    croppedJPEG,
+                    croppedUIImage,
+                    encodedJSON,
+                    recognizedDate,
+                    resolvedFormat,
+                    didRotateSourceImage ? sourceUIImage : nil
+                )
+                dismiss()
+            }
+        } else {
+            showBanner("裁切範圍無效，請確認四個頂點未交錯")
+        }
+    }
+
+    private func showBanner(_ text: String) {
+        withAnimation {
+            statusBannerText = text
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            withAnimation {
+                if statusBannerText == text {
+                    statusBannerText = nil
+                }
+            }
+        }
+    }
+
+    private static let defaultQuadCorners: [CGPoint] = [
+        CGPoint(x: 0.12, y: 0.12),
+        CGPoint(x: 0.88, y: 0.12),
+        CGPoint(x: 0.88, y: 0.88),
+        CGPoint(x: 0.12, y: 0.88)
+    ]
+
+    private static func aspectFitRect(imageSize: CGSize, in viewportSize: CGSize, padding: CGFloat) -> CGRect {
+        let availW = max(1, viewportSize.width - padding * 2)
+        let availH = max(1, viewportSize.height - padding * 2)
+        let imgW = max(1, imageSize.width)
+        let imgH = max(1, imageSize.height)
+        let scale = min(availW / imgW, availH / imgH)
+        let fitW = imgW * scale
+        let fitH = imgH * scale
+        return CGRect(
+            x: (viewportSize.width - fitW) / 2.0,
+            y: (viewportSize.height - fitH) / 2.0,
+            width: fitW,
+            height: fitH
+        )
+    }
+
+    private static func transformedImageRect(
+        baseRect: CGRect,
+        viewportSize: CGSize,
+        scale: CGFloat,
+        pan: CGSize
+    ) -> CGRect {
+        let clampedPan = clampedPanOffset(pan, baseRect: baseRect, viewportSize: viewportSize, scale: scale)
+        let scaledW = baseRect.width * scale
+        let scaledH = baseRect.height * scale
+        let centerX = viewportSize.width / 2.0 + clampedPan.width
+        let centerY = viewportSize.height / 2.0 + clampedPan.height
+        return CGRect(
+            x: centerX - scaledW / 2.0,
+            y: centerY - scaledH / 2.0,
+            width: scaledW,
+            height: scaledH
+        )
+    }
+
+    private static func clampedPanOffset(
+        _ pan: CGSize,
+        baseRect: CGRect,
+        viewportSize: CGSize,
+        scale: CGFloat
+    ) -> CGSize {
+        let scaledW = baseRect.width * scale
+        let scaledH = baseRect.height * scale
+        let maxOffsetX = max(40, (scaledW - viewportSize.width) / 2.0 + 60)
+        let maxOffsetY = max(40, (scaledH - viewportSize.height) / 2.0 + 60)
+        return CGSize(
+            width: min(max(pan.width, -maxOffsetX), maxOffsetX),
+            height: min(max(pan.height, -maxOffsetY), maxOffsetY)
+        )
     }
 }
 
