@@ -10,16 +10,15 @@
 * **最後更新時間**：2026-10-09
 * **當前所屬階段**：Phase 6 — 端到端整合與發布準備 (QA & Release)
 * **當前分支**：`main`
-* **當前進行中任務**：已完成 **Task 6.2**，並依據實機測試回饋完成單張檢視隱藏底部導覽列與「四角合成防反光」視覺錨點死鎖暨中央反光 100% 消除升級：
+* **當前進行中任務**：已完成 **Task 6.2**，並依據實機測試回饋完成單張檢視隱藏底部導覽列、「四角合成防反光」視覺錨點死鎖暨中央反光消除，以及**刪除照片零閃退與 iOS 系統相簿同步刪除修復**：
   1. **單張檢視自動隱藏底部相冊與搜尋導覽按鈕 (`LocalizationManager.swift`, `ContentView.swift`, `LibraryView.swift`, `ChekiDetailView.swift`)**：
      - 進入單張照片檢視 (`ChekiDetailView`) 時，自動同步隱藏 SwiftUI 與底層 `UITabBarController.tabBar`（相冊與搜尋按鈕完全消失），返回相冊時平順恢復；並修正日文模式下單面拍立得翻轉膠囊文字在地化。
-  2. **四角合成防反光：1,2,3,4 移至真正四個角落 + 視覺錨點追蹤使綠框死鎖在實體拍立得上 (`CameraScannerView.swift`)**：
-     - 將 `1, 2, 3, 4` 四個引導點移至拍立得外框真正的四個角落 (`0.08, 0.08` ~ `0.92, 0.92`)，讓移動對準時閃光燈反光斑能真正被推離中央主體區。
-     - 拍下第 1 張鎖定四邊形狀後，停止 `VNDetectRectanglesRequest`（四邊不再跳動變形），改以 `120×160` 視覺拍立得錨點與邊界梯度追蹤 (`updateLockedQuadVisualTracking` + `VNTranslationalImageRegistrationRequest`) 即時鎖定實體拍立得在畫面中的平移量，使綠框與 `1, 2, 3, 4` 在手機水平移動時緊貼實體拍立得位置。
-  3. **四角部分出界對位與第 1 張中央強光白斑 100% 消除 (`VisionManager+AntiGlare.swift`)**：
-     - 解決對準四個角落時拍立得對角移出相機畫面 (`0...1`) 導致的裁切錯位：透過 `estimateDonorNormalizedQuadInRawFrame` 直接比對第 1 張基準圖與四角照片的非反光錨點位移，並建立畫面內有效遮罩 `rawValidB` 排除畫面外延伸區。
-     - 在 `fuseMultiFrameGlareFree` 實作兩階段配準（`±36px × ±48px` 全域粗平移搜尋 + `4×6` 局部網格微調），並改由乾淨中間調 (`0.16...0.72`) 估算全域環境光差（杜絕白襯衫上的反光核被誤吸納進環境光差），將第 1 張中央白襯衫強光核與深色格紋外套上的閃光光暈 100% 替換為四角照片的乾淨像素。
-* **最新穩定 Git Commit**：fix(防反光): 修正四角點位、拍立得視覺錨點鎖定與中央反光100%消除
+  2. **四角合成防反光：1,2,3,4 移至真正四個角落 + 視覺錨點追蹤使綠框死鎖在實體拍立得上 (`CameraScannerView.swift`, `VisionManager+AntiGlare.swift`)**：
+     - 將 `1, 2, 3, 4` 四個引導點移至拍立得外框真正的四個角落 (`0.08, 0.08` ~ `0.92, 0.92`)，並以 `120×160` 視覺錨點與邊界梯度追蹤鎖定實體拍立得位置；透過兩階段配準與乾淨中間調環境光估計 100% 消除第 1 張中央強光反光斑。
+  3. **徹底修復按下刪除後 App 閃退與 iOS 系統相簿未同步刪除問題 (`PhotoLibraryManager.swift`, `ChekiDetailView.swift`, `LibraryView.swift`, `CameraScannerView.swift`, `SettingsView.swift`, `IdolMember.swift`)**：
+     - **零閃退保證**：移除 `ChekiDetailView` 與 `NavigationStack` 對 SwiftData `@Model` 實體 (`let item: ChekiItem`) 的直接持有，改以純值型別 `ChekiDetailRoute(itemID: UUID)` 進行導覽並透過 `@Query` + `deletedItemIDs` 動態解析；修正原本 `filmstripItems` 在 `modelContext.delete(item)` 後將已刪除物件透過 `[item] + sorted` 重新塞回陣列導致的 SwiftData Fault 崩潰 (`EXC_BREAKPOINT`)。
+     - **100% 系統相簿同步刪除**：實作 `PhotoLibraryManager.deleteItemsAsync`，統一將 `autoSyncToPhotosLibrary` 預設對齊為 `true`，並支援以 `frontAssetIdentifier` / `backAssetIdentifier` 及拍攝時間軸 `±2.5s` 回退查找對應 `PHAsset`；等待 `confirmationDialog` 收合動畫完成後，先執行 `PHPhotoLibrary.shared().performChanges` 刪除系統相簿照片，再安全切換/關閉檢視頁面並從 SwiftData `modelContext` 移除。
+* **最新穩定 Git Commit**：fix(刪除): 修復刪除拍立得時SwiftData閃退並確保iOS系統相簿同步刪除
 * **下一動執行指示**：執行 **Task 6.3**（建立 App 圖示、啟動畫面與 App Store 截圖產生流程）
 
 ---

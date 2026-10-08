@@ -9,6 +9,12 @@ import UIKit
 /// - 頂部：左側圓形毛玻璃返回鈕、中央半透明「日期時間藥丸 (`9月17日 · 16:26`)」、右側圓形 `⋯` 更多選單
 /// - 中央：支援 3D Y 軸 180° 翻轉動畫（查看背面手寫簽名）、雙指縮放、左右滑動切換上/下一張、向上滑動呼出資訊面板
 /// - 底部：縮圖膠卷滾動條 (Filmstrip Scrubber) ＋ Apple 標準 5 大工具列按鈕（分享、愛心、ℹ️、調整、垃圾桶）
+// MARK: - ChekiDetailRoute (Value-type navigation route to prevent NavigationStack from holding deleted @Model references)
+
+struct ChekiDetailRoute: Hashable {
+    let itemID: UUID
+}
+
 struct ChekiDetailView: View {
 
     @Environment(\.modelContext) private var modelContext
@@ -17,13 +23,17 @@ struct ChekiDetailView: View {
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
     @AppStorage("hasSeenDetailCoachMark") private var hasSeenDetailCoachMark: Bool = false
 
-    /// 初始點進來的拍立得項目
-    let item: ChekiItem
+    /// 初始點進來的拍立得 UUID（不直接持有 `@Model` 強引用，避免刪除後 SwiftData 觸發已刪除物件 Fault 閃退）
+    private let initialItemID: UUID
 
     /// 當前正在檢視的拍立得（透過底部縮圖膠卷或左右滑動可即時切換）
     @State private var currentItemID: UUID?
     /// 上一張檢視的拍立得 ID（確保跨張點擊縮圖時離場卡片也能平滑滑動）
     @State private var previousItemID: UUID?
+    /// 已標記刪除的拍立得 ID 集合（在 SwiftData context.delete 前先行由視圖樹排除）
+    @State private var deletedItemIDs: Set<UUID> = []
+    /// 是否正在執行刪除程序
+    @State private var isDeletingItem: Bool = false
     /// 是否翻轉至背面（true = 顯示背面手寫簽名，false = 顯示正面照片）
     @State private var isShowingBack: Bool = false
     /// 3D 翻轉連續動畫進度（0.0 = 正面 0°，1.0 = 背面 180°，供 Animatable 連續插值與 Z 軸浮起使用）
@@ -62,43 +72,55 @@ struct ChekiDetailView: View {
     @State private var syncStatusToast: String? = nil
     @State private var detailViewInstanceID = UUID()
 
-    init(item: ChekiItem) {
-        self.item = item
-        _currentItemID = State(initialValue: item.id)
+    init(itemID: UUID) {
+        self.initialItemID = itemID
+        _currentItemID = State(initialValue: itemID)
     }
 
-    /// 膠卷滾動條中的所有項目（依顯示日期由新到舊排列，並確保包含初始 `item`）
+    init(item: ChekiItem) {
+        let id = item.id
+        self.initialItemID = id
+        _currentItemID = State(initialValue: id)
+    }
+
+    /// 膠卷滾動條中的所有有效項目（嚴格過濾已刪除或已脫離 ModelContext 的物件）
     private var filmstripItems: [ChekiItem] {
-        let sorted = allChekiItems.sorted { $0.displayDate > $1.displayDate }
-        if sorted.contains(where: { $0.id == item.id }) {
-            return sorted
-        }
-        return [item] + sorted
+        allChekiItems
+            .filter { !$0.isDeleted && $0.modelContext != nil && !deletedItemIDs.contains($0.id) }
+            .sorted { $0.displayDate > $1.displayDate }
     }
 
     /// 目前選中的索引位置
     private var currentIndex: Int {
         let items = filmstripItems
+        guard !items.isEmpty else { return 0 }
         if let id = currentItemID,
            let idx = items.firstIndex(where: { $0.id == id }) {
             return idx
         }
-        return items.firstIndex(where: { $0.id == item.id }) ?? 0
+        return items.firstIndex(where: { $0.id == initialItemID }) ?? 0
     }
 
-    /// 目前選中的 `ChekiItem`
-    private var currentItem: ChekiItem {
+    /// 目前選中的有效 `ChekiItem?`（若最後一張剛被刪除則為 `nil`）
+    private var currentItemOpt: ChekiItem? {
         let items = filmstripItems
+        guard !items.isEmpty else { return nil }
         let idx = currentIndex
         if items.indices.contains(idx) {
             return items[idx]
         }
-        return item
+        return items.first
+    }
+
+    /// 目前選中的 `ChekiItem`（僅在確認 `currentItemOpt != nil` 的視圖分支中呼叫）
+    private var currentItem: ChekiItem {
+        currentItemOpt!
     }
 
     /// 是否已加入「最愛」（以備忘錄中含有 `#最愛` 或 `#お気に入り` 判定）
     private var isFavorite: Bool {
-        guard let tags = currentItem.memo?.hashtags else { return false }
+        guard let active = currentItemOpt,
+              let tags = active.memo?.hashtags else { return false }
         return tags.contains { $0 == "#最愛" || $0 == "最愛" || $0 == "#お気に入り" }
     }
 
@@ -113,39 +135,47 @@ struct ChekiDetailView: View {
             Color.black
                 .ignoresSafeArea()
 
-            // 2. 主拍立得卡片檢視區（直接套用 .ignoresSafeArea() 於 GeometryReader，確保全顯示時 100% 填滿全畫面）
-            GeometryReader { fullScreenGeo in
-                let isLandscape = fullScreenGeo.size.width > fullScreenGeo.size.height
-                mainCardViewport(
-                    fullScreenSize: fullScreenGeo.size,
-                    isLandscape: isLandscape
-                )
-            }
-            .ignoresSafeArea()
-
-            // 3. 頂部與底部懸浮控制介面（常駐視圖樹並以 opacity/offset 漸進漸出動畫切換，根除視圖重建造成的單擊抖動）
-            GeometryReader { overlayGeo in
-                let isLandscape = overlayGeo.size.width > overlayGeo.size.height
-                VStack(spacing: 0) {
-                    topOverlayNavigationBar(isLandscape: isLandscape)
-                        .opacity(isChromeHidden ? 0.0 : 1.0)
-                        .offset(y: isChromeHidden ? -18 : 0)
-
-                    Spacer(minLength: 0)
-
-                    if !hasSeenDetailCoachMark && !isLandscape {
-                        detailCoachMarkBanner
-                            .padding(.bottom, 6)
-                            .opacity(isChromeHidden ? 0.0 : 1.0)
-                    }
-
-                    bottomControlsStack(isLandscape: isLandscape, containerWidth: overlayGeo.size.width)
-                        .opacity(isChromeHidden ? 0.0 : 1.0)
-                        .offset(y: isChromeHidden ? 22 : 0)
+            if let activeItem = currentItemOpt {
+                // 2. 主拍立得卡片檢視區（直接套用 .ignoresSafeArea() 於 GeometryReader，確保全顯示時 100% 填滿全畫面）
+                GeometryReader { fullScreenGeo in
+                    let isLandscape = fullScreenGeo.size.width > fullScreenGeo.size.height
+                    mainCardViewport(
+                        fullScreenSize: fullScreenGeo.size,
+                        isLandscape: isLandscape
+                    )
                 }
-                .frame(width: overlayGeo.size.width, height: overlayGeo.size.height)
+                .ignoresSafeArea()
+
+                // 3. 頂部與底部懸浮控制介面（常駐視圖樹並以 opacity/offset 漸進漸出動畫切換，根除視圖重建造成的單擊抖動）
+                GeometryReader { overlayGeo in
+                    let isLandscape = overlayGeo.size.width > overlayGeo.size.height
+                    VStack(spacing: 0) {
+                        topOverlayNavigationBar(isLandscape: isLandscape)
+                            .opacity(isChromeHidden ? 0.0 : 1.0)
+                            .offset(y: isChromeHidden ? -18 : 0)
+
+                        Spacer(minLength: 0)
+
+                        if !hasSeenDetailCoachMark && !isLandscape {
+                            detailCoachMarkBanner
+                                .padding(.bottom, 6)
+                                .opacity(isChromeHidden ? 0.0 : 1.0)
+                        }
+
+                        bottomControlsStack(isLandscape: isLandscape, containerWidth: overlayGeo.size.width)
+                            .opacity(isChromeHidden ? 0.0 : 1.0)
+                            .offset(y: isChromeHidden ? 22 : 0)
+                    }
+                    .frame(width: overlayGeo.size.width, height: overlayGeo.size.height)
+                }
+                .allowsHitTesting(!isChromeHidden)
+
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .task(id: activeItem.id) {
+                        await ensureCoverDateAndFormatNormalized(for: activeItem)
+                    }
             }
-            .allowsHitTesting(!isChromeHidden)
 
             if let toast = syncStatusToast {
                 VStack {
@@ -192,40 +222,43 @@ struct ChekiDetailView: View {
             Task { await synthesizeModeBSecondAnglePhoto(from: newPickerItem) }
         }
         .sheet(isPresented: $showingInfoSheet) {
-            NavigationStack {
-                ChekiInfoView(item: currentItem)
+            if let activeItem = currentItemOpt {
+                NavigationStack {
+                    ChekiInfoView(item: activeItem)
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingInAppBacksidePicker) {
-            InAppBacksidePickerSheet(
-                targetItem: currentItem,
-                candidates: allChekiItems.filter { $0.id != currentItem.id },
-                onSelectItem: { selectedSource, mergeAndRemoveSource in
-                    attachBacksideFromInAppItem(selectedSource, mergeAndRemoveSource: mergeAndRemoveSource)
-                }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-        }
-        .task(id: currentItem.id) {
-            await ensureCoverDateAndFormatNormalized(for: currentItem)
+            if let activeItem = currentItemOpt {
+                InAppBacksidePickerSheet(
+                    targetItem: activeItem,
+                    candidates: filmstripItems.filter { $0.id != activeItem.id },
+                    onSelectItem: { selectedSource, mergeAndRemoveSource in
+                        attachBacksideFromInAppItem(selectedSource, mergeAndRemoveSource: mergeAndRemoveSource)
+                    }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
         }
         .fullScreenCover(isPresented: $showingAdjustmentSheet) {
-            ChekiQuadCropEditorView(
-                item: currentItem,
-                initialEditingBackside: isShowingBack && currentItem.hasBothSides,
-                onRequestBacksidePicker: {
-                    showingAdjustmentSheet = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        isShowingBacksidePicker = true
+            if let activeItem = currentItemOpt {
+                ChekiQuadCropEditorView(
+                    item: activeItem,
+                    initialEditingBackside: isShowingBack && activeItem.hasBothSides,
+                    onRequestBacksidePicker: {
+                        showingAdjustmentSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            isShowingBacksidePicker = true
+                        }
+                    },
+                    onAppliedToast: { msg in
+                        showToast(msg)
                     }
-                },
-                onAppliedToast: { msg in
-                    showToast(msg)
-                }
-            )
+                )
+            }
         }
         .confirmationDialog(
             "確定要刪除此照片嗎？",
@@ -238,7 +271,7 @@ struct ChekiDetailView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text(
-                PhotoLibraryManager.shouldSyncDeleteFromSystemPhotoLibrary(for: currentItem)
+                PhotoLibraryManager.shouldSyncDeleteFromSystemPhotoLibrary(for: currentItemOpt)
                     ? "此拍立得（含正反面與特典會備忘）將從典藏庫與 iOS 系統相簿中一併刪除。"
                     : "此拍立得（含背面與特典會備忘）將從典藏庫永久移除。"
             )
@@ -1594,11 +1627,13 @@ struct ChekiDetailView: View {
     }
 
     private func deleteCurrentItem() {
-        let items = filmstripItems
-        let targetToDelete = currentItem
+        guard !isDeletingItem, let targetToDelete = currentItemOpt else { return }
+        isDeletingItem = true
 
+        let items = filmstripItems
+        let targetID = targetToDelete.id
         var nextID: UUID? = nil
-        if let idx = items.firstIndex(where: { $0.id == targetToDelete.id }) {
+        if let idx = items.firstIndex(where: { $0.id == targetID }) {
             if idx + 1 < items.count {
                 nextID = items[idx + 1].id
             } else if idx - 1 >= 0 {
@@ -1606,15 +1641,24 @@ struct ChekiDetailView: View {
             }
         }
 
-        PhotoLibraryManager.shared.deleteItems([targetToDelete], modelContext: modelContext)
-
-        if let nextID {
-            withAnimation(.snappy(duration: 0.25)) {
-                currentItemID = nextID
-                isShowingBack = false
-            }
-        } else {
-            dismiss()
+        Task { @MainActor in
+            await PhotoLibraryManager.shared.deleteItemsAsync(
+                [targetToDelete],
+                modelContext: modelContext,
+                onBeforeContextDelete: {
+                    deletedItemIDs.insert(targetID)
+                    if let nextID {
+                        withAnimation(.snappy(duration: 0.25)) {
+                            currentItemID = nextID
+                            isShowingBack = false
+                            flipProgress = 0.0
+                        }
+                    } else {
+                        dismiss()
+                    }
+                }
+            )
+            isDeletingItem = false
         }
     }
 
@@ -1622,6 +1666,7 @@ struct ChekiDetailView: View {
 
     @MainActor
     private func ensureCoverDateAndFormatNormalized(for target: ChekiItem) async {
+        guard !target.isDeleted, target.modelContext != nil else { return }
         var didMutate = false
 
         // 1. 確保規格為三種具體規格之一（Instax Mini / Square / Wide）
@@ -1658,13 +1703,14 @@ struct ChekiDetailView: View {
         }
 
         // 3. 若尚未辨識出封面手寫日期，自動於背景辨識並填入拍攝日期
-        guard target.ocrDate == nil else { return }
+        guard !target.isDeleted, target.modelContext != nil, target.ocrDate == nil else { return }
         guard let data = target.frontImageData ?? target.originalFrontImageData,
               let uiImage = UIImage(data: data)?.normalizedImage,
               let cgImage = uiImage.cgImage else { return }
 
         let visionManager = VisionManager()
         if let ocrResult = await visionManager.recognizeDate(from: cgImage) {
+            guard !target.isDeleted, target.modelContext != nil else { return }
             let mergedDate = ChekiItem.mergeRecognizedDate(ocrResult.date, into: target.capturedAt)
             target.ocrDate = mergedDate
             target.capturedAt = mergedDate
@@ -1674,6 +1720,7 @@ struct ChekiDetailView: View {
                   let origUI = UIImage(data: origData)?.normalizedImage,
                   let origCG = origUI.cgImage,
                   let fallbackResult = await visionManager.recognizeDate(from: origCG) {
+            guard !target.isDeleted, target.modelContext != nil else { return }
             let mergedDate = ChekiItem.mergeRecognizedDate(fallbackResult.date, into: target.capturedAt)
             target.ocrDate = mergedDate
             target.capturedAt = mergedDate

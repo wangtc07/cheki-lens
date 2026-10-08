@@ -818,9 +818,9 @@ struct CameraScannerView: View {
             camera.stop()
         }
         .sheet(isPresented: $showingLatestDetail) {
-            if let latest = chekiItems.first {
+            if let latest = chekiItems.first(where: { !$0.isDeleted && $0.modelContext != nil }) {
                 NavigationStack {
-                    ChekiDetailView(item: latest)
+                    ChekiDetailView(itemID: latest.id)
                         .toolbar {
                             ToolbarItem(placement: .topBarLeading) {
                                 Button("返回相機") {
@@ -1521,6 +1521,7 @@ struct CameraScannerView: View {
                         isKnownFrontPhoto: false,
                         priorNormalizedCorners: backQuad
                     )
+                    guard !newItem.isDeleted, newItem.modelContext != nil else { return }
 
                     if let frontProcessed = frontResult?.0 {
                         newItem.frontImageData = frontProcessed
@@ -1551,6 +1552,7 @@ struct CameraScannerView: View {
                     try? context.save()
 
                     await self.syncCapturedItemToPhotoLibrary(newItem)
+                    guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                     withAnimation {
                         self.statusBannerMessage = L10n.tr(
                             "正反雙面拍立得已完成背景裁切並同步至系統相簿！",
@@ -1593,6 +1595,7 @@ struct CameraScannerView: View {
                     isKnownFrontPhoto: true,
                     priorNormalizedCorners: lockedPreviewQuad
                 )
+                guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                 if let processedData {
                     newItem.frontImageData = processedData
                 }
@@ -1612,6 +1615,7 @@ struct CameraScannerView: View {
                 try? context.save()
 
                 await self.syncCapturedItemToPhotoLibrary(newItem)
+                guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                 withAnimation {
                     self.statusBannerMessage = L10n.tr(
                         "已自動正位並存入系統相簿",
@@ -1829,6 +1833,8 @@ struct CameraScannerView: View {
                 }
             }.value
 
+            guard !newItem.isDeleted, newItem.modelContext != nil else { return }
+
             if let outcome = synthesisOutcome, let fusedJPEG = outcome.fusedJPEG {
                 newItem.frontImageData = fusedJPEG
                 if let rawJPEGA = outcome.rawJPEGA {
@@ -1847,6 +1853,7 @@ struct CameraScannerView: View {
                 try? context.save()
 
                 await self.syncCapturedItemToPhotoLibrary(newItem)
+                guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                 withAnimation {
                     self.statusBannerMessage = L10n.tr(
                         "✨ 四角去反光合成完成！已同步至系統相簿",
@@ -1860,6 +1867,7 @@ struct CameraScannerView: View {
                     isKnownFrontPhoto: true,
                     priorNormalizedCorners: capturedQuads.first ?? nil
                 )
+                guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                 if let processedData {
                     newItem.frontImageData = processedData
                 }
@@ -1879,6 +1887,7 @@ struct CameraScannerView: View {
                 try? context.save()
 
                 await self.syncCapturedItemToPhotoLibrary(newItem)
+                guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                 withAnimation {
                     self.statusBannerMessage = L10n.tr(
                         "已透過反光抑制正位並存入系統相簿",
@@ -1968,6 +1977,7 @@ struct CameraScannerView: View {
             albumName: albumName,
             inFolder: folderName
         )
+        guard item.modelContext != nil, !item.isDeleted else { return }
 
         if let frontData = item.frontImageData,
            let frontUIImage = UIImage(data: frontData) {
@@ -1978,6 +1988,10 @@ struct CameraScannerView: View {
                 creationDate: frontSyncDate,
                 to: album
             ) {
+                guard item.modelContext != nil, !item.isDeleted else {
+                    await PhotoLibraryManager.shared.deleteAssetsFromSystemPhotoLibrary(identifiers: [frontAssetId])
+                    return
+                }
                 item.frontAssetIdentifier = frontAssetId
                 item.isSyncedToPhotoLibrary = true
                 item.isDateWrittenToAlbum = overwriteExif && (item.ocrDate != nil)
@@ -1993,6 +2007,10 @@ struct CameraScannerView: View {
                 creationDate: backSyncDate,
                 to: album
             ) {
+                guard item.modelContext != nil, !item.isDeleted else {
+                    await PhotoLibraryManager.shared.deleteAssetsFromSystemPhotoLibrary(identifiers: [backAssetId])
+                    return
+                }
                 item.backAssetIdentifier = backAssetId
                 item.isSyncedToPhotoLibrary = true
             }

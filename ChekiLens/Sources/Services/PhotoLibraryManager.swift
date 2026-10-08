@@ -378,28 +378,35 @@ final class PhotoLibraryManager {
     // MARK: - Delete Sync with System Photo Library
 
     /// 判斷刪除指定拍立得時是否應一併自 iOS 系統相簿 (`Photos.app`) 刪除對應照片：
-    /// - 當「同步至 iOS 系統相簿 (`autoSyncToPhotosLibrary`)」開啟時，一律同步刪除系統相簿中的正反面照片
-    /// - 若使用者尚未手動關閉同步開關，但該項目已由相機預設同步至系統相簿 (`isSyncedToPhotoLibrary == true`)，亦同步刪除
+    /// - 只要該拍立得已綁定系統相簿 `frontAssetIdentifier` / `backAssetIdentifier` 或 `isSyncedToPhotoLibrary == true`，或系統相簿同步開啟時，一律同步自系統相簿刪除
     static func shouldSyncDeleteFromSystemPhotoLibrary(for item: ChekiItem? = nil) -> Bool {
+        if let item, !item.isDeleted, item.modelContext != nil {
+            if item.isSyncedToPhotoLibrary { return true }
+            if let f = item.frontAssetIdentifier, !f.isEmpty { return true }
+            if let b = item.backAssetIdentifier, !b.isEmpty { return true }
+        }
         if let explicit = UserDefaults.standard.object(forKey: "autoSyncToPhotosLibrary") as? Bool {
             return explicit
         }
         if let legacyExplicit = UserDefaults.standard.object(forKey: "autoSyncToPhotos") as? Bool {
             return legacyExplicit
         }
-        return item?.isSyncedToPhotoLibrary ?? false
+        return true
     }
 
-    /// 刪除指定的 `ChekiItem` 陣列，並在啟用「系統相簿同步」時一併自 iOS 系統相簿 (`Photos.app`) 刪除對應的正反面照片
+    /// 收集待刪除項目對應之 iOS 系統相簿 `PHAsset.localIdentifier`（包含拍攝時間軸 ±2.5 秒自動回退比對）
     @MainActor
-    func deleteItems(
-        _ items: [ChekiItem],
+    private func collectAssetIdentifiersToDelete(
+        for items: [ChekiItem],
         modelContext: ModelContext
-    ) {
-        guard !items.isEmpty else { return }
+    ) async -> [String] {
+        let liveItems = items.filter { !$0.isDeleted && $0.modelContext != nil }
+        guard !liveItems.isEmpty else { return [] }
 
-        let deletingIDs = Set(items.map(\.id))
-        let allItems = (try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? []
+        let deletingIDs = Set(liveItems.map(\.id))
+        let allItems = ((try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? [])
+            .filter { !$0.isDeleted && $0.modelContext != nil }
+
         var retainedAssetIDs = Set<String>()
         for existing in allItems where !deletingIDs.contains(existing.id) {
             if let f = existing.frontAssetIdentifier, !f.isEmpty {
@@ -411,29 +418,103 @@ final class PhotoLibraryManager {
         }
 
         var assetIDsToDelete: [String] = []
-        for item in items {
-            if Self.shouldSyncDeleteFromSystemPhotoLibrary(for: item) {
-                if let frontID = item.frontAssetIdentifier,
-                   !frontID.isEmpty,
-                   !retainedAssetIDs.contains(frontID),
-                   !assetIDsToDelete.contains(frontID) {
+        var fallbackDatesToSearch: [Date] = []
+
+        for item in liveItems {
+            guard Self.shouldSyncDeleteFromSystemPhotoLibrary(for: item) else { continue }
+            var foundExplicitID = false
+            if let frontID = item.frontAssetIdentifier,
+               !frontID.isEmpty,
+               !retainedAssetIDs.contains(frontID) {
+                if !assetIDsToDelete.contains(frontID) {
                     assetIDsToDelete.append(frontID)
                 }
-                if let backID = item.backAssetIdentifier,
-                   !backID.isEmpty,
-                   !retainedAssetIDs.contains(backID),
-                   !assetIDsToDelete.contains(backID) {
+                foundExplicitID = true
+            }
+            if let backID = item.backAssetIdentifier,
+               !backID.isEmpty,
+               !retainedAssetIDs.contains(backID) {
+                if !assetIDsToDelete.contains(backID) {
                     assetIDsToDelete.append(backID)
                 }
+                foundExplicitID = true
             }
+            if !foundExplicitID {
+                fallbackDatesToSearch.append(item.capturedAt)
+                if abs(item.displayDate.timeIntervalSince(item.capturedAt)) > 1.0 {
+                    fallbackDatesToSearch.append(item.displayDate)
+                }
+            }
+        }
+
+        // 若相機剛拍完背景正位同步剛寫入系統相簿、或舊項目未記錄 frontAssetIdentifier，以拍攝時間軸 ±2.5 秒在系統相簿定位對應相片
+        if !fallbackDatesToSearch.isEmpty, await requestAuthorization() {
+            for targetDate in fallbackDatesToSearch {
+                let opts = PHFetchOptions()
+                let minDate = targetDate.addingTimeInterval(-2.5)
+                let maxDate = targetDate.addingTimeInterval(2.5)
+                opts.predicate = NSPredicate(
+                    format: "creationDate >= %@ AND creationDate <= %@",
+                    minDate as NSDate,
+                    maxDate as NSDate
+                )
+                let matched = PHAsset.fetchAssets(with: .image, options: opts)
+                matched.enumerateObjects { asset, _, _ in
+                    let id = asset.localIdentifier
+                    if !retainedAssetIDs.contains(id) && !assetIDsToDelete.contains(id) {
+                        assetIDsToDelete.append(id)
+                    }
+                }
+            }
+        }
+
+        return assetIDsToDelete
+    }
+
+    /// 非同步安全刪除指定的 `ChekiItem` 陣列：
+    /// 1. 先向 iOS 系統相簿 (`Photos.app`) 請求刪除對應的 `PHAsset`（確保系統相簿確實刪除且視圖狀態穩定不閃退）。
+    /// 2. 執行 `onBeforeContextDelete` 讓單張檢視器先行切換上/下一張或關閉頁面，徹底脫離被刪除物件之引用。
+    /// 3. 最後再解除關聯並從 SwiftData `modelContext` 刪除與儲存。
+    @MainActor
+    func deleteItemsAsync(
+        _ items: [ChekiItem],
+        modelContext: ModelContext,
+        onBeforeContextDelete: (@MainActor () -> Void)? = nil
+    ) async {
+        let liveItems = items.filter { !$0.isDeleted && $0.modelContext != nil }
+        guard !liveItems.isEmpty else {
+            onBeforeContextDelete?()
+            return
+        }
+
+        let assetIDsToDelete = await collectAssetIdentifiersToDelete(for: liveItems, modelContext: modelContext)
+        if !assetIDsToDelete.isEmpty {
+            await deleteAssetsFromSystemPhotoLibrary(identifiers: assetIDsToDelete)
+        }
+
+        onBeforeContextDelete?()
+        await Task.yield()
+
+        for item in liveItems where !item.isDeleted && item.modelContext != nil {
+            if let memo = item.memo {
+                item.memo = nil
+                modelContext.delete(memo)
+            }
+            item.idolMember = nil
             modelContext.delete(item)
         }
         try? modelContext.save()
+    }
 
-        if !assetIDsToDelete.isEmpty {
-            Task {
-                await deleteAssetsFromSystemPhotoLibrary(identifiers: assetIDsToDelete)
-            }
+    /// 刪除指定的 `ChekiItem` 陣列，並一併自 iOS 系統相簿 (`Photos.app`) 刪除對應的正反面照片
+    @MainActor
+    func deleteItems(
+        _ items: [ChekiItem],
+        modelContext: ModelContext
+    ) {
+        guard !items.isEmpty else { return }
+        Task { @MainActor in
+            await self.deleteItemsAsync(items, modelContext: modelContext)
         }
     }
 
@@ -443,6 +524,7 @@ final class PhotoLibraryManager {
         from item: ChekiItem,
         modelContext: ModelContext
     ) {
+        guard !item.isDeleted, item.modelContext != nil else { return }
         let removedBackAssetID = item.backAssetIdentifier
         let shouldDeleteFromPhotos = Self.shouldSyncDeleteFromSystemPhotoLibrary(for: item)
 
@@ -458,7 +540,8 @@ final class PhotoLibraryManager {
             return
         }
 
-        let allItems = (try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? []
+        let allItems = ((try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? [])
+            .filter { !$0.isDeleted && $0.modelContext != nil }
         let isStillReferenced = allItems.contains { existing in
             existing.frontAssetIdentifier == backID || existing.backAssetIdentifier == backID
         }
@@ -477,6 +560,9 @@ final class PhotoLibraryManager {
 
         let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: validIDs, options: nil)
         guard fetchResult.count > 0 else { return }
+
+        // 等待 SwiftUI confirmationDialog (UIAlertController) 收合動畫完成，避免阻擋 iOS 系統相簿刪除權限對話框彈出
+        try? await Task.sleep(nanoseconds: 350_000_000)
 
         do {
             try await PHPhotoLibrary.shared().performChanges {

@@ -36,7 +36,7 @@ struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var chekiItems: [ChekiItem]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
-    @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = false
+    @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = true
 
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var processingItems: [PhotosPickerItem] = []
@@ -65,8 +65,12 @@ struct LibraryView: View {
 
     init() {}
 
+    private var validChekiItems: [ChekiItem] {
+        chekiItems.filter { !$0.isDeleted && $0.modelContext != nil }
+    }
+
     private var displayedItems: [ChekiItem] {
-        let filtered = filterDualSideOnly ? chekiItems.filter(\.hasBothSides) : chekiItems
+        let filtered = filterDualSideOnly ? validChekiItems.filter(\.hasBothSides) : validChekiItems
         return filtered.sorted {
             sortAscending ? ($0.displayDate < $1.displayDate) : ($0.displayDate > $1.displayDate)
         }
@@ -119,7 +123,7 @@ struct LibraryView: View {
                 Color(.systemBackground)
                     .ignoresSafeArea()
 
-                if chekiItems.isEmpty {
+                if validChekiItems.isEmpty {
                     emptyStateView
                         .padding(.top, 72)
                 } else {
@@ -185,7 +189,7 @@ struct LibraryView: View {
                 if autoSyncToPhotos {
                     Task {
                         await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                            chekiItems,
+                            validChekiItems,
                             modelContext: modelContext,
                             onlyAlbumAndDateIfAlreadySynced: false
                         )
@@ -199,7 +203,7 @@ struct LibraryView: View {
                 if autoSyncToPhotos {
                     Task {
                         await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                            chekiItems,
+                            validChekiItems,
                             modelContext: modelContext,
                             onlyAlbumAndDateIfAlreadySynced: true
                         )
@@ -212,7 +216,7 @@ struct LibraryView: View {
                 guard isEnabled else { return }
                 Task {
                     await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
-                        chekiItems,
+                        validChekiItems,
                         modelContext: modelContext,
                         onlyAlbumAndDateIfAlreadySynced: false
                     )
@@ -226,8 +230,8 @@ struct LibraryView: View {
                     processingOverlay
                 }
             }
-            .navigationDestination(for: ChekiItem.self) { item in
-                ChekiDetailView(item: item)
+            .navigationDestination(for: ChekiDetailRoute.self) { route in
+                ChekiDetailView(itemID: route.itemID)
                     .toolbar(.hidden, for: .tabBar)
             }
             .alert(
@@ -542,7 +546,7 @@ struct LibraryView: View {
                     }
                 }
         } else {
-            NavigationLink(value: item) {
+            NavigationLink(value: ChekiDetailRoute(itemID: item.id)) {
                 AppleLibraryPhotoCell(item: item, cornerRadius: cornerRadius)
             }
             .buttonStyle(.plain)
@@ -585,7 +589,9 @@ struct LibraryView: View {
                 Divider()
 
                 Button(role: .destructive) {
-                    PhotoLibraryManager.shared.deleteItems([item], modelContext: modelContext)
+                    Task { @MainActor in
+                        await PhotoLibraryManager.shared.deleteItemsAsync([item], modelContext: modelContext)
+                    }
                 } label: {
                     Label("刪除此拍立得", systemImage: "trash")
                 }
@@ -660,11 +666,13 @@ struct LibraryView: View {
     }
 
     private func deleteSelectedItems() {
-        let itemsToDelete = chekiItems.filter { selectedItemIDs.contains($0.persistentModelID) }
-        PhotoLibraryManager.shared.deleteItems(itemsToDelete, modelContext: modelContext)
+        let itemsToDelete = validChekiItems.filter { selectedItemIDs.contains($0.persistentModelID) }
         withAnimation {
             isSelectionMode = false
             selectedItemIDs.removeAll()
+        }
+        Task { @MainActor in
+            await PhotoLibraryManager.shared.deleteItemsAsync(itemsToDelete, modelContext: modelContext)
         }
     }
 
@@ -684,7 +692,7 @@ struct LibraryView: View {
 
             if let assetId = item.itemIdentifier,
                !assetId.isEmpty,
-               let existingItem = chekiItems.first(where: { $0.frontAssetIdentifier == assetId }) {
+               let existingItem = validChekiItems.first(where: { $0.frontAssetIdentifier == assetId }) {
                 if existingItem.originalFrontImageData == nil {
                     existingItem.originalFrontImageData = normalizedData
                 }
@@ -723,8 +731,10 @@ private struct AppleLibraryPhotoCell: View {
     let cornerRadius: CGFloat
 
     var body: some View {
+        let isValid = !item.isDeleted && item.modelContext != nil
         ZStack(alignment: .topTrailing) {
-            if let data = item.frontImageData,
+            if isValid,
+               let data = item.frontImageData,
                let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage)
                     .resizable()
@@ -744,7 +754,7 @@ private struct AppleLibraryPhotoCell: View {
                     }
             }
 
-            if item.hasBothSides {
+            if isValid && item.hasBothSides {
                 Image(systemName: "rectangle.portrait.on.rectangle.portrait.fill")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white)
@@ -783,8 +793,12 @@ struct AlbumsRootView: View {
         GridItem(.flexible(), spacing: 12)
     ]
 
+    private var validChekiItems: [ChekiItem] {
+        chekiItems.filter { !$0.isDeleted && $0.modelContext != nil }
+    }
+
     private var uncategorizedItems: [ChekiItem] {
-        chekiItems.filter { $0.idolMember == nil }
+        validChekiItems.filter { $0.idolMember == nil }
     }
 
     /// 取得所有成員（依團體順序與成員順序排列，確保在「成員」模式下完整展開所有團體的成員）
@@ -844,13 +858,13 @@ struct AlbumsRootView: View {
                 BatchPairingView()
             }
             .navigationDestination(for: IdolGroup.self) { group in
-                GroupMembersAlbumView(group: group, allItems: chekiItems)
+                GroupMembersAlbumView(group: group, allItems: validChekiItems)
             }
             .navigationDestination(for: IdolMember.self) { member in
                 AlbumHeroDetailView(
                     primaryTitle: member.albumTitle,
                     secondaryTitle: nil,
-                    items: chekiItems.filter { $0.idolMember?.id == member.id },
+                    items: validChekiItems.filter { $0.idolMember?.id == member.id },
                     defaultMember: member
                 )
             }
@@ -862,8 +876,8 @@ struct AlbumsRootView: View {
                     defaultMember: nil
                 )
             }
-            .navigationDestination(for: ChekiItem.self) { item in
-                ChekiDetailView(item: item)
+            .navigationDestination(for: ChekiDetailRoute.self) { route in
+                ChekiDetailView(itemID: route.itemID)
                     .toolbar(.hidden, for: .tabBar)
             }
         }
@@ -1216,7 +1230,7 @@ struct AlbumHeroDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var allChekiItems: [ChekiItem]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
-    @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = false
+    @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = true
 
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var processingItems: [PhotosPickerItem] = []
@@ -1238,12 +1252,16 @@ struct AlbumHeroDetailView: View {
     @State private var columnCount: Int = 5
     @State private var pinchBaselineColumnCount: Int? = nil
 
+    private var validAllChekiItems: [ChekiItem] {
+        allChekiItems.filter { !$0.isDeleted && $0.modelContext != nil }
+    }
+
     /// 即時從 SwiftData 查詢目前所在相簿的所有拍立得項目，確保從相簿追加或配對歸檔後立即更新目前所在的相簿
     private var liveItems: [ChekiItem] {
         if let defaultMember {
-            return allChekiItems.filter { $0.idolMember?.id == defaultMember.id }
+            return validAllChekiItems.filter { $0.idolMember?.id == defaultMember.id }
         } else {
-            return allChekiItems.filter { $0.idolMember == nil }
+            return validAllChekiItems.filter { $0.idolMember == nil }
         }
     }
 
@@ -1274,7 +1292,7 @@ struct AlbumHeroDetailView: View {
     }
 
     private var heroCoverData: Data? {
-        displayedItems.first?.frontImageData ?? liveItems.first?.frontImageData ?? items.first?.frontImageData
+        displayedItems.first?.frontImageData ?? liveItems.first?.frontImageData
     }
 
     var body: some View {
@@ -1504,9 +1522,11 @@ struct AlbumHeroDetailView: View {
         ) {
             Button("刪除 \(selectedItemIDs.count) 張拍立得", role: .destructive) {
                 let itemsToDelete = displayedItems.filter { selectedItemIDs.contains($0.persistentModelID) }
-                PhotoLibraryManager.shared.deleteItems(itemsToDelete, modelContext: modelContext)
                 isSelectionMode = false
                 selectedItemIDs.removeAll()
+                Task { @MainActor in
+                    await PhotoLibraryManager.shared.deleteItemsAsync(itemsToDelete, modelContext: modelContext)
+                }
             }
             Button("取消", role: .cancel) {}
         } message: {
@@ -1662,7 +1682,7 @@ struct AlbumHeroDetailView: View {
                     Spacer()
 
                     if let firstItem = displayedItems.first {
-                        NavigationLink(value: firstItem) {
+                        NavigationLink(value: ChekiDetailRoute(itemID: firstItem.id)) {
                             Image(systemName: "play.fill")
                                 .font(.subheadline.weight(.bold))
                                 .foregroundStyle(.white)
@@ -1703,7 +1723,7 @@ struct AlbumHeroDetailView: View {
                     }
                 }
         } else {
-            NavigationLink(value: item) {
+            NavigationLink(value: ChekiDetailRoute(itemID: item.id)) {
                 AlbumSquareThumbnailCell(item: item)
             }
             .buttonStyle(.plain)
@@ -1745,7 +1765,9 @@ struct AlbumHeroDetailView: View {
                 Divider()
 
                 Button(role: .destructive) {
-                    PhotoLibraryManager.shared.deleteItems([item], modelContext: modelContext)
+                    Task { @MainActor in
+                        await PhotoLibraryManager.shared.deleteItemsAsync([item], modelContext: modelContext)
+                    }
                 } label: {
                     Label("刪除拍立得", systemImage: "trash")
                 }
@@ -1769,7 +1791,7 @@ struct AlbumHeroDetailView: View {
 
             if let assetId = pickerItem.itemIdentifier,
                !assetId.isEmpty,
-               let existingItem = allChekiItems.first(where: { $0.frontAssetIdentifier == assetId }) {
+               let existingItem = validAllChekiItems.first(where: { $0.frontAssetIdentifier == assetId }) {
                 if existingItem.originalFrontImageData == nil {
                     existingItem.originalFrontImageData = normalizedData
                 }
@@ -1807,10 +1829,12 @@ private struct AlbumSquareThumbnailCell: View {
     let item: ChekiItem
 
     var body: some View {
+        let isValid = !item.isDeleted && item.modelContext != nil
         GeometryReader { geo in
             let size = geo.size.width
             ZStack(alignment: .topTrailing) {
-                if let data = item.frontImageData,
+                if isValid,
+                   let data = item.frontImageData,
                    let uiImage = UIImage(data: data) {
                     Image(uiImage: uiImage)
                         .resizable()
@@ -1827,7 +1851,7 @@ private struct AlbumSquareThumbnailCell: View {
                 ChekiWatermarkOverlayView(compact: true)
                     .frame(width: size, height: size)
 
-                if item.hasBothSides {
+                if isValid && item.hasBothSides {
                     Image(systemName: "rectangle.portrait.on.rectangle.portrait.fill")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.white)
@@ -1868,13 +1892,17 @@ struct LibrarySearchView: View {
         GridItem(.flexible(), spacing: 10)
     ]
 
+    private var validChekiItems: [ChekiItem] {
+        chekiItems.filter { !$0.isDeleted && $0.modelContext != nil }
+    }
+
     private var filteredItems: [ChekiItem] {
-        chekiItems.filter { LibraryView.matchesSearch(item: $0, query: searchText) }
+        validChekiItems.filter { LibraryView.matchesSearch(item: $0, query: searchText) }
     }
 
     private var availableHashtags: [String] {
         var counts: [String: Int] = [:]
-        for item in chekiItems {
+        for item in validChekiItems {
             for rawTag in item.memo?.hashtags ?? [] {
                 let normalized = rawTag.hasPrefix("#") ? String(rawTag.dropFirst()) : rawTag
                 counts[normalized, default: 0] += 1
@@ -1952,7 +1980,7 @@ struct LibrarySearchView: View {
 
                         LazyVGrid(columns: threeColumns, spacing: 10) {
                             ForEach(filteredItems) { item in
-                                NavigationLink(value: item) {
+                                NavigationLink(value: ChekiDetailRoute(itemID: item.id)) {
                                     AppleLibraryPhotoCell(item: item, cornerRadius: 9)
                                 }
                                 .buttonStyle(.plain)
@@ -1988,15 +2016,15 @@ struct LibrarySearchView: View {
             .sheet(isPresented: $showingSettingsSheet) {
                 SettingsView()
             }
-            .navigationDestination(for: ChekiItem.self) { item in
-                ChekiDetailView(item: item)
+            .navigationDestination(for: ChekiDetailRoute.self) { route in
+                ChekiDetailView(itemID: route.itemID)
                     .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(for: IdolMember.self) { member in
                 AlbumHeroDetailView(
                     primaryTitle: member.albumTitle,
                     secondaryTitle: nil,
-                    items: chekiItems.filter { $0.idolMember?.id == member.id },
+                    items: validChekiItems.filter { $0.idolMember?.id == member.id },
                     defaultMember: member
                 )
             }

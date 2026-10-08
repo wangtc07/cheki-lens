@@ -83,11 +83,13 @@ extension IdolMember {
 
     /// 最新一張拍立得（按 displayDate 排序）
     var latestCheki: ChekiItem? {
-        chekiItems.max(by: { $0.displayDate < $1.displayDate })
+        chekiItems
+            .filter { !$0.isDeleted && $0.modelContext != nil }
+            .max(by: { $0.displayDate < $1.displayDate })
     }
 
     /// 完成處理的拍立得數量
     var completedChekiCount: Int {
-        chekiItems.filter { $0.processingState == .completed }.count
+        chekiItems.filter { !$0.isDeleted && $0.modelContext != nil && $0.processingState == .completed }.count
     }
 }

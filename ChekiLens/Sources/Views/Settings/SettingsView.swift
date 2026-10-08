@@ -158,7 +158,7 @@ struct SettingsView: View {
     @AppStorage("dailyFreeQuotaUsedCount") private var dailyFreeQuotaUsedCount: Int = 0
 
     // MARK: 第 1 組：相簿雙向同步與時間軸策略
-    @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = false
+    @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = true
     @AppStorage("createGroupMemberAlbumsInPhotos") private var createGroupMemberAlbums: Bool = true
     @AppStorage("overwriteExifDateWithOCR") private var overwriteExifDateWithOCR: Bool = true
     @AppStorage("backsideTimelineStrategy") private var backsideTimelineStrategyRaw: String = BacksideTimelineStrategy.sameSecond.rawValue
