@@ -1,5 +1,79 @@
 import SwiftUI
+import UIKit
 import Foundation
+
+// MARK: - NavigationChromeState (控制單張檢視與多選模式時隱藏底部 TabView 導覽列與搜尋鈕)
+
+@MainActor
+@Observable
+final class NavigationChromeState {
+    static let shared = NavigationChromeState()
+
+    private(set) var activeDetailIDs: Set<UUID> = []
+    private(set) var activeSelectionIDs: Set<UUID> = []
+
+    var shouldHideMainTabBar: Bool {
+        !activeDetailIDs.isEmpty || !activeSelectionIDs.isEmpty
+    }
+
+    func registerDetail(_ id: UUID) {
+        activeDetailIDs.insert(id)
+        syncSystemTabBarVisibility()
+    }
+
+    func unregisterDetail(_ id: UUID) {
+        activeDetailIDs.remove(id)
+        syncSystemTabBarVisibility()
+    }
+
+    func setSelectionMode(_ isSelecting: Bool, id: UUID) {
+        if isSelecting {
+            activeSelectionIDs.insert(id)
+        } else {
+            activeSelectionIDs.remove(id)
+        }
+        syncSystemTabBarVisibility()
+    }
+
+    func syncSystemTabBarVisibility() {
+        let hidden = shouldHideMainTabBar
+        applyTabBarHidden(hidden)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.applyTabBarHidden(self.shouldHideMainTabBar)
+        }
+    }
+
+    private func applyTabBarHidden(_ hidden: Bool) {
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows {
+                if let tabBarController = Self.findTabBarController(in: window.rootViewController) {
+                    if #available(iOS 18.0, *) {
+                        tabBarController.setTabBarHidden(hidden, animated: false)
+                    }
+                    tabBarController.tabBar.isHidden = hidden
+                }
+            }
+        }
+    }
+
+    private static func findTabBarController(in vc: UIViewController?) -> UITabBarController? {
+        guard let vc else { return nil }
+        if let tab = vc as? UITabBarController {
+            return tab
+        }
+        for child in vc.children {
+            if let found = findTabBarController(in: child) {
+                return found
+            }
+        }
+        if let presented = vc.presentedViewController {
+            return findTabBarController(in: presented)
+        }
+        return nil
+    }
+}
 
 // MARK: - AppLanguageMode (Task 6.2: 繁體中文 / 日本語 語系管理與系統自動匹配)
 

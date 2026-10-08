@@ -60,6 +60,7 @@ struct ChekiDetailView: View {
 
     /// 同步至系統相簿提示
     @State private var syncStatusToast: String? = nil
+    @State private var detailViewInstanceID = UUID()
 
     init(item: ChekiItem) {
         self.item = item
@@ -162,6 +163,12 @@ struct ChekiDetailView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
+        .onAppear {
+            NavigationChromeState.shared.registerDetail(detailViewInstanceID)
+        }
+        .onDisappear {
+            NavigationChromeState.shared.unregisterDetail(detailViewInstanceID)
+        }
         .photosPicker(
             isPresented: $isShowingBacksidePicker,
             selection: $backsidePickerItem,
@@ -299,7 +306,7 @@ struct ChekiDetailView: View {
                     trigger3DFlip()
                 } label: {
                     Label(
-                        isShowingBack ? "翻回正面相片" : "3D 翻轉查看背面",
+                        LocalizedStringKey(isShowingBack ? "翻回正面相片" : "3D 翻轉查看背面"),
                         systemImage: "rectangle.portrait.rotate"
                     )
                 }
@@ -311,7 +318,7 @@ struct ChekiDetailView: View {
                         showingInAppBacksidePicker = true
                     } label: {
                         Label(
-                            currentItem.hasBothSides ? "從 App 內替換背面照片" : "從 App 內選取背面照片",
+                            LocalizedStringKey(currentItem.hasBothSides ? "從 App 內替換背面照片" : "從 App 內選取背面照片"),
                             systemImage: "square.grid.2x2"
                         )
                     }
@@ -320,7 +327,7 @@ struct ChekiDetailView: View {
                         isShowingBacksidePicker = true
                     } label: {
                         Label(
-                            currentItem.hasBothSides ? "從系統相簿替換背面照片" : "從系統相簿選取背面照片",
+                            LocalizedStringKey(currentItem.hasBothSides ? "從系統相簿替換背面照片" : "從系統相簿選取背面照片"),
                             systemImage: "photo.badge.plus"
                         )
                     }
@@ -613,7 +620,7 @@ struct ChekiDetailView: View {
             HStack(spacing: 3) {
                 Image(systemName: "rectangle.portrait.rotate")
                     .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
-                Text(isBackFace ? "背面 · 翻面" : (pageItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面"))
+                Text(LocalizedStringKey(isBackFace ? "背面 · 翻面" : (pageItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面")))
                     .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
             }
             .foregroundStyle(.white)

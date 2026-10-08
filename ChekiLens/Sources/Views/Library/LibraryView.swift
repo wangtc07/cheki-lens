@@ -43,6 +43,8 @@ struct LibraryView: View {
     @State private var isProcessing: Bool = false
 
     @State private var isSelectionMode: Bool = false
+    @State private var selectionViewID = UUID()
+    private var chromeState = NavigationChromeState.shared
     @State private var selectedItemIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm: Bool = false
 
@@ -150,7 +152,10 @@ struct LibraryView: View {
                 topFloatingHeaderBar
             }
             .toolbar(.hidden, for: .navigationBar)
-            .toolbar(isSelectionMode ? .hidden : .visible, for: .tabBar)
+            .toolbar((isSelectionMode || chromeState.shouldHideMainTabBar) ? .hidden : .visible, for: .tabBar)
+            .onChange(of: isSelectionMode) { _, newValue in
+                NavigationChromeState.shared.setSelectionMode(newValue, id: selectionViewID)
+            }
             .safeAreaInset(edge: .bottom) {
                 if isSelectionMode {
                     selectionBottomBar
@@ -223,6 +228,7 @@ struct LibraryView: View {
             }
             .navigationDestination(for: ChekiItem.self) { item in
                 ChekiDetailView(item: item)
+                    .toolbar(.hidden, for: .tabBar)
             }
             .alert(
                 "iOS 系統相簿測試相片",
@@ -770,6 +776,7 @@ struct AlbumsRootView: View {
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingBatchPairingSheet: Bool = false
+    private var chromeState = NavigationChromeState.shared
 
     private let albumColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -826,6 +833,7 @@ struct AlbumsRootView: View {
                     .zIndex(10)
             }
             .toolbar(.hidden, for: .navigationBar)
+            .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
             .sheet(isPresented: $showingQuickCreateSheet) {
                 QuickCreateIdolSheet()
             }
@@ -856,6 +864,7 @@ struct AlbumsRootView: View {
             }
             .navigationDestination(for: ChekiItem.self) { item in
                 ChekiDetailView(item: item)
+                    .toolbar(.hidden, for: .tabBar)
             }
         }
     }
@@ -1214,6 +1223,8 @@ struct AlbumHeroDetailView: View {
     @State private var isProcessing: Bool = false
 
     @State private var isSelectionMode: Bool = false
+    @State private var selectionViewID = UUID()
+    private var chromeState = NavigationChromeState.shared
     @State private var selectedItemIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm: Bool = false
     @State private var showingSettingsSheet: Bool = false
@@ -1305,7 +1316,13 @@ struct AlbumHeroDetailView: View {
         .background(Color(.systemBackground))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbar(isSelectionMode ? .hidden : .visible, for: .tabBar)
+        .toolbar((isSelectionMode || chromeState.shouldHideMainTabBar) ? .hidden : .visible, for: .tabBar)
+        .onChange(of: isSelectionMode) { _, newValue in
+            NavigationChromeState.shared.setSelectionMode(newValue, id: selectionViewID)
+        }
+        .onDisappear {
+            NavigationChromeState.shared.setSelectionMode(false, id: selectionViewID)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 10) {
@@ -1838,6 +1855,7 @@ struct LibrarySearchView: View {
 
     @State private var searchText: String = ""
     @State private var showingSettingsSheet: Bool = false
+    private var chromeState = NavigationChromeState.shared
 
     private let twoColumns = [
         GridItem(.flexible(), spacing: 12),
@@ -1948,6 +1966,7 @@ struct LibrarySearchView: View {
             .background(Color(.systemBackground))
             .navigationTitle("搜尋")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),
@@ -1971,6 +1990,7 @@ struct LibrarySearchView: View {
             }
             .navigationDestination(for: ChekiItem.self) { item in
                 ChekiDetailView(item: item)
+                    .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(for: IdolMember.self) { member in
                 AlbumHeroDetailView(

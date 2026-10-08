@@ -14,6 +14,7 @@ struct ContentView: View {
     @AppStorage("appAppearanceMode") private var appAppearanceModeRaw: String = AppAppearanceMode.system.rawValue
     @AppStorage("appLanguageMode") private var appLanguageModeRaw: String = AppLanguageMode.system.rawValue
     @State private var selectedTab: MainLibraryTab = .allPhotos
+    private var chromeState = NavigationChromeState.shared
 
     var body: some View {
         Group {
@@ -21,16 +22,20 @@ struct ContentView: View {
                 TabView(selection: $selectedTab) {
                     Tab("全部", systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
                         LibraryView()
+                            .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
                     }
 
                     Tab("相冊", systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
                         AlbumsRootView()
+                            .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
                     }
 
                     Tab("搜尋", systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
                         LibrarySearchView()
+                            .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
                     }
                 }
+                .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
             } else {
                 OnboardingView()
             }
