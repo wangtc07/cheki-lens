@@ -42,10 +42,14 @@ struct StagingChekiPhoto: Identifiable, Equatable {
     var croppedUIImage: UIImage? = nil
     /// 背景預先偵測出的正規化四頂點座標 JSON (`[TL, TR, BR, BL]`)
     var normalizedCornersJSON: String? = nil
-    /// 背景預先辨識出的手寫日期 OCR 結果
+    /// 背景預先辨識出的手寫日期 OCR 結果（若判斷無日期或使用者設為空白則為 nil）
     var detectedOCRDate: Date? = nil
+    /// 使用者是否已手動設定或清除此相片的拍攝日期
+    var hasManuallyModifiedDate: Bool = false
     /// 背景預先辨識出的具體相紙規格（Instax Mini / Square / Wide）
     var resolvedFilmFormat: FilmFormat = .mini
+    /// 使用者是否已手動指定此相片的相紙規格
+    var hasManuallyModifiedFormat: Bool = false
     /// 是否正在背景執行邊界偵測
     var isDetectingBoundary: Bool = false
     /// 是否已完成背景邊界偵測
@@ -61,6 +65,25 @@ struct StagingChekiPhoto: Identifiable, Equatable {
         return croppedUIImage ?? uiImage
     }
 
+    /// 卡片右上角顯示用的簡短相紙規格名稱（Mini / Square / Wide）
+    var shortFormatBadgeText: String {
+        switch resolvedFilmFormat.concreteFormat {
+        case .mini: return "Mini"
+        case .square: return "Square"
+        case .wide: return "Wide"
+        case .auto: return "Mini"
+        }
+    }
+
+    /// 卡片右上角顯示用的辨識日期字串（若無辨識出日期則回傳 nil，顯示空白）
+    var formattedDetectedDateString: String? {
+        guard let date = detectedOCRDate else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy.MM.dd"
+        return formatter.string(from: date)
+    }
+
     static func == (lhs: StagingChekiPhoto, rhs: StagingChekiPhoto) -> Bool {
         lhs.id == rhs.id &&
         lhs.sequenceNumber == rhs.sequenceNumber &&
@@ -73,7 +96,9 @@ struct StagingChekiPhoto: Identifiable, Equatable {
         lhs.isRevertedToOriginal == rhs.isRevertedToOriginal &&
         lhs.normalizedCornersJSON == rhs.normalizedCornersJSON &&
         lhs.detectedOCRDate == rhs.detectedOCRDate &&
+        lhs.hasManuallyModifiedDate == rhs.hasManuallyModifiedDate &&
         lhs.resolvedFilmFormat == rhs.resolvedFilmFormat &&
+        lhs.hasManuallyModifiedFormat == rhs.hasManuallyModifiedFormat &&
         lhs.croppedImageData?.count == rhs.croppedImageData?.count
     }
 }
@@ -124,6 +149,40 @@ struct ChekiPairingSlot: Identifiable, Equatable {
 
     var isPaired: Bool {
         backPhoto != nil
+    }
+
+    var sequenceSummaryTitle: String {
+        if let back = backPhoto {
+            return "#\(frontPhoto.sequenceNumber) + #\(back.sequenceNumber)"
+        }
+        return "#\(frontPhoto.sequenceNumber)"
+    }
+
+    /// 此組拍立得目前採用的具體相紙規格（Instax Mini / Square / Wide）
+    var concreteFilmFormat: FilmFormat {
+        frontPhoto.resolvedFilmFormat.concreteFormat
+    }
+
+    /// 此組拍立得右上角顯示的簡短相紙規格名稱（Mini / Square / Wide）
+    var shortFormatBadgeText: String {
+        frontPhoto.shortFormatBadgeText
+    }
+
+    /// 此組拍立得辨識或手動設定的日期（正面優先，若正面無日期則取背面；若皆無則為 nil 顯示空白）
+    var effectiveOCRDate: Date? {
+        if frontPhoto.hasManuallyModifiedDate {
+            return frontPhoto.detectedOCRDate
+        }
+        return frontPhoto.detectedOCRDate ?? backPhoto?.detectedOCRDate
+    }
+
+    /// 此組拍立得右上角顯示的日期字串（若無日期則回傳 nil，顯示空白）
+    var formattedDetectedDateString: String? {
+        guard let date = effectiveOCRDate else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy.MM.dd"
+        return formatter.string(from: date)
     }
 
     /// Vision 雙正面防呆警示：當正反兩張都被 AI 判定為「正面」時觸發警告
@@ -190,6 +249,8 @@ struct BatchPairingView: View {
     @State private var defaultFallbackMember: IdolMember? = nil
     @State private var selectedFilmFormat: FilmFormat = .auto
     @State private var showingQuickCreateMemberSheet: Bool = false
+    /// 點選照片格右上角的「相紙規格 / 判斷日期」時彈出的單張規格與日期修改面板目標 Slot ID
+    @State private var editingSlotForFormatAndDateID: UUID? = nil
 
     // 載入與處理狀態
     @State private var isLoadingPhotos: Bool = false
@@ -396,6 +457,14 @@ struct BatchPairingView: View {
             .sheet(isPresented: $showingQuickCreateMemberSheet) {
                 QuickCreateIdolSheet()
             }
+            .sheet(
+                isPresented: Binding(
+                    get: { editingSlotForFormatAndDateID != nil },
+                    set: { if !$0 { editingSlotForFormatAndDateID = nil } }
+                )
+            ) {
+                formatAndDateEditorSheetContent
+            }
             .onChange(of: idolMembers.count) { oldCount, newCount in
                 // 當使用者透過「新增成員」建立新成員後，自動將最新建立的成員加入上方多選目標中
                 if newCount > oldCount, let newestMember = idolMembers.last {
@@ -456,6 +525,38 @@ struct BatchPairingView: View {
         }
     }
 
+    @ViewBuilder
+    private var formatAndDateEditorSheetContent: some View {
+        if let targetID = editingSlotForFormatAndDateID,
+           let slot = slots.first(where: { $0.id == targetID }) {
+            SlotFormatAndDateEditorSheet(
+                slotSequenceTitle: slot.sequenceSummaryTitle,
+                frontThumbnail: slot.frontPhoto.displayUIImage,
+                currentFormat: slot.concreteFilmFormat,
+                currentOCRDate: slot.effectiveOCRDate,
+                totalSlotCount: slots.count,
+                onSelectFormat: { newFormat in
+                    Task {
+                        await updateSlotFilmFormat(slotID: targetID, format: newFormat)
+                    }
+                },
+                onApplyFormatToAll: { newFormat in
+                    Task {
+                        await updateAllSlotsFilmFormat(newFormat)
+                    }
+                },
+                onUpdateDate: { newDate in
+                    updateSlotOCRDate(slotID: targetID, date: newDate)
+                },
+                onApplyDateToAll: { newDate in
+                    updateAllSlotsOCRDate(newDate)
+                }
+            )
+            .presentationDetents([.height(500), .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
     // MARK: - 1. 格狀配對工作台主視圖 (Album-Style Grid + Playing-Card Fan)
 
     private var slotGridWorkbenchView: some View {
@@ -466,7 +567,7 @@ struct BatchPairingView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    // 1. 多人歸檔成員（多層選擇 Multiple Select + 全部套用 / 選擇套用）與相紙規格設定卡
+                    // 1. 多人歸檔成員設定卡（多層選擇 Multiple Select + 全部套用 / 選擇套用）
                     multiMemberAndFormatHeaderCard
 
                     // 2. Vision 防呆警示橫幅（若有雙正面或正反顛倒）
@@ -528,7 +629,7 @@ struct BatchPairingView: View {
         }
     }
 
-    // MARK: - 2. 多層多選歸檔成員與規格設定卡 (Hierarchical Multiple-Select + Apply All / Select to Apply)
+    // MARK: - 2. 多層多選歸檔成員設定卡 (Hierarchical Multiple-Select + Apply All / Select to Apply)
 
     private var multiMemberAndFormatHeaderCard: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -572,7 +673,7 @@ struct BatchPairingView: View {
             }
 
             // 第二列：成員選擇移至下方
-            // - 沒有選擇時：顯示「選擇成員 ⌄」下拉選單膠囊
+            // - 沒有選擇時：顯示「未分類 · 選擇成員 ⌄」下拉選單膠囊
             // - 有選擇時：每個已選成員顯示為下拉選單膠囊框（直接點選可用多層下拉選單重選成員，右邊保持 X 按鈕取消），後面接著未選擇的下拉選單（可多選追加）
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -583,22 +684,6 @@ struct BatchPairingView: View {
                     // 後方接著未選擇的多層下拉選單膠囊（未選擇時作為主選單，已選擇時可繼續多選追加成員）
                     unselectedMemberDropdownCapsule
                 }
-            }
-
-            Divider()
-
-            // 第三列：相紙規格選擇
-            HStack {
-                Label("相紙規格", systemImage: "aspectratio")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Picker("相紙規格", selection: $selectedFilmFormat) {
-                    ForEach(FilmFormat.allCases, id: \.self) { format in
-                        Text(format.displayName).tag(format)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
             }
         }
         .padding(14)
@@ -930,9 +1015,9 @@ struct BatchPairingView: View {
             .rotationEffect(.degrees(-8), anchor: .bottom)
             .offset(x: -16, y: 0)
 
-            // 3. 頂部左右控制角標：左側序號 (#1+#2)，右側一鍵「拆開」按鈕（照片多選模式時隱藏拆開鈕以免誤觸）
+            // 3. 頂部左右控制角標：左側序號 (#1+#2)，右側依序顯示「拆開」、「相紙規格」、「判斷日期（無日期則空白）」
             VStack {
-                HStack {
+                HStack(alignment: .top) {
                     Text("#\(frontPhoto.sequenceNumber)+#\(backPhoto.sequenceNumber)")
                         .font(.system(size: 10, weight: .bold).monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -943,30 +1028,35 @@ struct BatchPairingView: View {
                     Spacer()
 
                     if !isSelectingPhotosToApply {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            withAnimation(.snappy(duration: 0.24)) {
-                                unpairSlot(id: slot.id)
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                withAnimation(.snappy(duration: 0.24)) {
+                                    unpairSlot(id: slot.id)
+                                }
+                            } label: {
+                                HStack(spacing: 2) {
+                                    Image(systemName: "rectangle.on.rectangle.slash")
+                                        .font(.system(size: 9, weight: .bold))
+                                    Text("拆開")
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .foregroundStyle(slot.isDoubleFrontWarning ? .white : .primary)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3.5)
+                                .background(
+                                    slot.isDoubleFrontWarning
+                                        ? AnyShapeStyle(Color.orange)
+                                        : AnyShapeStyle(.ultraThinMaterial),
+                                    in: Capsule()
+                                )
                             }
-                        } label: {
-                            HStack(spacing: 2) {
-                                Image(systemName: "rectangle.on.rectangle.slash")
-                                    .font(.system(size: 9, weight: .bold))
-                                Text("拆開")
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                            .foregroundStyle(slot.isDoubleFrontWarning ? .white : .primary)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3.5)
-                            .background(
-                                slot.isDoubleFrontWarning
-                                    ? AnyShapeStyle(Color.orange)
-                                    : AnyShapeStyle(.ultraThinMaterial),
-                                in: Capsule()
-                            )
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("解除正反面配對")
+
+                            // 右上角下方：相紙規格 ＋ 判斷日期（無日期則空白），點擊開啟修改面板
+                            slotFormatAndDateBadgesButton(for: slot)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("解除正反面配對")
                     }
                 }
                 .padding(.horizontal, 8)
@@ -1058,7 +1148,7 @@ struct BatchPairingView: View {
                 .shadow(color: .black.opacity(0.22), radius: 7, x: 0, y: 3)
 
             VStack {
-                HStack {
+                HStack(alignment: .top) {
                     Text("#\(photo.sequenceNumber)")
                         .font(.system(size: 10, weight: .bold).monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -1069,23 +1159,29 @@ struct BatchPairingView: View {
                     Spacer()
 
                     if !isSelectingPhotosToApply {
-                        HStack(spacing: 3) {
-                            if photo.isDetectingBoundary {
-                                ProgressView()
-                                    .controlSize(.mini)
-                                    .tint(.white)
-                                    .scaleEffect(0.7)
+                        VStack(alignment: .trailing, spacing: 4) {
+                            // 1. 右上角最上方：正面 / 背面
+                            HStack(spacing: 3) {
+                                if photo.isDetectingBoundary {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                        .tint(.white)
+                                        .scaleEffect(0.7)
+                                }
+                                Text(photo.detectedSide.rawValue)
+                                    .font(.system(size: 9.5, weight: .bold))
+                                    .foregroundStyle(.white)
                             }
-                            Text(photo.detectedSide.rawValue)
-                                .font(.system(size: 9.5, weight: .bold))
-                                .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2.5)
+                            .background(
+                                photo.detectedSide == .likelyBack ? Color.purple.opacity(0.85) : Color.black.opacity(0.58),
+                                in: Capsule()
+                            )
+
+                            // 2. 正面下方：相紙規格 ＋ 3. 相紙規格下方：判斷日期（無日期則顯示空白）
+                            slotFormatAndDateBadgesButton(for: slot)
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2.5)
-                        .background(
-                            photo.detectedSide == .likelyBack ? Color.purple.opacity(0.85) : Color.black.opacity(0.58),
-                            in: Capsule()
-                        )
                     }
                 }
                 .padding(.horizontal, 8)
@@ -1118,6 +1214,49 @@ struct BatchPairingView: View {
                 }
             }
         }
+    }
+
+    /// 每個相片格右上角（位於「正面」正下方）的「相紙規格」與「判斷日期」垂直疊加膠囊
+    /// - 判斷有日期時顯示於相紙規格下方；判斷沒有日期時顯示空白
+    /// - 擴大點擊熱區並整合為單一觸控區，點選後彈出大尺寸半頁面板 (`SlotFormatAndDateEditorSheet`) 供輕鬆修改相紙規格與日期
+    private func slotFormatAndDateBadgesButton(for slot: ChekiPairingSlot) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            editingSlotForFormatAndDateID = slot.id
+        } label: {
+            VStack(alignment: .trailing, spacing: 3.5) {
+                // 1. 相紙規格膠囊（顯示於「正面」下方）
+                HStack(spacing: 2.5) {
+                    Text(slot.shortFormatBadgeText)
+                        .font(.system(size: 9.5, weight: .bold))
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .opacity(0.7)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 6.5)
+                .padding(.vertical, 2.5)
+                .background(.ultraThinMaterial, in: Capsule())
+                .shadow(color: .black.opacity(0.14), radius: 2, x: 0, y: 1)
+
+                // 2. 判斷的日期膠囊（顯示於「相紙規格」下方；若判斷沒有日期則顯示空白）
+                if let dateString = slot.formattedDetectedDateString {
+                    Text(dateString)
+                        .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .shadow(color: .black.opacity(0.14), radius: 2, x: 0, y: 1)
+                }
+            }
+            // 向左與向下擴展透明點擊熱區（避免膠囊較小不好點選，且不會誤觸底層配對）
+            .padding(.leading, 14)
+            .padding(.bottom, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("修改相紙規格與拍攝日期")
     }
 
     /// 每組拍立得卡片正下方的「多層多選成員膠囊」(支援依團體 ➔ 成員複選，最後可新增成員)
@@ -1251,6 +1390,12 @@ struct BatchPairingView: View {
 
     @ViewBuilder
     private func slotContextMenu(for slot: ChekiPairingSlot) -> some View {
+        Button {
+            editingSlotForFormatAndDateID = slot.id
+        } label: {
+            Label("修改相紙規格與日期…", systemImage: "calendar.badge.clock")
+        }
+
         Menu {
             ForEach(idolGroups) { group in
                 let groupMembers = idolMembers.filter { $0.group?.id == group.id }
@@ -2112,6 +2257,133 @@ struct BatchPairingView: View {
         }
     }
 
+    @MainActor
+    private func updateSlotFilmFormat(slotID: UUID, format: FilmFormat) async {
+        let concrete = format.concreteFormat
+        guard let slotIdx = slots.firstIndex(where: { $0.id == slotID }) else { return }
+        let frontID = slots[slotIdx].frontPhoto.id
+        let backID = slots[slotIdx].backPhoto?.id
+        let targetIDs = [frontID, backID].compactMap { $0 }
+
+        withAnimation(.snappy(duration: 0.2)) {
+            slots[slotIdx].frontPhoto.resolvedFilmFormat = concrete
+            slots[slotIdx].frontPhoto.hasManuallyModifiedFormat = true
+            if slots[slotIdx].backPhoto != nil {
+                slots[slotIdx].backPhoto?.resolvedFilmFormat = concrete
+                slots[slotIdx].backPhoto?.hasManuallyModifiedFormat = true
+            }
+            for id in targetIDs {
+                if let idx = allPhotos.firstIndex(where: { $0.id == id }) {
+                    allPhotos[idx].resolvedFilmFormat = concrete
+                    allPhotos[idx].hasManuallyModifiedFormat = true
+                }
+            }
+        }
+
+        let visionManager = VisionManager()
+        let chekiFormat = Self.toChekiFilmFormat(concrete)
+
+        for photoID in targetIDs {
+            guard let photo = findPhoto(by: photoID),
+                  let cornersJSON = photo.normalizedCornersJSON,
+                  let normCorners = ChekiItem.decodeNormalizedCorners(from: cornersJSON),
+                  let cgImage = photo.uiImage.cgImage else { continue }
+
+            let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
+            let pixelCorners = normCorners.map { pt in
+                CGPoint(x: pt.x * imgSize.width, y: pt.y * imgSize.height)
+            }
+            let detection = DetectionResult(
+                corners: pixelCorners,
+                method: .visionNative,
+                confidence: 1.0,
+                imageSize: imgSize
+            )
+            if let cropRes = try? await visionManager.perspectiveCorrect(
+                image: cgImage,
+                corners: pixelCorners,
+                detection: detection,
+                format: chekiFormat
+            ) {
+                let uiImg = UIImage(cgImage: cropRes.cgImage)
+                let jpeg = uiImg.jpegData(compressionQuality: 0.92)
+                withAnimation(.snappy(duration: 0.2)) {
+                    updatePhotoBoundaryResult(
+                        id: photoID,
+                        croppedData: jpeg,
+                        croppedImage: uiImg,
+                        cornersJSON: cornersJSON,
+                        ocrDate: photo.detectedOCRDate,
+                        resolvedFormat: concrete
+                    )
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func updateAllSlotsFilmFormat(_ format: FilmFormat) async {
+        let concrete = format.concreteFormat
+        selectedFilmFormat = concrete
+        withAnimation(.snappy(duration: 0.2)) {
+            for i in allPhotos.indices {
+                allPhotos[i].resolvedFilmFormat = concrete
+                allPhotos[i].hasManuallyModifiedFormat = true
+            }
+            for i in slots.indices {
+                slots[i].frontPhoto.resolvedFilmFormat = concrete
+                slots[i].frontPhoto.hasManuallyModifiedFormat = true
+                if slots[i].backPhoto != nil {
+                    slots[i].backPhoto?.resolvedFilmFormat = concrete
+                    slots[i].backPhoto?.hasManuallyModifiedFormat = true
+                }
+            }
+        }
+        await reapplyFilmFormatInBackground(concrete)
+    }
+
+    @MainActor
+    private func updateSlotOCRDate(slotID: UUID, date: Date?) {
+        guard let slotIdx = slots.firstIndex(where: { $0.id == slotID }) else { return }
+        let frontID = slots[slotIdx].frontPhoto.id
+        let backID = slots[slotIdx].backPhoto?.id
+
+        withAnimation(.snappy(duration: 0.2)) {
+            slots[slotIdx].frontPhoto.detectedOCRDate = date
+            slots[slotIdx].frontPhoto.hasManuallyModifiedDate = true
+            if slots[slotIdx].backPhoto != nil {
+                slots[slotIdx].backPhoto?.detectedOCRDate = date
+                slots[slotIdx].backPhoto?.hasManuallyModifiedDate = true
+            }
+            if let fIdx = allPhotos.firstIndex(where: { $0.id == frontID }) {
+                allPhotos[fIdx].detectedOCRDate = date
+                allPhotos[fIdx].hasManuallyModifiedDate = true
+            }
+            if let bID = backID, let bIdx = allPhotos.firstIndex(where: { $0.id == bID }) {
+                allPhotos[bIdx].detectedOCRDate = date
+                allPhotos[bIdx].hasManuallyModifiedDate = true
+            }
+        }
+    }
+
+    @MainActor
+    private func updateAllSlotsOCRDate(_ date: Date?) {
+        withAnimation(.snappy(duration: 0.2)) {
+            for i in allPhotos.indices {
+                allPhotos[i].detectedOCRDate = date
+                allPhotos[i].hasManuallyModifiedDate = true
+            }
+            for i in slots.indices {
+                slots[i].frontPhoto.detectedOCRDate = date
+                slots[i].frontPhoto.hasManuallyModifiedDate = true
+                if slots[i].backPhoto != nil {
+                    slots[i].backPhoto?.detectedOCRDate = date
+                    slots[i].backPhoto?.hasManuallyModifiedDate = true
+                }
+            }
+        }
+    }
+
     private static func toChekiFilmFormat(_ format: FilmFormat) -> ChekiFilmFormat {
         switch format {
         case .mini: return .mini
@@ -2172,8 +2444,12 @@ struct BatchPairingView: View {
             allPhotos[idx].croppedImageData = croppedData
             allPhotos[idx].croppedUIImage = croppedImage
             allPhotos[idx].normalizedCornersJSON = cornersJSON
-            allPhotos[idx].detectedOCRDate = ocrDate
-            allPhotos[idx].resolvedFilmFormat = resolvedFormat
+            if !allPhotos[idx].hasManuallyModifiedDate {
+                allPhotos[idx].detectedOCRDate = ocrDate
+            }
+            if !allPhotos[idx].hasManuallyModifiedFormat {
+                allPhotos[idx].resolvedFilmFormat = resolvedFormat
+            }
             allPhotos[idx].isDetectingBoundary = false
             allPhotos[idx].hasCompletedBoundaryDetection = true
         }
@@ -2182,8 +2458,12 @@ struct BatchPairingView: View {
                 slots[i].frontPhoto.croppedImageData = croppedData
                 slots[i].frontPhoto.croppedUIImage = croppedImage
                 slots[i].frontPhoto.normalizedCornersJSON = cornersJSON
-                slots[i].frontPhoto.detectedOCRDate = ocrDate
-                slots[i].frontPhoto.resolvedFilmFormat = resolvedFormat
+                if !slots[i].frontPhoto.hasManuallyModifiedDate {
+                    slots[i].frontPhoto.detectedOCRDate = ocrDate
+                }
+                if !slots[i].frontPhoto.hasManuallyModifiedFormat {
+                    slots[i].frontPhoto.resolvedFilmFormat = resolvedFormat
+                }
                 slots[i].frontPhoto.isDetectingBoundary = false
                 slots[i].frontPhoto.hasCompletedBoundaryDetection = true
             }
@@ -2191,8 +2471,12 @@ struct BatchPairingView: View {
                 slots[i].backPhoto?.croppedImageData = croppedData
                 slots[i].backPhoto?.croppedUIImage = croppedImage
                 slots[i].backPhoto?.normalizedCornersJSON = cornersJSON
-                slots[i].backPhoto?.detectedOCRDate = ocrDate
-                slots[i].backPhoto?.resolvedFilmFormat = resolvedFormat
+                if !(slots[i].backPhoto?.hasManuallyModifiedDate ?? false) {
+                    slots[i].backPhoto?.detectedOCRDate = ocrDate
+                }
+                if !(slots[i].backPhoto?.hasManuallyModifiedFormat ?? false) {
+                    slots[i].backPhoto?.resolvedFilmFormat = resolvedFormat
+                }
                 slots[i].backPhoto?.isDetectingBoundary = false
                 slots[i].backPhoto?.hasCompletedBoundaryDetection = true
             }
@@ -2224,23 +2508,27 @@ struct BatchPairingView: View {
         return (.likelyFront, "Vision 偵測為拍立得正面影像窗")
     }
 
-    // MARK: - 9. 豐富擬真測試資料集（8 張涵蓋多位不同成員、正反撲克牌配對、⚠️ 雙正面防呆警示、⚠️ 正反顛倒）
+    // MARK: - 9. 豐富擬真測試資料集（8 張涵蓋多位不同成員、正反撲克牌配對、⚠️ 雙正面防呆警示、⚠️ 正反顛倒、有日期與無日期空白對照）
 
     private func loadSimulatedBatchSample() {
         let sampleSpecs: [(seq: Int, title: String, side: DetectedPhotoSide, note: String, colors: [UIColor], isBackLook: Bool, dateText: String, memberIdx: Int)] = [
-            // Pair 1 (成員 0): 正常正反配對 (#1 正面 + #2 背面)
+            // Pair 1 (成員 0): 正常正反配對 (#1 正面 + #2 背面，有日期)
             (1, "夏巡舞台服特寫", .likelyFront, "Vision 偵測到正面人物主體", [.systemIndigo, .systemPink], false, "2026.09.24", 0),
             (2, "夏巡簽名背面",   .likelyBack,  "Vision 偵測到 instax 背面標記", [.darkGray, .black], true, "2026.09.24", 0),
-            // Pair 2 (成員 1 & 2): ⚠️ 雙正面防呆警示案例 (#3 正面 + #4 正面，拆開後各自歸屬不同成員)
+            // Pair 2 (成員 1 & 2): ⚠️ 雙正面防呆警示案例 (#3 有日期 + #4 無日期空白)
             (3, "浴衣造型正面",   .likelyFront, "Vision 偵測到正面人物主體", [.systemTeal, .systemBlue], false, "2026.09.28", 1),
-            (4, "生誕祭私服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemOrange, .systemPink], false, "2026.09.29", 2),
+            (4, "生誕祭私服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemOrange, .systemPink], false, "", 2),
             // Pair 3 (成員 2): ⚠️ 正反順序顛倒警示案例 (#5 背面 + #6 正面)
             (5, "握手會背面留言", .likelyBack,  "Vision 偵測到 instax 背面標記", [.systemGray, .darkGray], true, "2026.10.02", 2),
             (6, "握手會比愛心正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPurple, .systemIndigo], false, "2026.10.02", 2),
-            // Pair 4 (成員 3): 正常正反配對 (#7 正面 + #8 背面)
-            (7, "五週年紀念服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPink, .systemRed], false, "2026.10.05", 3),
-            (8, "五週年感謝留言背面", .likelyBack, "Vision 偵測到 instax 背面標記", [.darkGray, .systemIndigo], true, "2026.10.05", 3)
+            // Pair 4 (成員 3): 正常正反配對 (#7 正面 + #8 背面，無日期空白)
+            (7, "五週年紀念服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPink, .systemRed], false, "", 3),
+            (8, "五週年感謝留言背面", .likelyBack, "Vision 偵測到 instax 背面標記", [.darkGray, .systemIndigo], true, "", 3)
         ]
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.dateFormat = "yyyy.MM.dd"
 
         var generated: [StagingChekiPhoto] = []
         var assignments: [UUID: [IdolMember]] = [:]
@@ -2255,6 +2543,7 @@ struct BatchPairingView: View {
             )
             let data = img.jpegData(compressionQuality: 0.9) ?? Data()
             let photoID = UUID()
+            let parsedDate = spec.dateText.isEmpty ? nil : dateFormatter.date(from: spec.dateText)
             assignments[photoID] = []
             generated.append(
                 StagingChekiPhoto(
@@ -2267,6 +2556,7 @@ struct BatchPairingView: View {
                     detectionNote: spec.note,
                     croppedImageData: data,
                     croppedUIImage: img,
+                    detectedOCRDate: parsedDate,
                     resolvedFilmFormat: .mini,
                     isDetectingBoundary: false,
                     hasCompletedBoundaryDetection: true
@@ -2367,7 +2657,6 @@ struct BatchPairingView: View {
         defer { isProcessingBatch = false }
 
         let visionManager = VisionManager()
-        let chekiFormat = Self.toChekiFilmFormat(selectedFilmFormat)
         let defaultInsetRatio = defaultBorderInsetPercentage / 100.0
         let baseTimestamp = Date()
 
@@ -2375,9 +2664,9 @@ struct BatchPairingView: View {
             // 同一組拍立得的正反面賦予完全相同的秒數 (Task 3.3)
             let itemTimestamp = baseTimestamp.addingTimeInterval(TimeInterval(-index))
             let targetMember = slot.assignedMembers.first
-            var concreteFormat: FilmFormat = selectedFilmFormat == .auto
-                ? slot.frontPhoto.resolvedFilmFormat.concreteFormat
-                : selectedFilmFormat.concreteFormat
+            var concreteFormat: FilmFormat = slot.concreteFilmFormat
+            let chekiFormat = Self.toChekiFilmFormat(concreteFormat)
+            let userExplicitlyModifiedDate = slot.frontPhoto.hasManuallyModifiedDate || (slot.backPhoto?.hasManuallyModifiedDate ?? false)
 
             let initialFrontData = slot.frontPhoto.isRevertedToOriginal
                 ? slot.frontPhoto.imageData
@@ -2439,12 +2728,12 @@ struct BatchPairingView: View {
 
             // 1. 正面：優先直接使用背景已完成的邊界裁切與封面手寫日期 OCR 結果
             var finalFrontUIImage = slot.frontPhoto.displayUIImage
-            var recognizedDate: Date? = slot.frontPhoto.detectedOCRDate
+            var recognizedDate: Date? = slot.effectiveOCRDate
             if slot.frontPhoto.isRevertedToOriginal {
                 targetItem.frontImageData = slot.frontPhoto.imageData
                 targetItem.perspectivePointsJSON = nil
                 finalFrontUIImage = slot.frontPhoto.uiImage
-                if recognizedDate == nil, let frontCG = slot.frontPhoto.uiImage.cgImage {
+                if recognizedDate == nil, !userExplicitlyModifiedDate, let frontCG = slot.frontPhoto.uiImage.cgImage {
                     recognizedDate = await visionManager.recognizeDate(from: frontCG)?.date
                 }
             } else if slot.frontPhoto.hasCompletedBoundaryDetection {
@@ -2453,7 +2742,7 @@ struct BatchPairingView: View {
                     targetItem.detectionMethod = .visionNative
                 }
                 targetItem.perspectivePointsJSON = slot.frontPhoto.normalizedCornersJSON
-                if recognizedDate == nil, let frontCG = slot.frontPhoto.displayUIImage.cgImage {
+                if recognizedDate == nil, !userExplicitlyModifiedDate, let frontCG = slot.frontPhoto.displayUIImage.cgImage {
                     recognizedDate = await visionManager.recognizeDate(from: frontCG)?.date
                 }
             } else if let frontCG = slot.frontPhoto.uiImage.cgImage {
@@ -2478,21 +2767,25 @@ struct BatchPairingView: View {
                         }
                         targetItem.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(adjustedCorners, imageSize: imgSize)
                         targetItem.detectionMethod = .visionNative
-                        concreteFormat = FilmFormat.resolvedConcreteFormat(
-                            preferred: selectedFilmFormat,
-                            specName: cropRes.filmSpecification?.format.rawValue,
-                            outputSize: cropRes.outputSize
-                        )
+                        if !slot.frontPhoto.hasManuallyModifiedFormat {
+                            concreteFormat = FilmFormat.resolvedConcreteFormat(
+                                preferred: concreteFormat,
+                                specName: cropRes.filmSpecification?.format.rawValue,
+                                outputSize: cropRes.outputSize
+                            )
+                        }
                         targetItem.filmFormat = concreteFormat
                         targetItem.detectedAspectRatio = concreteFormat.aspectRatio
 
-                        if let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
-                            recognizedDate = ocrRes.date
-                        } else if let fallbackOCR = await visionManager.recognizeDate(from: frontCG) {
-                            recognizedDate = fallbackOCR.date
+                        if !userExplicitlyModifiedDate {
+                            if let ocrRes = await visionManager.recognizeDate(from: cropRes.cgImage) {
+                                recognizedDate = ocrRes.date
+                            } else if let fallbackOCR = await visionManager.recognizeDate(from: frontCG) {
+                                recognizedDate = fallbackOCR.date
+                            }
                         }
                     }
-                } else {
+                } else if !userExplicitlyModifiedDate {
                     if let ocrRes = await visionManager.recognizeDate(from: frontCG) {
                         recognizedDate = ocrRes.date
                     }
@@ -2511,7 +2804,7 @@ struct BatchPairingView: View {
                         targetItem.backImageData = preCroppedBackData
                     }
                     targetItem.backPerspectivePointsJSON = backPhoto.normalizedCornersJSON
-                    if recognizedDate == nil {
+                    if recognizedDate == nil, !userExplicitlyModifiedDate {
                         recognizedDate = backPhoto.detectedOCRDate
                     }
                 } else if let backCG = backPhoto.uiImage.cgImage {
@@ -2544,6 +2837,8 @@ struct BatchPairingView: View {
                 let mergedDate = ChekiItem.mergeRecognizedDate(recognizedDate, into: itemTimestamp)
                 targetItem.ocrDate = mergedDate
                 targetItem.capturedAt = mergedDate
+            } else if userExplicitlyModifiedDate {
+                targetItem.ocrDate = nil
             }
 
             // 備忘預設保持空白（不自動塞入系統匯入文字）
@@ -2612,9 +2907,249 @@ struct BatchPairingView: View {
     }
 }
 
+// MARK: - 單張相片格子「相紙規格 & 日期」大觸控區快速編輯面板
+
+private struct SlotFormatAndDateEditorSheet: View {
+    let slotSequenceTitle: String
+    let frontThumbnail: UIImage
+    let currentFormat: FilmFormat
+    let currentOCRDate: Date?
+    let totalSlotCount: Int
+    let onSelectFormat: (FilmFormat) -> Void
+    let onApplyFormatToAll: (FilmFormat) -> Void
+    let onUpdateDate: (Date?) -> Void
+    let onApplyDateToAll: (Date?) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedFormat: FilmFormat
+    @State private var pickerDate: Date
+    @State private var hasDate: Bool
+
+    init(
+        slotSequenceTitle: String,
+        frontThumbnail: UIImage,
+        currentFormat: FilmFormat,
+        currentOCRDate: Date?,
+        totalSlotCount: Int,
+        onSelectFormat: @escaping (FilmFormat) -> Void,
+        onApplyFormatToAll: @escaping (FilmFormat) -> Void,
+        onUpdateDate: @escaping (Date?) -> Void,
+        onApplyDateToAll: @escaping (Date?) -> Void
+    ) {
+        self.slotSequenceTitle = slotSequenceTitle
+        self.frontThumbnail = frontThumbnail
+        self.currentFormat = currentFormat.concreteFormat
+        self.currentOCRDate = currentOCRDate
+        self.totalSlotCount = totalSlotCount
+        self.onSelectFormat = onSelectFormat
+        self.onApplyFormatToAll = onApplyFormatToAll
+        self.onUpdateDate = onUpdateDate
+        self.onApplyDateToAll = onApplyDateToAll
+        _selectedFormat = State(initialValue: currentFormat.concreteFormat)
+        _pickerDate = State(initialValue: currentOCRDate ?? Date())
+        _hasDate = State(initialValue: currentOCRDate != nil)
+    }
+
+    private var formattedDatePreview: String {
+        guard hasDate else { return "空白（未標記日期）" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy.MM.dd"
+        return formatter.string(from: pickerDate)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    // 頂部照片摘要列
+                    HStack(spacing: 12) {
+                        Image(uiImage: frontThumbnail)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 44, height: 60)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.8)
+                            )
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("照片 \(slotSequenceTitle) 規格與日期")
+                                .font(.subheadline.weight(.bold))
+                            HStack(spacing: 6) {
+                                Text(selectedFormat.displayName)
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 2.5)
+                                    .background(Color.accentColor, in: Capsule())
+
+                                Text("日期：\(formattedDatePreview)")
+                                    .font(.caption.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(hasDate ? .primary : .secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                    // 區塊 1：相紙規格
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("相紙規格", systemImage: "aspectratio")
+                                .font(.subheadline.weight(.bold))
+                            Spacer()
+                            if totalSlotCount > 1 {
+                                Button {
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    onApplyFormatToAll(selectedFormat)
+                                } label: {
+                                    Text("套用至全部 \(totalSlotCount) 組")
+                                        .font(.caption.weight(.semibold))
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 8) {
+                            ForEach(FilmFormat.concreteFormats, id: \.rawValue) { format in
+                                formatOptionButton(for: format)
+                            }
+                        }
+                    }
+
+                    // 區塊 2：拍攝日期（有日期顯示 yyyy.MM.dd，無日期則在卡片上顯示空白）
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("拍立得日期", systemImage: "calendar")
+                                .font(.subheadline.weight(.bold))
+                            Spacer()
+                            if hasDate {
+                                Button(role: .destructive) {
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    hasDate = false
+                                    onUpdateDate(nil)
+                                } label: {
+                                    Label("設為空白", systemImage: "xmark.circle.fill")
+                                        .font(.caption.weight(.semibold))
+                                }
+                            } else {
+                                Button {
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    hasDate = true
+                                    onUpdateDate(pickerDate)
+                                } label: {
+                                    Label("填入今天日期", systemImage: "plus.circle.fill")
+                                        .font(.caption.weight(.semibold))
+                                }
+                            }
+                        }
+
+                        VStack(spacing: 10) {
+                            DatePicker(
+                                "選擇拍立得日期",
+                                selection: Binding(
+                                    get: { pickerDate },
+                                    set: { newDate in
+                                        pickerDate = newDate
+                                        hasDate = true
+                                        onUpdateDate(newDate)
+                                    }
+                                ),
+                                displayedComponents: [.date]
+                            )
+                            .datePickerStyle(.graphical)
+                            .environment(\.locale, Locale(identifier: "zh_Hant_TW"))
+
+                            if totalSlotCount > 1 {
+                                Divider()
+                                Button {
+                                    UISelectionFeedbackGenerator().selectionChanged()
+                                    onApplyDateToAll(hasDate ? pickerDate : nil)
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "doc.on.doc")
+                                        Text(hasDate ? "將 \(formattedDatePreview) 套用至全部 \(totalSlotCount) 組照片" : "將「空白日期」套用至全部 \(totalSlotCount) 組照片")
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 6)
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                }
+                .padding(16)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("修改相紙規格與日期")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") {
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private func formatOptionButton(for format: FilmFormat) -> some View {
+        let isSelected = selectedFormat == format
+        return Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            selectedFormat = format
+            onSelectFormat(format)
+        } label: {
+            VStack(spacing: 4) {
+                Text(Self.shortFormatTitle(for: format))
+                    .font(.subheadline.weight(.bold))
+                Text(Self.dimensionSubtitle(for: format))
+                    .font(.system(size: 10, weight: .medium))
+                    .opacity(0.8)
+            }
+            .foregroundStyle(isSelected ? Color.white : Color.primary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? Color.accentColor : Color(.secondarySystemGroupedBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private static func shortFormatTitle(for format: FilmFormat) -> String {
+        switch format {
+        case .mini: return "Mini"
+        case .square: return "Square"
+        case .wide: return "Wide"
+        case .auto: return "Mini"
+        }
+    }
+
+    private static func dimensionSubtitle(for format: FilmFormat) -> String {
+        switch format {
+        case .mini: return "54 × 86 mm"
+        case .square: return "72 × 86 mm"
+        case .wide: return "108 × 86 mm"
+        case .auto: return "54 × 86 mm"
+        }
+    }
+}
+
 // MARK: - Preview
 
 #Preview("04. 批次配對工作台 (格狀撲克牌展開 + 多人歸檔)") {
     BatchPairingView()
         .modelContainer(try! ModelContainerProvider.preview(withSampleData: true))
 }
+
