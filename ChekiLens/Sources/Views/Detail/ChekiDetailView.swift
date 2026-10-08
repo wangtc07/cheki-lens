@@ -26,6 +26,8 @@ struct ChekiDetailView: View {
     @State private var previousItemID: UUID?
     /// 是否翻轉至背面（true = 顯示背面手寫簽名，false = 顯示正面照片）
     @State private var isShowingBack: Bool = false
+    /// 3D 翻轉連續動畫進度（0.0 = 正面 0°，1.0 = 背面 180°，供 Animatable 連續插值與 Z 軸浮起使用）
+    @State private var flipProgress: Double = 0.0
     /// 點擊單下隱藏/顯示上下工具列（沉浸式全螢幕檢視）
     @State private var isChromeHidden: Bool = false
 
@@ -290,6 +292,9 @@ struct ChekiDetailView: View {
                         Button(role: .destructive) {
                             currentItem.backImageData = nil
                             isShowingBack = false
+                            withAnimation(flipAnimation) {
+                                flipProgress = 0.0
+                            }
                             try? modelContext.save()
                         } label: {
                             Label("移除背面照片", systemImage: "trash")
@@ -411,25 +416,11 @@ struct ChekiDetailView: View {
         .frame(width: fullScreenSize.width, height: fullScreenSize.height)
         .clipped()
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            if zoomScale > 1.05 {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    zoomScale = 1.0
-                }
-            } else {
-                trigger3DFlip()
-            }
-        }
-        .onTapGesture(count: 1) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isChromeHidden.toggle()
-            }
-        }
         .gesture(cardMagnifyGesture)
         .simultaneousGesture(cardDragAndSwipeGesture(pageStride: pageStride))
-        .animation(.easeInOut(duration: 0.2), value: isChromeHidden)
     }
 
+    /// 單張卡片頁面：透過 `Cheki3DFlipContainer` (Animatable) 驅動 0° ↔ 180° 連續 3D 翻轉、Z 軸浮起與慢進慢出減速強調
     @ViewBuilder
     private func singleCardPageView(
         for pageItem: ChekiItem,
@@ -437,53 +428,82 @@ struct ChekiDetailView: View {
         availableSize: CGSize,
         isLandscape: Bool
     ) -> some View {
-        let showingBackFace = isCurrent ? isShowingBack : false
+        let effectiveFlipProgress = isCurrent ? flipProgress : 0.0
         let effectiveScale = isCurrent ? (zoomScale * activePinchScale) : 1.0
 
-        Group {
-            if !showingBackFace {
-                frontCardFace(for: pageItem, availableSize: availableSize)
-            } else {
-                backCardFace(for: pageItem, availableSize: availableSize)
-                    // 背面翻轉 180 度後需鏡像回正，確保手寫文字與圖片方向正確不顛倒
-                    .rotation3DEffect(
-                        .degrees(180),
-                        axis: (x: 0, y: 1, z: 0)
-                    )
+        Cheki3DFlipContainer(
+            flipProgress: effectiveFlipProgress,
+            front: {
+                frontCardFace(
+                    for: pageItem,
+                    isCurrent: isCurrent,
+                    availableSize: availableSize,
+                    isLandscape: isLandscape
+                )
+            },
+            back: {
+                backCardFace(
+                    for: pageItem,
+                    isCurrent: isCurrent,
+                    availableSize: availableSize,
+                    isLandscape: isLandscape
+                )
             }
-        }
-        .overlay(alignment: .topTrailing) {
-            // 右上角浮動正反面 3D 翻轉徽章（緊貼拍立得卡片右上角）
-            if isCurrent && !isChromeHidden {
-                Button {
-                    trigger3DFlip()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "rectangle.portrait.rotate")
-                            .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
-                        Text(showingBackFace ? "背面 · 手寫" : (pageItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面"))
-                            .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, isLandscape ? 7 : 9)
-                    .padding(.vertical, isLandscape ? 3 : 4.5)
-                    .background(.black.opacity(0.62), in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
-                    )
-                }
-                .buttonStyle(.plain)
-                .padding(isLandscape ? 6 : 8)
-            }
-        }
-        .rotation3DEffect(
-            .degrees(showingBackFace ? 180 : 0),
-            axis: (x: 0, y: 1, z: 0),
-            perspective: 0.42
         )
         .scaleEffect(effectiveScale)
-        .shadow(color: .black.opacity(0.75), radius: 24, x: 0, y: 12)
+    }
+
+    /// 卡片右上角翻轉按鈕（正面與背面皆固定於各自畫面的右上角 `topTrailing`）
+    @ViewBuilder
+    private func cardTopRightFlipButton(
+        for pageItem: ChekiItem,
+        isCurrent: Bool,
+        isBackFace: Bool,
+        isLandscape: Bool
+    ) -> some View {
+        // 正面於顯示工具列時呈現；背面則固定顯示於右上角（即使全螢幕模式也能直接從右上角翻回正面）
+        if isCurrent && (!isChromeHidden || isBackFace) {
+            Button {
+                trigger3DFlip()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "rectangle.portrait.rotate")
+                        .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
+                    Text(isBackFace ? "背面 · 翻面" : (pageItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面"))
+                        .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, isLandscape ? 7 : 9)
+                .padding(.vertical, isLandscape ? 3 : 4.5)
+                .background(.black.opacity(0.62), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(.plain)
+            .padding(isLandscape ? 6 : 8)
+        }
+    }
+
+    /// 卡片本體的單擊（沉浸模式切換）與雙擊（3D 翻轉 / 重置縮放）手勢，綁定在底圖上以避免干擾右上角翻轉按鈕
+    private func applyCardTapGestures<V: View>(to view: V) -> some View {
+        view
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                if zoomScale > 1.05 {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        zoomScale = 1.0
+                    }
+                } else {
+                    trigger3DFlip()
+                }
+            }
+            .onTapGesture(count: 1) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isChromeHidden.toggle()
+                }
+            }
     }
 
     private func fittedCardSize(for imageSize: CGSize, in availableSize: CGSize) -> CGSize {
@@ -498,42 +518,84 @@ struct ChekiDetailView: View {
     }
 
     @ViewBuilder
-    private func frontCardFace(for targetItem: ChekiItem, availableSize: CGSize) -> some View {
+    private func frontCardFace(
+        for targetItem: ChekiItem,
+        isCurrent: Bool,
+        availableSize: CGSize,
+        isLandscape: Bool
+    ) -> some View {
         let insetScale = CGFloat(1.0 - targetItem.borderInsetRatio * 1.4)
         if let data = targetItem.frontImageData,
            let uiImage = UIImage(data: data) {
             let cardSize = fittedCardSize(for: uiImage.size, in: availableSize)
-            Image(uiImage: uiImage)
-                .resizable()
-                .scaledToFill()
-                .scaleEffect(insetScale)
-                .frame(width: cardSize.width, height: cardSize.height)
-                .overlay {
-                    ChekiWatermarkOverlayView(compact: false)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: isChromeHidden ? 6 : 10, style: .continuous))
-        } else {
-            placeholderCardFace(
-                title: "尚無正面影像",
-                subtitle: "此拍立得尚未儲存正面照片",
-                availableSize: availableSize
+            applyCardTapGestures(
+                to: Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .scaleEffect(insetScale)
+                    .frame(width: cardSize.width, height: cardSize.height)
+                    .overlay {
+                        ChekiWatermarkOverlayView(compact: false)
+                            .allowsHitTesting(false)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: isChromeHidden ? 6 : 10, style: .continuous))
             )
+            .overlay(alignment: .topTrailing) {
+                cardTopRightFlipButton(
+                    for: targetItem,
+                    isCurrent: isCurrent,
+                    isBackFace: false,
+                    isLandscape: isLandscape
+                )
+            }
+        } else {
+            applyCardTapGestures(
+                to: placeholderCardFace(
+                    title: "尚無正面影像",
+                    subtitle: "此拍立得尚未儲存正面照片",
+                    availableSize: availableSize
+                )
+            )
+            .overlay(alignment: .topTrailing) {
+                cardTopRightFlipButton(
+                    for: targetItem,
+                    isCurrent: isCurrent,
+                    isBackFace: false,
+                    isLandscape: isLandscape
+                )
+            }
         }
     }
 
     @ViewBuilder
-    private func backCardFace(for targetItem: ChekiItem, availableSize: CGSize) -> some View {
+    private func backCardFace(
+        for targetItem: ChekiItem,
+        isCurrent: Bool,
+        availableSize: CGSize,
+        isLandscape: Bool
+    ) -> some View {
         if let backData = targetItem.backImageData,
            let uiImage = UIImage(data: backData) {
             let cardSize = fittedCardSize(for: uiImage.size, in: availableSize)
-            Image(uiImage: uiImage)
-                .resizable()
-                .scaledToFill()
-                .frame(width: cardSize.width, height: cardSize.height)
-                .overlay {
-                    ChekiWatermarkOverlayView(compact: false)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: isChromeHidden ? 6 : 10, style: .continuous))
+            applyCardTapGestures(
+                to: Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: cardSize.width, height: cardSize.height)
+                    .overlay {
+                        ChekiWatermarkOverlayView(compact: false)
+                            .allowsHitTesting(false)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: isChromeHidden ? 6 : 10, style: .continuous))
+            )
+            .overlay(alignment: .topTrailing) {
+                cardTopRightFlipButton(
+                    for: targetItem,
+                    isCurrent: isCurrent,
+                    isBackFace: true,
+                    isLandscape: isLandscape
+                )
+            }
         } else {
             // 若此張拍立得尚無背面，提供原生引導卡直接補上背面或產生測試手寫背面
             VStack(spacing: 14) {
@@ -586,6 +648,14 @@ struct ChekiDetailView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(.white.opacity(0.15), lineWidth: 1)
             )
+            .overlay(alignment: .topTrailing) {
+                cardTopRightFlipButton(
+                    for: targetItem,
+                    isCurrent: isCurrent,
+                    isBackFace: true,
+                    isLandscape: isLandscape
+                )
+            }
         }
     }
 
@@ -924,11 +994,18 @@ struct ChekiDetailView: View {
             }
     }
 
+    /// 3D 翻轉曲線：慢進慢出（減速強調 / 減速を強調する），速度較先前放慢約 0.7 倍（時長 0.84 秒）
+    private var flipAnimation: Animation {
+        .timingCurve(0.24, 0.06, 0.12, 1.0, duration: 0.84)
+    }
+
     private func trigger3DFlip() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         hasSeenDetailCoachMark = true
-        withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
-            isShowingBack.toggle()
+        let nextBack = !isShowingBack
+        isShowingBack = nextBack
+        withAnimation(flipAnimation) {
+            flipProgress = nextBack ? 1.0 : 0.0
         }
     }
 
@@ -945,6 +1022,7 @@ struct ChekiDetailView: View {
             currentItemID = targetItem.id
             horizontalDragOffset = 0
             isShowingBack = false
+            flipProgress = 0.0
             zoomScale = 1.0
         }
     }
@@ -1055,8 +1133,9 @@ struct ChekiDetailView: View {
         currentItem.backAssetIdentifier = pickerItem.itemIdentifier
         try? modelContext.save()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
-            isShowingBack = true
+        isShowingBack = true
+        withAnimation(flipAnimation) {
+            flipProgress = 1.0
         }
     }
 
@@ -1082,8 +1161,9 @@ struct ChekiDetailView: View {
             currentItem.backPerspectivePointsJSON = nil
             try? modelContext.save()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            withAnimation(.spring(response: 0.52, dampingFraction: 0.78)) {
-                isShowingBack = true
+            isShowingBack = true
+            withAnimation(flipAnimation) {
+                flipProgress = 1.0
             }
         }
     }
@@ -2389,6 +2469,57 @@ private struct ChekiQuadCropEditorView: View {
     }
 }
 
+
+// MARK: - 3D 拍立得正反翻轉與 Z 軸浮起容器 (Animatable 3D Flip + Z-Axis Lift)
+
+/// 透過 `Animatable` 連續插值 `flipProgress (0.0 ... 1.0)`：
+/// 1. 保持正反兩面同時駐留於 `ZStack`，於 `90°` 垂直切面瞬間無縫切換正反面可見度，根除視圖重建造成的無動畫問題。
+/// 2. 結合 `sin(flipProgress * .pi)` 在翻轉中段將拍立得沿 Z 軸向觀察者微微浮起 (`scale` 放大) 並向上微移 (`offset.y` 上提)，落定時平滑復原。
+private struct Cheki3DFlipContainer<Front: View, Back: View>: View, Animatable {
+    var flipProgress: Double
+    let front: () -> Front
+    let back: () -> Back
+
+    var animatableData: Double {
+        get { flipProgress }
+        set { flipProgress = newValue }
+    }
+
+    var body: some View {
+        let clamped = min(max(flipProgress, 0.0), 1.0)
+        let angle = clamped * 180.0
+        let isBackVisible = angle >= 90.0
+
+        // Z 軸與向上微幅浮起曲線：0 -> 1 (90° 中點最高峰) -> 0 (180° 落定復原)
+        let liftPhase = sin(clamped * .pi)
+        let zLiftScale = 1.0 + 0.085 * liftPhase
+        let upwardLiftOffset = -18.0 * liftPhase
+        let shadowRadius = 22.0 + 18.0 * liftPhase
+        let shadowY = 12.0 + 14.0 * liftPhase
+
+        ZStack {
+            front()
+                .opacity(isBackVisible ? 0.0 : 1.0)
+                .allowsHitTesting(!isBackVisible)
+
+            back()
+                .rotation3DEffect(
+                    .degrees(180),
+                    axis: (x: 0, y: 1, z: 0)
+                )
+                .opacity(isBackVisible ? 1.0 : 0.0)
+                .allowsHitTesting(isBackVisible)
+        }
+        .rotation3DEffect(
+            .degrees(angle),
+            axis: (x: 0, y: 1, z: 0),
+            perspective: 0.45
+        )
+        .scaleEffect(zLiftScale)
+        .offset(y: upwardLiftOffset)
+        .shadow(color: .black.opacity(0.76), radius: shadowRadius, x: 0, y: shadowY)
+    }
+}
 
 // MARK: - Preview
 
