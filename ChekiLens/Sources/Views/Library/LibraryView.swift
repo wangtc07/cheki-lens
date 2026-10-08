@@ -1570,6 +1570,7 @@ struct AlbumHeroDetailView: View {
     @State private var pinchBaselineColumnCount: Int? = nil
     @State private var livePinchScale: CGFloat = 1.0
     @State private var showingQuickCreateMember: Bool = false
+    @State private var showingInAppPhotoPickerSheet: Bool = false
 
     private var validAllChekiItems: [ChekiItem] {
         allChekiItems.filter { !$0.isDeleted && $0.modelContext != nil }
@@ -1644,7 +1645,7 @@ struct AlbumHeroDetailView: View {
                             transaction.animation = nil
                         }
 
-                    if displayedItems.isEmpty {
+                    if displayedItems.isEmpty && defaultMember == nil {
                         ContentUnavailableView {
                             Label("尚無拍立得項目", systemImage: "photo.on.rectangle")
                         } description: {
@@ -1655,6 +1656,10 @@ struct AlbumHeroDetailView: View {
                         LazyVGrid(columns: gridColumns, spacing: gridSpacing) {
                             ForEach(displayedItems) { item in
                                 albumPhotoCell(for: item)
+                            }
+
+                            if defaultMember != nil && !isSelectionMode {
+                                addFromInAppLibraryCell
                             }
                         }
                         .overlay {
@@ -1672,6 +1677,15 @@ struct AlbumHeroDetailView: View {
                         .padding(.top, 2)
                         .scaleEffect(livePinchScale, anchor: .top)
                         .animation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15), value: columnCount)
+
+                        if displayedItems.isEmpty {
+                            ContentUnavailableView {
+                                Label(L10n.tr("尚無拍立得項目", "チェキがまだありません"), systemImage: "photo.on.rectangle")
+                            } description: {
+                                Text(L10n.tr("點擊上方「＋」從 App 內挑選照片加入，或由右上角匯入／拍攝。", "上の「＋」からアプリ内の写真を追加するか、右上から読み込んでください。"))
+                            }
+                            .padding(.vertical, 28)
+                        }
                     }
                 }
                 .padding(.bottom, isSelectionMode ? 96 : 40)
@@ -1923,6 +1937,21 @@ struct AlbumHeroDetailView: View {
         }) {
             CameraScannerView(defaultMember: defaultMember)
         }
+        .sheet(isPresented: $showingInAppPhotoPickerSheet) {
+            if let defaultMember {
+                InAppAlbumPhotoPickerSheet(targetMember: defaultMember) { addedItems in
+                    if autoSyncToPhotos && !addedItems.isEmpty {
+                        Task {
+                            await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary(
+                                addedItems,
+                                modelContext: modelContext,
+                                onlyAlbumAndDateIfAlreadySynced: true
+                            )
+                        }
+                    }
+                }
+            }
+        }
         .alert(
             L10n.tr("修改成員名", "メンバー名を変更"),
             isPresented: $showingRenameMemberAlert
@@ -2088,6 +2117,29 @@ struct AlbumHeroDetailView: View {
         .contentShape(Rectangle())
     }
 
+    private var addFromInAppLibraryCell: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showingInAppPhotoPickerSheet = true
+        } label: {
+            Color(.secondarySystemFill)
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    Image(systemName: "plus")
+                        .font(.system(size: columnCount >= 5 ? 20 : 28, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: cellCornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: cellCornerRadius, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: cellCornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n.tr("從 App 內挑選照片加入此相冊", "アプリ内の写真からこのアルバムに追加"))
+    }
+
     @ViewBuilder
     private func albumPhotoCell(for item: ChekiItem) -> some View {
         let isSelected = selectedItemIDs.contains(item.persistentModelID)
@@ -2178,6 +2230,493 @@ struct AlbumHeroDetailView: View {
                 onlyAlbumAndDateIfAlreadySynced: false
             )
         }
+    }
+}
+
+// MARK: - InAppAlbumPhotoPickerSheet (從 App 內挑選既有照片加入成員相冊：仿照系統 PHPicker，將 コレクション 改為 相冊，全部支援過濾未分類與雙層多選成員)
+
+private struct InAppAlbumPhotoPickerSheet: View {
+    let targetMember: IdolMember
+    var onAdded: ([ChekiItem]) -> Void = { _ in }
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var allChekiItems: [ChekiItem]
+    @Query(sort: \IdolGroup.sortOrder, order: .forward) private var idolGroups: [IdolGroup]
+    @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
+
+    private enum PickerTab: String, CaseIterable, Identifiable {
+        case all
+        case albums
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .all:
+                return L10n.tr("全部", "すべて")
+            case .albums:
+                return L10n.tr("相冊", "アルバム")
+            }
+        }
+    }
+
+    private enum BrowseAlbumScope: Equatable {
+        case uncategorized
+        case member(UUID)
+        case group(UUID)
+    }
+
+    @State private var pickerTab: PickerTab = .all
+    @State private var searchText: String = ""
+    @State private var filterUncategorizedOnly: Bool = false
+    @State private var filterMemberIDs: Set<UUID> = []
+    @State private var selectedItemIDs: Set<UUID> = []
+    @State private var browseAlbumScope: BrowseAlbumScope? = nil
+
+    private let photoGridColumns = [
+        GridItem(.flexible(), spacing: 4),
+        GridItem(.flexible(), spacing: 4),
+        GridItem(.flexible(), spacing: 4)
+    ]
+
+    private let albumGridColumns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
+    private var validChekiItems: [ChekiItem] {
+        allChekiItems.filter { !$0.isDeleted && $0.modelContext != nil }
+    }
+
+    private var groupedMembers: [(group: IdolGroup, members: [IdolMember])] {
+        idolGroups.compactMap { group in
+            let members = group.members.sorted { $0.sortOrder < $1.sortOrder }
+            return members.isEmpty ? nil : (group, members)
+        }
+    }
+
+    private var ungroupedMembers: [IdolMember] {
+        idolMembers.filter { $0.group == nil }
+    }
+
+    private var filteredAllTabItems: [ChekiItem] {
+        validChekiItems.filter { item in
+            guard LibraryView.matchesSearch(item: item, query: searchText, allMembers: idolMembers) else {
+                return false
+            }
+            if !filterUncategorizedOnly && filterMemberIDs.isEmpty {
+                return true
+            }
+            var matched = false
+            if filterUncategorizedOnly && item.isUncategorized {
+                matched = true
+            }
+            if !filterMemberIDs.isEmpty {
+                let itemMemberIDs = Set(item.assignedMemberIDs)
+                if !itemMemberIDs.isDisjoint(with: filterMemberIDs) {
+                    matched = true
+                }
+            }
+            return matched
+        }
+    }
+
+    private var scopedAlbumItems: [ChekiItem] {
+        guard let browseAlbumScope else { return [] }
+        let baseItems: [ChekiItem]
+        switch browseAlbumScope {
+        case .uncategorized:
+            baseItems = validChekiItems.filter { $0.isUncategorized }
+        case .member(let memberID):
+            if let member = idolMembers.first(where: { $0.id == memberID }) {
+                baseItems = validChekiItems.filter { $0.isAssigned(to: member) }
+            } else {
+                baseItems = []
+            }
+        case .group(let groupID):
+            if let group = idolGroups.first(where: { $0.id == groupID }) {
+                let groupMemberIDs = Set(group.members.map(\.id))
+                baseItems = validChekiItems.filter { !Set($0.assignedMemberIDs).isDisjoint(with: groupMemberIDs) }
+            } else {
+                baseItems = []
+            }
+        }
+        return baseItems.filter {
+            LibraryView.matchesSearch(item: $0, query: searchText, allMembers: idolMembers)
+        }
+    }
+
+    private var scopedAlbumTitle: String {
+        guard let browseAlbumScope else { return "" }
+        switch browseAlbumScope {
+        case .uncategorized:
+            return L10n.tr("未分類", "未分類")
+        case .member(let memberID):
+            return idolMembers.first(where: { $0.id == memberID })?.albumTitle ?? ""
+        case .group(let groupID):
+            return idolGroups.first(where: { $0.id == groupID })?.name ?? ""
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if pickerTab == .all {
+                    filterHeaderBar
+                    Divider()
+                    photoSelectionGrid(items: filteredAllTabItems)
+                } else {
+                    if browseAlbumScope != nil {
+                        albumDrilldownHeaderBar
+                        Divider()
+                        photoSelectionGrid(items: scopedAlbumItems)
+                    } else {
+                        albumsBrowserGrid
+                    }
+                }
+            }
+            .background(Color(.systemBackground))
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: L10n.tr("搜尋照片、成員、團體或 #標籤", "写真、メンバー、グループ、#タグを検索")
+            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.tr("取消", "キャンセル")) {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    Picker("", selection: $pickerTab) {
+                        ForEach(PickerTab.allCases) { tab in
+                            Text(tab.title).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 180)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        commitPickedItems()
+                    } label: {
+                        Text(selectedItemIDs.isEmpty ? L10n.tr("加入", "追加") : L10n.tr("加入(\(selectedItemIDs.count))", "追加(\(selectedItemIDs.count))"))
+                            .fontWeight(.semibold)
+                    }
+                    .disabled(selectedItemIDs.isEmpty)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                HStack {
+                    Spacer()
+                    Text(
+                        selectedItemIDs.isEmpty
+                            ? L10n.tr("選擇要加入「\(targetMember.stageName)」的拍立得", "「\(targetMember.stageName)」に追加するチェキを選択")
+                            : L10n.tr("已選擇 \(selectedItemIDs.count) 張拍立得", "\(selectedItemIDs.count)枚のチェキを選択中")
+                    )
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial)
+            }
+        }
+        .applyAppAppearanceAndLocale()
+    }
+
+    private var filterHeaderBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.snappy(duration: 0.18)) {
+                        filterUncategorizedOnly.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: filterUncategorizedOnly ? "checkmark.circle.fill" : "tray")
+                            .font(.caption.weight(.semibold))
+                        Text(L10n.tr("未分類", "未分類"))
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .foregroundStyle(filterUncategorizedOnly ? .white : .primary)
+                    .background(
+                        filterUncategorizedOnly ? Color.accentColor : Color(.secondarySystemFill),
+                        in: Capsule()
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Menu {
+                    ForEach(groupedMembers, id: \.group.id) { entry in
+                        Menu(entry.group.name) {
+                            ForEach(entry.members) { member in
+                                Button {
+                                    toggleFilterMember(member.id)
+                                } label: {
+                                    if filterMemberIDs.contains(member.id) {
+                                        Label(member.stageName, systemImage: "checkmark")
+                                    } else {
+                                        Text(member.stageName)
+                                    }
+                                }
+                            }
+                        }
+                        .menuActionDismissBehavior(.disabled)
+                    }
+
+                    if !ungroupedMembers.isEmpty {
+                        Section(L10n.tr("未分組", "グループなし")) {
+                            ForEach(ungroupedMembers) { member in
+                                Button {
+                                    toggleFilterMember(member.id)
+                                } label: {
+                                    if filterMemberIDs.contains(member.id) {
+                                        Label(member.stageName, systemImage: "checkmark")
+                                    } else {
+                                        Text(member.stageName)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if !filterMemberIDs.isEmpty {
+                        Divider()
+                        Button(role: .destructive) {
+                            filterMemberIDs.removeAll()
+                        } label: {
+                            Label(L10n.tr("清除成員過濾", "メンバー絞り込みを解除"), systemImage: "xmark.circle")
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "person.2")
+                            .font(.caption.weight(.semibold))
+                        Text(
+                            filterMemberIDs.isEmpty
+                                ? L10n.tr("選成員", "メンバーを選択")
+                                : L10n.tr("選成員 (\(filterMemberIDs.count))", "メンバー (\(filterMemberIDs.count))")
+                        )
+                        .font(.subheadline.weight(.medium))
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.bold))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .foregroundStyle(!filterMemberIDs.isEmpty ? .white : .primary)
+                    .background(
+                        !filterMemberIDs.isEmpty ? Color.accentColor : Color(.secondarySystemFill),
+                        in: Capsule()
+                    )
+                }
+                .menuActionDismissBehavior(.disabled)
+
+                if filterUncategorizedOnly || !filterMemberIDs.isEmpty {
+                    Button {
+                        withAnimation(.snappy(duration: 0.18)) {
+                            filterUncategorizedOnly = false
+                            filterMemberIDs.removeAll()
+                        }
+                    } label: {
+                        Text(L10n.tr("重設", "リセット"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private var albumDrilldownHeaderBar: some View {
+        HStack {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) {
+                    browseAlbumScope = nil
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.subheadline.weight(.semibold))
+                    Text(L10n.tr("返回相冊", "アルバム一覧"))
+                        .font(.subheadline.weight(.medium))
+                }
+            }
+            Spacer()
+            Text(scopedAlbumTitle)
+                .font(.subheadline.weight(.bold))
+            Spacer()
+            Color.clear.frame(width: 68, height: 1)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private func photoSelectionGrid(items: [ChekiItem]) -> some View {
+        if items.isEmpty {
+            ContentUnavailableView {
+                Label(L10n.tr("沒有符合條件的拍立得", "条件に一致するチェキがありません"), systemImage: "photo.on.rectangle")
+            }
+            .frame(maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVGrid(columns: photoGridColumns, spacing: 4) {
+                    ForEach(items) { item in
+                        let isSelected = selectedItemIDs.contains(item.id)
+                        let alreadyInAlbum = item.isAssigned(to: targetMember)
+                        AlbumSquareThumbnailCell(item: item, cornerRadius: 6)
+                            .overlay(alignment: .topLeading) {
+                                if alreadyInAlbum {
+                                    Text(L10n.tr("已在相冊", "追加済"))
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.black.opacity(0.6), in: Capsule())
+                                        .padding(5)
+                                }
+                            }
+                            .overlay(alignment: .bottomTrailing) {
+                                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                    .font(.title3)
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(
+                                        isSelected ? .white : .white.opacity(0.9),
+                                        isSelected ? .blue : .black.opacity(0.35)
+                                    )
+                                    .padding(6)
+                            }
+                            .scaleEffect(isSelected ? 0.96 : 1.0)
+                            .animation(.snappy(duration: 0.14), value: isSelected)
+                            .onTapGesture {
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                if isSelected {
+                                    selectedItemIDs.remove(item.id)
+                                } else {
+                                    selectedItemIDs.insert(item.id)
+                                }
+                            }
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    private var albumsBrowserGrid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                let uncategorized = validChekiItems.filter { $0.isUncategorized }
+                if !uncategorized.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(L10n.tr("未分類", "未分類"))
+                            .font(.headline)
+                            .padding(.horizontal, 16)
+
+                        LazyVGrid(columns: albumGridColumns, spacing: 12) {
+                            Button {
+                                browseAlbumScope = .uncategorized
+                            } label: {
+                                ApplePhotoAlbumTile(
+                                    primaryTitle: L10n.tr("未分類", "未分類"),
+                                    secondaryTitle: "\(uncategorized.count)",
+                                    coverImagesData: Array(uncategorized.compactMap(\.frontImageData).prefix(1))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                }
+
+                if !idolMembers.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(L10n.tr("成員相冊", "メンバーアルバム"))
+                            .font(.headline)
+                            .padding(.horizontal, 16)
+
+                        LazyVGrid(columns: albumGridColumns, spacing: 12) {
+                            ForEach(idolMembers) { member in
+                                Button {
+                                    browseAlbumScope = .member(member.id)
+                                } label: {
+                                    ApplePhotoAlbumTile(
+                                        primaryTitle: member.albumTitle,
+                                        secondaryTitle: nil,
+                                        coverImagesData: AlbumsRootView.memberCoverImages(for: member, allItems: validChekiItems)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                }
+
+                if !idolGroups.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(L10n.tr("團體相冊", "グループアルバム"))
+                            .font(.headline)
+                            .padding(.horizontal, 16)
+
+                        LazyVGrid(columns: albumGridColumns, spacing: 12) {
+                            ForEach(idolGroups) { group in
+                                Button {
+                                    browseAlbumScope = .group(group.id)
+                                } label: {
+                                    ApplePhotoAlbumTile(
+                                        primaryTitle: group.name,
+                                        secondaryTitle: nil,
+                                        coverImagesData: AlbumsRootView.groupCoverImages(for: group, allItems: validChekiItems)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                }
+            }
+            .padding(.vertical, 14)
+        }
+    }
+
+    private func toggleFilterMember(_ id: UUID) {
+        UISelectionFeedbackGenerator().selectionChanged()
+        if filterMemberIDs.contains(id) {
+            filterMemberIDs.remove(id)
+        } else {
+            filterMemberIDs.insert(id)
+        }
+    }
+
+    private func commitPickedItems() {
+        let itemsToUpdate = validChekiItems.filter { selectedItemIDs.contains($0.id) }
+        guard !itemsToUpdate.isEmpty else {
+            dismiss()
+            return
+        }
+        for item in itemsToUpdate {
+            if !item.isAssigned(to: targetMember) {
+                item.toggleAssignedMember(targetMember, allMembers: idolMembers)
+            }
+        }
+        try? modelContext.save()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        onAdded(itemsToUpdate)
+        dismiss()
     }
 }
 
