@@ -17,7 +17,8 @@
      - **全卡 `0% ~ 100%` 測地線光暈 100% 乾淨像素替換 (`VisionManager+AntiGlare.swift`)**：解除舊版頂部 `11.5%` 與底部 `22.5%` 邊框排除限制（解決頂部兔耳/氣球與底部手寫字反光無法消除問題），改用 `4×6` 截斷 L1 (`min(d, 85)`) 局部網格微平移對位 + 鏡面高光峰值種子 (`L >= 0.84`) + 4 輪測地線光暈膨脹，對反光核心與藍白光暈執行 `weight = 1.0`（100% 無反光像素替換），非反光區嚴格保持 `weight = 0.0` 零重影。
   3. **手動四頂點裁切編輯器支援移出相片邊界外 (`ChekiDetailView.swift`, `VisionManager+PerspectiveCorrect.swift`, `ChekiItem.swift`)**：放寬頂點拖曳與儲存範圍至 `-0.45 ~ 1.45`、加寬畫布預設邊距 (`padding: 44`) 並支援雙指縮小至 `0.65x`，且於透視校正超出相片邊界時透過 `clampedToExtent()` 自動延續相紙白邊色澤，避免傾斜超出畫面的拍立得邊角產生黑邊缺角。
   4. **單張全螢幕檢視單擊全畫面平滑漸進漸出與放大防跳動 (`ChekiDetailView.swift`)**：固定卡片基準 Layout Frame 並移除會觸發系統 Safe Area 重排的 `.statusBarHidden` 與 `if !isChromeHidden` 視圖銷毀重建，改以 GPU `scaleEffect` + `offset` 搭配翻頁同款漸進漸出曲線 (`pageAndZoomAnimation`) 驅動全畫面放大；當圖片處於放大狀態 (`isImageZoomed`) 時自動隱藏 icon，且單擊畫面僅切換 icon 顯示而不改變圖片倍率與座標，徹底消除畫面跳動與抖動。
-* **最新穩定 Git Commit**：fix(Detail): 修正單擊全畫面放大抖動與圖片放大時單擊跳動問題
+  5. **相簿與相冊多選模式支援 Apple 原生拖選多選與底部左圓分享／右圓刪除操作列 (`LibraryView.swift`)**：於「全部」與「相冊詳情」進入選取模式時自動隱藏底部主 `TabView` 導覽列，並對齊 iOS 原生相簿 (`Photos.app`) 改為左下圓形毛玻璃「分享 (`square.and.arrow.up`)」、中央「已選取 N 張照片」、右下圓形毛玻璃「刪除 (`trash`)」操作列（右上角為「全選」與圓形「✕」完成按鈕）；同時加入 `ApplePhotosDragSelectOverlay`，支援手指橫向滑動跨格連續範圍拖選／取消勾選（啟動後可繼續跨多列上下滑動批次選取，純垂直滑動則維持 `ScrollView` 原生順暢捲動）。
+* **最新穩定 Git Commit**：feat(Library): 支援 Apple 原生相簿拖選多選與選取模式底部分享刪除介面
 * **下一動執行指示**：執行 **Task 6.2**（支援深色/淺色模式與動態字級 Dynamic Type）
 
 ---

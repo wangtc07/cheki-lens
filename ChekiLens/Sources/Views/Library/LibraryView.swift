@@ -117,9 +117,20 @@ struct LibraryView: View {
                                 photoGridCell(for: item)
                             }
                         }
+                        .overlay {
+                            if isSelectionMode {
+                                ApplePhotosDragSelectOverlay(
+                                    itemIDs: displayedItems.map(\.persistentModelID),
+                                    columnCount: columnCount,
+                                    spacing: gridSpacing,
+                                    cellAspectRatio: 0.75,
+                                    selectedItemIDs: $selectedItemIDs
+                                )
+                            }
+                        }
                         .padding(.horizontal, columnCount >= 5 ? 8 : 14)
                         .padding(.top, 82)
-                        .padding(.bottom, 32)
+                        .padding(.bottom, isSelectionMode ? 96 : 32)
                         .animation(.spring(response: 0.32, dampingFraction: 0.82), value: columnCount)
                     }
                     .simultaneousGesture(pinchZoomGesture)
@@ -129,9 +140,11 @@ struct LibraryView: View {
                 topFloatingHeaderBar
             }
             .toolbar(.hidden, for: .navigationBar)
+            .toolbar(isSelectionMode ? .hidden : .visible, for: .tabBar)
             .safeAreaInset(edge: .bottom) {
                 if isSelectionMode {
                     selectionBottomBar
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .confirmationDialog(
@@ -194,7 +207,7 @@ struct LibraryView: View {
     private var topFloatingHeaderBar: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(isSelectionMode ? "已選取 \(selectedItemIDs.count) 項" : "全部")
+                Text("全部")
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(.primary)
 
@@ -210,6 +223,7 @@ struct LibraryView: View {
             HStack(spacing: 8) {
                 if isSelectionMode {
                     Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         if selectedItemIDs.count == displayedItems.count {
                             selectedItemIDs.removeAll()
                         } else {
@@ -218,11 +232,15 @@ struct LibraryView: View {
                     } label: {
                         Text(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(.primary)
                             .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 12)
+                            .padding(.horizontal, 14)
                             .frame(height: 36)
                             .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(.white.opacity(0.16), lineWidth: 0.6)
+                            )
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -353,20 +371,33 @@ struct LibraryView: View {
 
                 if !displayedItems.isEmpty {
                     Button {
-                        withAnimation(.snappy(duration: 0.2)) {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(.snappy(duration: 0.22)) {
                             isSelectionMode.toggle()
                             if !isSelectionMode {
                                 selectedItemIDs.removeAll()
                             }
                         }
                     } label: {
-                        Text(isSelectionMode ? "完成" : "選取")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.blue)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 14)
-                            .frame(height: 36)
-                            .background(.ultraThinMaterial, in: Capsule())
+                        if isSelectionMode {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.primary)
+                                .frame(width: 36, height: 36)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(.white.opacity(0.16), lineWidth: 0.6)
+                                )
+                        } else {
+                            Text("選取")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.blue)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .padding(.horizontal, 14)
+                                .frame(height: 36)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
                     }
                     .buttonStyle(.plain)
                     .fixedSize()
@@ -451,6 +482,7 @@ struct LibraryView: View {
                 .scaleEffect(isSelected ? 0.95 : 1.0)
                 .animation(.snappy(duration: 0.15), value: isSelected)
                 .onTapGesture {
+                    UISelectionFeedbackGenerator().selectionChanged()
                     if isSelected {
                         selectedItemIDs.remove(item.persistentModelID)
                     } else {
@@ -536,22 +568,16 @@ struct LibraryView: View {
     }
 
     private var selectionBottomBar: some View {
-        HStack {
-            Text("已選取 \(selectedItemIDs.count) 張")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button(role: .destructive) {
+        ApplePhotosSelectionBottomBar(
+            selectedCount: selectedItemIDs.count,
+            onShare: {
+                let selected = displayedItems.filter { selectedItemIDs.contains($0.persistentModelID) }
+                ChekiBatchSharePresenter.share(items: selected)
+            },
+            onDelete: {
                 showDeleteConfirm = true
-            } label: {
-                Label("刪除", systemImage: "trash")
-                    .font(.subheadline.weight(.semibold))
             }
-            .disabled(selectedItemIDs.isEmpty)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(.bar)
+        )
     }
 
     private var processingOverlay: some View {
@@ -1163,109 +1189,150 @@ struct AlbumHeroDetailView: View {
                             albumPhotoCell(for: item)
                         }
                     }
+                    .overlay {
+                        if isSelectionMode {
+                            ApplePhotosDragSelectOverlay(
+                                itemIDs: displayedItems.map(\.persistentModelID),
+                                columnCount: columnCount,
+                                spacing: 2,
+                                cellAspectRatio: 1.0,
+                                selectedItemIDs: $selectedItemIDs
+                            )
+                        }
+                    }
                     .animation(.spring(response: 0.3, dampingFraction: 0.82), value: columnCount)
                 }
             }
-            .padding(.bottom, 40)
+            .padding(.bottom, isSelectionMode ? 96 : 40)
         }
         .simultaneousGesture(pinchZoomGesture)
         .ignoresSafeArea(edges: .top)
         .background(Color(.systemBackground))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar(isSelectionMode ? .hidden : .visible, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 10) {
-                    Menu {
+                    if isSelectionMode {
                         Button {
-                            showingCameraScanner = true
-                        } label: {
-                            Label("使用相機拍攝至此相冊", systemImage: "camera")
-                        }
-
-                        PhotosPicker(
-                            selection: $selectedPhotos,
-                            maxSelectionCount: nil,
-                            matching: .images,
-                            photoLibrary: .shared()
-                        ) {
-                            Label("從相簿多選匯入（不限張數）", systemImage: "photo.badge.plus")
-                        }
-
-                        Button {
-                            processingItems = []
-                            showingBatchPairingSheet = true
-                        } label: {
-                            Label("開啟批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
-                        }
-
-                        Menu {
-                            ForEach(Self.supportedColumnCounts, id: \.self) { count in
-                                Button {
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                                        columnCount = count
-                                    }
-                                } label: {
-                                    Label("\(count) 欄網格", systemImage: columnCount == count ? "checkmark" : "square.grid.3x3")
-                                }
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            if selectedItemIDs.count == displayedItems.count {
+                                selectedItemIDs.removeAll()
+                            } else {
+                                selectedItemIDs = Set(displayedItems.map(\.persistentModelID))
                             }
                         } label: {
-                            Label("網格密度", systemImage: "square.grid.3x3")
-                        }
-
-                        Menu {
-                            Button {
-                                sortAscending = false
-                            } label: {
-                                Label("由新到舊", systemImage: !sortAscending ? "checkmark" : "arrow.down")
-                            }
-                            Button {
-                                sortAscending = true
-                            } label: {
-                                Label("由舊到新", systemImage: sortAscending ? "checkmark" : "arrow.up")
-                            }
-                            Divider()
-                            Button {
-                                filterDualSideOnly.toggle()
-                            } label: {
-                                Label("僅顯示正反雙面", systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait")
-                            }
-                        } label: {
-                            Label("排序與篩選", systemImage: "line.3.horizontal.decrease")
-                        }
-
-                        Divider()
-
-                        Button {
-                            showingSettingsSheet = true
-                        } label: {
-                            Label("設定（自動邊界微調）", systemImage: "gearshape")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 34, height: 34)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    .fixedSize()
-
-                    if !displayedItems.isEmpty {
-                        Button {
-                            withAnimation {
-                                isSelectionMode.toggle()
-                                if !isSelectionMode {
-                                    selectedItemIDs.removeAll()
-                                }
-                            }
-                        } label: {
-                            Text(isSelectionMode ? "完成" : "選取")
+                            Text(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white)
                                 .fixedSize(horizontal: true, vertical: false)
                                 .padding(.horizontal, 14)
                                 .frame(height: 34)
                                 .background(.ultraThinMaterial, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Menu {
+                            Button {
+                                showingCameraScanner = true
+                            } label: {
+                                Label("使用相機拍攝至此相冊", systemImage: "camera")
+                            }
+
+                            PhotosPicker(
+                                selection: $selectedPhotos,
+                                maxSelectionCount: nil,
+                                matching: .images,
+                                photoLibrary: .shared()
+                            ) {
+                                Label("從相簿多選匯入（不限張數）", systemImage: "photo.badge.plus")
+                            }
+
+                            Button {
+                                processingItems = []
+                                showingBatchPairingSheet = true
+                            } label: {
+                                Label("開啟批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
+                            }
+
+                            Menu {
+                                ForEach(Self.supportedColumnCounts, id: \.self) { count in
+                                    Button {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                                            columnCount = count
+                                        }
+                                    } label: {
+                                        Label("\(count) 欄網格", systemImage: columnCount == count ? "checkmark" : "square.grid.3x3")
+                                    }
+                                }
+                            } label: {
+                                Label("網格密度", systemImage: "square.grid.3x3")
+                            }
+
+                            Menu {
+                                Button {
+                                    sortAscending = false
+                                } label: {
+                                    Label("由新到舊", systemImage: !sortAscending ? "checkmark" : "arrow.down")
+                                }
+                                Button {
+                                    sortAscending = true
+                                } label: {
+                                    Label("由舊到新", systemImage: sortAscending ? "checkmark" : "arrow.up")
+                                }
+                                Divider()
+                                Button {
+                                    filterDualSideOnly.toggle()
+                                } label: {
+                                    Label("僅顯示正反雙面", systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait")
+                                }
+                            } label: {
+                                Label("排序與篩選", systemImage: "line.3.horizontal.decrease")
+                            }
+
+                            Divider()
+
+                            Button {
+                                showingSettingsSheet = true
+                            } label: {
+                                Label("設定（自動邊界微調）", systemImage: "gearshape")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .fixedSize()
+                    }
+
+                    if !displayedItems.isEmpty {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            withAnimation(.snappy(duration: 0.22)) {
+                                isSelectionMode.toggle()
+                                if !isSelectionMode {
+                                    selectedItemIDs.removeAll()
+                                }
+                            }
+                        } label: {
+                            if isSelectionMode {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 34, height: 34)
+                                    .background(.ultraThinMaterial, in: Circle())
+                            } else {
+                                Text("選取")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .padding(.horizontal, 14)
+                                    .frame(height: 34)
+                                    .background(.ultraThinMaterial, in: Capsule())
+                            }
                         }
                         .buttonStyle(.plain)
                         .fixedSize()
@@ -1282,21 +1349,17 @@ struct AlbumHeroDetailView: View {
         }
         .safeAreaInset(edge: .bottom) {
             if isSelectionMode {
-                HStack {
-                    Text("已選取 \(selectedItemIDs.count) 個項目")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button(role: .destructive) {
+                ApplePhotosSelectionBottomBar(
+                    selectedCount: selectedItemIDs.count,
+                    onShare: {
+                        let selected = displayedItems.filter { selectedItemIDs.contains($0.persistentModelID) }
+                        ChekiBatchSharePresenter.share(items: selected)
+                    },
+                    onDelete: {
                         showDeleteConfirm = true
-                    } label: {
-                        Image(systemName: "trash")
                     }
-                    .disabled(selectedItemIDs.isEmpty)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .background(.bar)
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .confirmationDialog(
@@ -1304,7 +1367,7 @@ struct AlbumHeroDetailView: View {
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
-            Button("刪除", role: .destructive) {
+            Button("刪除 \(selectedItemIDs.count) 張拍立得", role: .destructive) {
                 for item in displayedItems where selectedItemIDs.contains(item.persistentModelID) {
                     modelContext.delete(item)
                 }
@@ -1882,6 +1945,332 @@ private final class ChekiDateFormatter: Sendable {
         formatter.dateFormat = "yyyy.MM.dd"
         formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - 7. Apple Photos 原生風格選取底部列（左圓分享、中選取張數、右圓刪除）與滑動多選手勢
+
+private struct ApplePhotosSelectionBottomBar: View {
+    let selectedCount: Int
+    let onShare: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center) {
+            // 左下圓形毛玻璃分享按鈕
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onShare()
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 48, height: 48)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(
+                        Circle()
+                            .strokeBorder(.white.opacity(0.18), lineWidth: 0.6)
+                    )
+                    .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+            }
+            .buttonStyle(.plain)
+            .disabled(selectedCount == 0)
+            .opacity(selectedCount == 0 ? 0.42 : 1.0)
+            .accessibilityLabel("分享已選取的拍立得")
+
+            Spacer()
+
+            // 中央已選取張數狀態文字（對齊 Apple 原生相簿「2枚の写真を選択 / 已選取 N 張照片」）
+            Text(selectedCount == 0 ? "選擇項目" : "已選取 \(selectedCount) 張照片")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.16), value: selectedCount)
+                .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
+
+            Spacer()
+
+            // 右下圓形毛玻璃刪除按鈕
+            Button(role: .destructive) {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                onDelete()
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 48, height: 48)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(
+                        Circle()
+                            .strokeBorder(.white.opacity(0.18), lineWidth: 0.6)
+                    )
+                    .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+            }
+            .buttonStyle(.plain)
+            .disabled(selectedCount == 0)
+            .opacity(selectedCount == 0 ? 0.42 : 1.0)
+            .accessibilityLabel("刪除已選取的拍立得")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(.systemBackground).opacity(0.0),
+                    Color(.systemBackground).opacity(0.75),
+                    Color(.systemBackground).opacity(0.94)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .bottom)
+        )
+    }
+}
+
+/// 仿照 Apple 原生相簿 (Photos.app) 的拖選多選手勢覆蓋層：
+/// - 單指點擊：切換單張拍立得的選取狀態
+/// - 單指橫向/斜向滑動：自動鎖定當前捲軸並進入連續範圍拖選（可接著跨越多列上下滑動批次勾選或取消勾選）
+/// - 單指垂直滑動：不攔截手勢，交由外層 `ScrollView` 原生順暢捲動
+private struct ApplePhotosDragSelectOverlay: UIViewRepresentable {
+    let itemIDs: [PersistentIdentifier]
+    let columnCount: Int
+    let spacing: CGFloat
+    let cellAspectRatio: CGFloat
+    @Binding var selectedItemIDs: Set<PersistentIdentifier>
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.isMultipleTouchEnabled = true
+
+        let tapGesture = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleTap(_:))
+        )
+        tapGesture.cancelsTouchesInView = false
+        view.addGestureRecognizer(tapGesture)
+
+        let panGesture = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePan(_:))
+        )
+        panGesture.maximumNumberOfTouches = 1
+        panGesture.cancelsTouchesInView = false
+        panGesture.delegate = context.coordinator
+        view.addGestureRecognizer(panGesture)
+
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: ApplePhotosDragSelectOverlay
+
+        private var dragStartIndex: Int?
+        private var lastDraggedIndex: Int?
+        private var dragIsSelecting: Bool = true
+        private var dragBaselineSelection: Set<PersistentIdentifier> = []
+        private let feedbackGenerator = UISelectionFeedbackGenerator()
+
+        init(parent: ApplePhotosDragSelectOverlay) {
+            self.parent = parent
+        }
+
+        private func itemIndex(at point: CGPoint, in boundsSize: CGSize, clampToBounds: Bool) -> Int? {
+            let count = parent.itemIDs.count
+            guard count > 0, boundsSize.width > 1 else { return nil }
+
+            let cols = max(1, parent.columnCount)
+            let spacing = parent.spacing
+            let totalHSpacing = CGFloat(cols - 1) * spacing
+            let cellWidth = max(1, (boundsSize.width - totalHSpacing) / CGFloat(cols))
+            let cellHeight = max(1, cellWidth / max(0.1, parent.cellAspectRatio))
+
+            let strideX = cellWidth + spacing
+            let strideY = cellHeight + spacing
+
+            if !clampToBounds {
+                guard point.x >= 0, point.x <= boundsSize.width, point.y >= 0 else { return nil }
+                let col = min(max(0, Int(floor(point.x / strideX))), cols - 1)
+                let row = Int(floor(point.y / strideY))
+                let idx = row * cols + col
+                return (idx >= 0 && idx < count) ? idx : nil
+            } else {
+                let clampedX = min(max(0, point.x), boundsSize.width - 0.01)
+                let clampedY = max(0, point.y)
+                let col = min(max(0, Int(floor(clampedX / strideX))), cols - 1)
+                let row = max(0, Int(floor(clampedY / strideY)))
+                let idx = row * cols + col
+                return min(max(0, idx), count - 1)
+            }
+        }
+
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard gesture.state == .ended,
+                  let view = gesture.view,
+                  let index = itemIndex(at: gesture.location(in: view), in: view.bounds.size, clampToBounds: false) else {
+                return
+            }
+            let id = parent.itemIDs[index]
+            feedbackGenerator.selectionChanged()
+            if parent.selectedItemIDs.contains(id) {
+                parent.selectedItemIDs.remove(id)
+            } else {
+                parent.selectedItemIDs.insert(id)
+            }
+        }
+
+        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard let view = gesture.view else { return }
+            let boundsSize = view.bounds.size
+
+            switch gesture.state {
+            case .began:
+                let currentPoint = gesture.location(in: view)
+                let translation = gesture.translation(in: view)
+                let touchDownPoint = CGPoint(
+                    x: currentPoint.x - translation.x,
+                    y: currentPoint.y - translation.y
+                )
+                guard let startIdx = itemIndex(at: touchDownPoint, in: boundsSize, clampToBounds: true) else {
+                    return
+                }
+                dragStartIndex = startIdx
+                lastDraggedIndex = nil
+                let startID = parent.itemIDs[startIdx]
+                dragIsSelecting = !parent.selectedItemIDs.contains(startID)
+                dragBaselineSelection = parent.selectedItemIDs
+                feedbackGenerator.prepare()
+                applyDragSelection(at: currentPoint, in: boundsSize)
+
+            case .changed:
+                applyDragSelection(at: gesture.location(in: view), in: boundsSize)
+
+            case .ended, .cancelled, .failed:
+                dragStartIndex = nil
+                lastDraggedIndex = nil
+                dragBaselineSelection = []
+
+            default:
+                break
+            }
+        }
+
+        private func applyDragSelection(at point: CGPoint, in boundsSize: CGSize) {
+            guard let startIdx = dragStartIndex,
+                  let currentIdx = itemIndex(at: point, in: boundsSize, clampToBounds: true) else {
+                return
+            }
+            guard currentIdx != lastDraggedIndex else { return }
+            lastDraggedIndex = currentIdx
+
+            let lower = min(startIdx, currentIdx)
+            let upper = max(startIdx, currentIdx)
+            var updated = dragBaselineSelection
+
+            for i in lower...upper where parent.itemIDs.indices.contains(i) {
+                let id = parent.itemIDs[i]
+                if dragIsSelecting {
+                    updated.insert(id)
+                } else {
+                    updated.remove(id)
+                }
+            }
+
+            if updated != parent.selectedItemIDs {
+                parent.selectedItemIDs = updated
+                feedbackGenerator.selectionChanged()
+                feedbackGenerator.prepare()
+            }
+        }
+
+        // MARK: UIGestureRecognizerDelegate
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer,
+                  let view = pan.view else {
+                return true
+            }
+            let velocity = pan.velocity(in: view)
+            // 橫向或斜向滑動時啟動拖選多選；純垂直滑動時讓給 ScrollView 原生捲動
+            return abs(velocity.x) >= abs(velocity.y) * 0.55
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            // 當拖選多選手勢一旦以橫向滑動啟動，阻止外層 UIScrollView 搶走手勢，讓使用者可接著上下跨列拖選
+            if otherGestureRecognizer is UIPanGestureRecognizer,
+               otherGestureRecognizer.view is UIScrollView {
+                return true
+            }
+            return false
+        }
+    }
+}
+
+@MainActor
+private enum ChekiBatchSharePresenter {
+    static func share(items: [ChekiItem]) {
+        guard !items.isEmpty else { return }
+        StoreKitManager.shared.refreshDailyFreeQuotaIfNeeded()
+        let isPro = PhotoLibraryManager.isProLifetimeUnlocked
+        let canUseDailyFreeQuota = !isPro && StoreKitManager.shared.hasDailyFreeQuotaAvailable && items.count == 1
+        let shouldExportFullResWithoutWatermark = isPro || canUseDailyFreeQuota
+
+        var shareObjects: [Any] = []
+        for item in items {
+            if let frontData = item.frontImageData,
+               let frontUI = UIImage(data: frontData) {
+                shareObjects.append(
+                    shouldExportFullResWithoutWatermark
+                        ? frontUI
+                        : ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: frontUI, downscaleForSNS: true)
+                )
+            }
+            if let backData = item.backImageData,
+               let backUI = UIImage(data: backData) {
+                shareObjects.append(
+                    shouldExportFullResWithoutWatermark
+                        ? backUI
+                        : ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: backUI, downscaleForSNS: true)
+                )
+            }
+        }
+        guard !shareObjects.isEmpty else { return }
+
+        let activityVC = UIActivityViewController(activityItems: shareObjects, applicationActivities: nil)
+        activityVC.completionWithItemsHandler = { _, completed, _, _ in
+            guard completed else { return }
+            Task { @MainActor in
+                if canUseDailyFreeQuota {
+                    StoreKitManager.shared.consumeDailyFreeQuotaIfAvailable()
+                }
+            }
+        }
+
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           var topVC = scene.windows.first(where: \.isKeyWindow)?.rootViewController ?? scene.windows.first?.rootViewController {
+            while let presented = topVC.presentedViewController {
+                topVC = presented
+            }
+            if let popover = activityVC.popoverPresentationController {
+                popover.sourceView = topVC.view
+                popover.sourceRect = CGRect(x: 44, y: topVC.view.bounds.height - 60, width: 48, height: 48)
+            }
+            topVC.present(activityVC, animated: true)
+        }
     }
 }
 
