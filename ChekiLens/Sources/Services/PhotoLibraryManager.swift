@@ -457,24 +457,45 @@ final class PhotoLibraryManager {
 
 // MARK: - 免費版浮水印渲染器與視圖疊加元件 (Free Tier Watermark Overlay & Export Renderer)
 
-/// 負責在「免費版 (`isProLifetimeUnlocked == false`)」分享或匯出裁切後拍立得時，動態將 `ChekiLens` 浮水印繪製至輸出圖片上；
-/// 若已解鎖 Pro 終身買斷版，則 100% 原圖無損直出、完全不加任何浮水印。
+/// 負責在「免費版 (`isProLifetimeUnlocked == false`)」且每日 1 張免費高畫質額度用罄後，
+/// 將匯出/分享的裁切拍立得縮小為 SNS 夠用畫質（長邊上限 960px、JPEG 0.72 壓縮）並於右下角加上 `ChekiLens` 浮水印；
+/// 若已解鎖 Pro 終身買斷版（或使用當日 1 張免費高畫質額度），則 100% 原圖 4K 無損直出、完全不加浮水印。
 enum ChekiWatermarkRenderer {
-    static func applyWatermarkIfNeeded(to image: UIImage) -> UIImage {
+    /// 免費版額度用完後的 SNS 輸出長邊像素上限（例如 Mini 約 603×960 px，勉強夠 SNS 分享）
+    static let freeTierSNSMaxDimension: CGFloat = 960.0
+    /// 免費版額度用完後的 JPEG 壓縮品質
+    static let freeTierSNSJPEGQuality: CGFloat = 0.72
+
+    static func applyWatermarkIfNeeded(to image: UIImage, downscaleForSNS: Bool = true) -> UIImage {
         guard !PhotoLibraryManager.isProLifetimeUnlocked else {
             return image
         }
 
-        let size = image.size
-        guard size.width > 10, size.height > 10 else { return image }
+        let pixelWidth = image.size.width * image.scale
+        let pixelHeight = image.size.height * image.scale
+        guard pixelWidth > 10, pixelHeight > 10 else { return image }
+
+        // 1. 計算免費版 SNS 縮圖尺寸（長邊上限 960px，scale 固定為 1.0 確保實際輸出像素縮小）
+        let targetSize: CGSize
+        if downscaleForSNS {
+            let maxSide = max(pixelWidth, pixelHeight)
+            let ratio = maxSide > freeTierSNSMaxDimension ? (freeTierSNSMaxDimension / maxSide) : 1.0
+            targetSize = CGSize(
+                width: max(1, round(pixelWidth * ratio)),
+                height: max(1, round(pixelHeight * ratio))
+            )
+        } else {
+            targetSize = CGSize(width: pixelWidth, height: pixelHeight)
+        }
 
         let format = UIGraphicsImageRendererFormat.default()
-        format.scale = image.scale
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        format.scale = 1.0
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
 
-        return renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
-            let shortSide = min(size.width, size.height)
+        let watermarkedImage = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+            let shortSide = min(targetSize.width, targetSize.height)
 
             // 右下角拍立得白邊品牌浮水印章 ("ChekiLens")
             let badgeFontSize = max(12, shortSide * 0.038)
@@ -491,8 +512,8 @@ enum ChekiWatermarkRenderer {
             let margin = max(10, shortSide * 0.036)
 
             let pillRect = CGRect(
-                x: size.width - textSize.width - padX * 2 - margin,
-                y: size.height - textSize.height - padY * 2 - margin,
+                x: targetSize.width - textSize.width - padX * 2 - margin,
+                y: targetSize.height - textSize.height - padY * 2 - margin,
                 width: textSize.width + padX * 2,
                 height: textSize.height + padY * 2
             )
@@ -512,6 +533,14 @@ enum ChekiWatermarkRenderer {
                 )
             )
         }
+
+        // 2. 壓縮為 SNS 等級 JPEG，讓檔案大小與畫質僅勉強夠 SNS 分享使用
+        if downscaleForSNS,
+           let compressedData = watermarkedImage.jpegData(compressionQuality: freeTierSNSJPEGQuality),
+           let compressedImage = UIImage(data: compressedData) {
+            return compressedImage
+        }
+        return watermarkedImage
     }
 }
 

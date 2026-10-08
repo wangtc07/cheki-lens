@@ -1117,26 +1117,45 @@ struct ChekiDetailView: View {
     }
 
     private func shareCurrentItem() {
+        StoreKitManager.shared.refreshDailyFreeQuotaIfNeeded()
         let isPro = PhotoLibraryManager.isProLifetimeUnlocked
-        let usedDailyFreeQuota = !isPro && StoreKitManager.shared.consumeDailyFreeQuotaIfAvailable()
-        let shouldSkipWatermark = isPro || usedDailyFreeQuota
+        let canUseDailyFreeQuota = !isPro && StoreKitManager.shared.hasDailyFreeQuotaAvailable
+        let shouldExportFullResWithoutWatermark = isPro || canUseDailyFreeQuota
 
         var shareItems: [Any] = []
         if let frontData = currentItem.frontImageData,
            let frontUI = UIImage(data: frontData) {
-            shareItems.append(shouldSkipWatermark ? frontUI : ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: frontUI))
+            shareItems.append(
+                shouldExportFullResWithoutWatermark
+                    ? frontUI
+                    : ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: frontUI, downscaleForSNS: true)
+            )
         }
         if let backData = currentItem.backImageData,
            let backUI = UIImage(data: backData) {
-            shareItems.append(shouldSkipWatermark ? backUI : ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: backUI))
+            shareItems.append(
+                shouldExportFullResWithoutWatermark
+                    ? backUI
+                    : ChekiWatermarkRenderer.applyWatermarkIfNeeded(to: backUI, downscaleForSNS: true)
+            )
         }
         guard !shareItems.isEmpty else { return }
 
-        if usedDailyFreeQuota {
-            showToast("已使用今日免費無浮水印高畫質額度（今日剩餘 0/1）")
+        if !isPro && !canUseDailyFreeQuota {
+            showToast("今日免費高畫質額度已滿（1/1），目前為 SNS 畫質＋浮水印")
         }
 
         let activityVC = UIActivityViewController(activityItems: shareItems, applicationActivities: nil)
+        activityVC.completionWithItemsHandler = { _, completed, _, _ in
+            guard completed else { return }
+            Task { @MainActor in
+                if canUseDailyFreeQuota {
+                    StoreKitManager.shared.consumeDailyFreeQuotaIfAvailable()
+                    showToast("已使用今日免費高畫質無浮水印輸出（1/1）")
+                }
+            }
+        }
+
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let rootVC = scene.windows.first?.rootViewController {
             rootVC.present(activityVC, animated: true)

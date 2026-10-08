@@ -150,8 +150,9 @@ enum AppAppearanceMode: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
-    // MARK: Pro 買斷狀態 (預留與 Phase 5 StoreKitManager 雙向綁定)
+    // MARK: Pro 買斷狀態與每日免費額度 (與 Phase 5 StoreKitManager 雙向綁定)
     @AppStorage("isProLifetimeUnlocked") private var isProLifetimeUnlocked: Bool = false
+    @AppStorage("dailyFreeQuotaUsedCount") private var dailyFreeQuotaUsedCount: Int = 0
 
     // MARK: 第 1 組：相簿雙向同步與時間軸策略
     @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = false
@@ -503,15 +504,16 @@ struct SettingsView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                    } else if StoreKitManager.shared.remainingDailyFreeQuota < StoreKitManager.dailyFreeLimit {
+                    } else if dailyFreeQuotaUsedCount > 0 {
                         Button {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             StoreKitManager.shared.resetDailyFreeQuota()
+                            dailyFreeQuotaUsedCount = 0
                         } label: {
                             HStack {
                                 SettingsRowLabel(
                                     title: "重置今日免費 1 張額度（開發測試）",
-                                    subtitle: "目前剩餘 \(StoreKitManager.shared.remainingDailyFreeQuota)/\(StoreKitManager.dailyFreeLimit) 張",
+                                    subtitle: "目前使用進度 \(min(StoreKitManager.dailyFreeLimit, dailyFreeQuotaUsedCount))/\(StoreKitManager.dailyFreeLimit)（點擊重置為 0/1）",
                                     systemImage: "arrow.counterclockwise.circle.fill",
                                     iconColor: .purple
                                 )
@@ -574,7 +576,7 @@ struct SettingsView: View {
     // MARK: - Pro 終身買斷尊爵橫幅卡片 (對齊 docs/ui/screen_07_settings.html，僅於未解鎖時顯示)
 
     private var proLifetimeBannerCard: some View {
-        let remainingQuota = StoreKitManager.shared.remainingDailyFreeQuota
+        let usedQuota = min(StoreKitManager.dailyFreeLimit, max(0, dailyFreeQuotaUsedCount))
         let dailyLimit = StoreKitManager.dailyFreeLimit
 
         return VStack(alignment: .leading, spacing: 12) {
@@ -587,7 +589,7 @@ struct SettingsView: View {
                     .tracking(0.6)
                     .foregroundStyle(Color(red: 0.65, green: 0.71, blue: 0.99))
                 Spacer()
-                Text("今日免費無浮水印 \(remainingQuota)/\(dailyLimit)")
+                Text("今日免費無浮水印 \(usedQuota)/\(dailyLimit)")
                     .font(.caption2.weight(.bold).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.92))
                     .padding(.horizontal, 8)
