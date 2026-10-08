@@ -284,7 +284,7 @@ struct LibraryView: View {
                 }
             }
             .navigationDestination(for: ChekiDetailRoute.self) { route in
-                ChekiDetailView(itemID: route.itemID)
+                ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
                     .toolbar(.hidden, for: .tabBar)
             }
             .alert(
@@ -577,7 +577,7 @@ struct LibraryView: View {
                     }
                 }
         } else {
-            NavigationLink(value: ChekiDetailRoute(itemID: item.id)) {
+            NavigationLink(value: ChekiDetailRoute(itemID: item.id, scopedItemIDs: displayedItems.map(\.id))) {
                 AppleLibraryPhotoCell(item: item, cornerRadius: cornerRadius)
             }
             .buttonStyle(.plain)
@@ -991,7 +991,7 @@ struct AlbumsRootView: View {
                 )
             }
             .navigationDestination(for: ChekiDetailRoute.self) { route in
-                ChekiDetailView(itemID: route.itemID)
+                ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
                     .toolbar(.hidden, for: .tabBar)
             }
         }
@@ -2547,7 +2547,7 @@ struct AlbumHeroDetailView: View {
                 Spacer()
 
                 if let firstItem = displayedItems.first {
-                    NavigationLink(value: ChekiDetailRoute(itemID: firstItem.id)) {
+                    NavigationLink(value: ChekiDetailRoute(itemID: firstItem.id, scopedItemIDs: displayedItems.map(\.id))) {
                         Image(systemName: "play.fill")
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(.white)
@@ -2609,7 +2609,7 @@ struct AlbumHeroDetailView: View {
                     }
                 }
         } else {
-            NavigationLink(value: ChekiDetailRoute(itemID: item.id)) {
+            NavigationLink(value: ChekiDetailRoute(itemID: item.id, scopedItemIDs: displayedItems.map(\.id))) {
                 AlbumSquareThumbnailCell(item: item, cornerRadius: cellCornerRadius)
             }
             .buttonStyle(.plain)
@@ -3339,7 +3339,7 @@ struct LibrarySearchView: View {
 
                         LazyVGrid(columns: threeColumns, spacing: 10) {
                             ForEach(filteredItems) { item in
-                                NavigationLink(value: ChekiDetailRoute(itemID: item.id)) {
+                                NavigationLink(value: ChekiDetailRoute(itemID: item.id, scopedItemIDs: filteredItems.map(\.id))) {
                                     AppleLibraryPhotoCell(item: item, cornerRadius: 9)
                                 }
                                 .buttonStyle(.plain)
@@ -3376,7 +3376,7 @@ struct LibrarySearchView: View {
                 SettingsView()
             }
             .navigationDestination(for: ChekiDetailRoute.self) { route in
-                ChekiDetailView(itemID: route.itemID)
+                ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
                     .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(for: IdolMember.self) { member in

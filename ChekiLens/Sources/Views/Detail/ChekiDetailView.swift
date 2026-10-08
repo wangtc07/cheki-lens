@@ -14,6 +14,12 @@ import UIKit
 
 struct ChekiDetailRoute: Hashable {
     let itemID: UUID
+    let scopedItemIDs: [UUID]?
+
+    init(itemID: UUID, scopedItemIDs: [UUID]? = nil) {
+        self.itemID = itemID
+        self.scopedItemIDs = scopedItemIDs
+    }
 }
 
 struct ChekiDetailView: View {
@@ -27,6 +33,8 @@ struct ChekiDetailView: View {
 
     /// 初始點進來的拍立得 UUID（不直接持有 `@Model` 強引用，避免刪除後 SwiftData 觸發已刪除物件 Fault 閃退）
     private let initialItemID: UUID
+    /// 從相冊、搜尋或特定篩選排序點進來時的「限定範圍與排序 ID 列表」（Task 6.5.9：確保左右滑動與底部膠卷僅顯示該相冊內容與當前排序）
+    private let scopedItemIDs: [UUID]?
 
     /// 當前正在檢視的拍立得（透過底部縮圖膠卷或左右滑動可即時切換）
     @State private var showingQuickCreateMember: Bool = false
@@ -82,22 +90,40 @@ struct ChekiDetailView: View {
     @State private var syncStatusToast: String? = nil
     @State private var detailViewInstanceID = UUID()
 
-    init(itemID: UUID) {
+    init(itemID: UUID, scopedItemIDs: [UUID]? = nil) {
         self.initialItemID = itemID
+        self.scopedItemIDs = scopedItemIDs
         _currentItemID = State(initialValue: itemID)
     }
 
-    init(item: ChekiItem) {
+    init(item: ChekiItem, scopedItemIDs: [UUID]? = nil) {
         let id = item.id
         self.initialItemID = id
+        self.scopedItemIDs = scopedItemIDs
         _currentItemID = State(initialValue: id)
     }
 
-    /// 膠卷滾動條中的所有有效項目（嚴格過濾已刪除或已脫離 ModelContext 的物件）
-    private var filmstripItems: [ChekiItem] {
+    /// 典藏庫中所有有效項目（供「從 App 內選取背面」跨相冊挑選使用）
+    private var allValidLibraryItems: [ChekiItem] {
         allChekiItems
             .filter { !$0.isDeleted && $0.modelContext != nil && !deletedItemIDs.contains($0.id) }
             .sorted { $0.displayDate > $1.displayDate }
+    }
+
+    /// 膠卷滾動條與左右滑動中的所有有效項目：
+    /// - 若有傳入 `scopedItemIDs`（例如從指定相冊點開），嚴格依照該相冊內的項目與其當前排序呈現；
+    /// - 否則預設顯示全部有效項目（依顯示日期由新到舊）。
+    private var filmstripItems: [ChekiItem] {
+        let validItems = allChekiItems
+            .filter { !$0.isDeleted && $0.modelContext != nil && !deletedItemIDs.contains($0.id) }
+        if let scopedItemIDs, !scopedItemIDs.isEmpty {
+            let itemByID = Dictionary(uniqueKeysWithValues: validItems.map { ($0.id, $0) })
+            let scopedOrdered = scopedItemIDs.compactMap { itemByID[$0] }
+            if !scopedOrdered.isEmpty {
+                return scopedOrdered
+            }
+        }
+        return validItems.sorted { $0.displayDate > $1.displayDate }
     }
 
     /// 目前選中的索引位置
@@ -271,7 +297,7 @@ struct ChekiDetailView: View {
             if let activeItem = currentItemOpt {
                 InAppBacksidePickerSheet(
                     targetItem: activeItem,
-                    candidates: filmstripItems.filter { $0.id != activeItem.id },
+                    candidates: allValidLibraryItems.filter { $0.id != activeItem.id },
                     onSelectItem: { selectedSource, mergeAndRemoveSource in
                         attachBacksideFromInAppItem(selectedSource, mergeAndRemoveSource: mergeAndRemoveSource)
                     }
