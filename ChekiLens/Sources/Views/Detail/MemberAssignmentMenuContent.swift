@@ -21,7 +21,7 @@ struct MemberAssignmentMenuContent: View {
         let assignedIDs = isItemValid ? Set(item.assignedMemberIDs) : Set<UUID>()
         let isUncategorized = isItemValid ? item.isUncategorized : true
 
-        Section("選擇成員（可多選）") {
+        Section(L10n.tr("成員", "メンバー")) {
             ForEach(idolGroups) { group in
                 let groupMembers = validMembers.filter { $0.group?.id == group.id }
                 if !groupMembers.isEmpty {
@@ -32,7 +32,7 @@ struct MemberAssignmentMenuContent: View {
                     } label: {
                         let selectedInGroup = groupMembers.filter { assignedIDs.contains($0.id) }.count
                         if selectedInGroup > 0 {
-                            Label("\(group.name) (\(selectedInGroup))", systemImage: "checkmark.circle.fill")
+                            Label("\(group.name) · \(selectedInGroup)", systemImage: "checkmark.circle.fill")
                         } else {
                             Text(group.name)
                         }
@@ -50,11 +50,11 @@ struct MemberAssignmentMenuContent: View {
                     let selectedUngrouped = ungroupedMembers.filter { assignedIDs.contains($0.id) }.count
                     if selectedUngrouped > 0 {
                         Label(
-                            "\(L10n.tr("未分團成員", "グループ未所属")) (\(selectedUngrouped))",
+                            "\(L10n.tr("未分團", "未所属")) · \(selectedUngrouped)",
                             systemImage: "checkmark.circle.fill"
                         )
                     } else {
-                        Text("未分團成員")
+                        Text(L10n.tr("未分團", "未所属"))
                     }
                 }
                 .menuActionDismissBehavior(.disabled)
@@ -66,7 +66,7 @@ struct MemberAssignmentMenuContent: View {
         Button {
             clearMembers()
         } label: {
-            Label("設為「未分類」", systemImage: isUncategorized ? "checkmark" : "tray")
+            Label(L10n.tr("未分類", "未分類"), systemImage: isUncategorized ? "checkmark" : "tray")
         }
         .menuActionDismissBehavior(.disabled)
 
@@ -75,7 +75,7 @@ struct MemberAssignmentMenuContent: View {
         Button {
             onCreateMember()
         } label: {
-            Label("新增成員…", systemImage: "person.badge.plus")
+            Label(L10n.tr("成員", "メンバー"), systemImage: "person.badge.plus")
         }
         .menuActionDismissBehavior(.enabled)
     }
@@ -209,7 +209,7 @@ struct MemberMultiSelectPopoverView: View {
         VStack(spacing: 0) {
             // 頂部狀態與快速設為未分類列
             HStack(spacing: 8) {
-                Label("選擇成員（可多選）", systemImage: "person.2.fill")
+                Label(L10n.tr("成員", "メンバー"), systemImage: "person.2.fill")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
 
@@ -219,7 +219,7 @@ struct MemberMultiSelectPopoverView: View {
                     Button {
                         clearAllSelectedMembers()
                     } label: {
-                        Text("設為未分類")
+                        Text(L10n.tr("未分類", "未分類"))
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.red)
                             .padding(.horizontal, 8)
@@ -293,7 +293,7 @@ struct MemberMultiSelectPopoverView: View {
                                 selectedGroupID = Self.ungroupedCategoryID
                             } label: {
                                 HStack(spacing: 6) {
-                                    Text("未分團成員")
+                                    Text(L10n.tr("未分團", "未所属"))
                                         .font(.subheadline.weight(isActive ? .bold : .medium))
                                         .foregroundStyle(isActive ? .primary : .secondary)
                                         .lineLimit(1)
@@ -383,7 +383,7 @@ struct MemberMultiSelectPopoverView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "person.badge.plus")
                         .font(.subheadline.weight(.semibold))
-                    Text("新增成員…")
+                    Text(L10n.tr("成員", "メンバー"))
                         .font(.subheadline.weight(.semibold))
                     Spacer()
                 }

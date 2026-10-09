@@ -201,7 +201,7 @@ struct ChekiInfoView: View {
                                     HStack(spacing: 3) {
                                         Image(systemName: "plus")
                                             .font(.system(size: 10, weight: .bold))
-                                        Text("選擇成員")
+                                        Text(L10n.tr("成員", "メンバー"))
                                             .font(.caption.weight(.medium))
                                     }
                                     .foregroundStyle(.secondary)
@@ -219,7 +219,7 @@ struct ChekiInfoView: View {
 
             // MARK: 2. 備忘（預設空白，點擊直接輸入並即時儲存）
             Section("備忘") {
-                TextField("點擊輸入備忘…", text: $memoText, axis: .vertical)
+                TextField(L10n.tr("輸入備忘…", "メモを入力…"), text: $memoText, axis: .vertical)
                     .lineLimit(3...8)
                     .focused($isMemoFocused)
                     .onChange(of: memoText) { _, newValue in

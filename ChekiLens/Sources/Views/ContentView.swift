@@ -23,17 +23,17 @@ struct ContentView: View {
             if hasCompletedOnboarding {
                 ZStack {
                     TabView(selection: $selectedTab) {
-                        Tab("全部", systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
+                        Tab(L10n.tr("全部", "すべて"), systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
                             LibraryView()
                                 .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
                         }
 
-                        Tab("相冊", systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
+                        Tab(L10n.tr("相冊", "アルバム"), systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
                             AlbumsRootView()
                                 .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
                         }
 
-                        Tab("搜尋", systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
+                        Tab(L10n.tr("搜尋", "検索"), systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
                             LibrarySearchView()
                                 .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
                         }

@@ -825,7 +825,7 @@ struct CameraScannerView: View {
                     ChekiDetailView(itemID: latest.id)
                         .toolbar {
                             ToolbarItem(placement: .topBarLeading) {
-                                Button("返回相機") {
+                                Button(L10n.tr("返回", "戻る")) {
                                     showingLatestDetail = false
                                 }
                             }
@@ -947,7 +947,7 @@ struct CameraScannerView: View {
                     .font(.caption)
                     .foregroundStyle(.yellow)
 
-                Button("重設") {
+                Button(L10n.tr("重設", "リセット")) {
                     camera.applyExposureBias(-0.3)
                 }
                 .font(.caption.weight(.semibold))
@@ -1017,7 +1017,7 @@ struct CameraScannerView: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "sparkles")
-                                Text("立即合成無反光照片 (\(completedCornerCount)/4 角點)")
+                                Text(L10n.tr("合成 · \(completedCornerCount)/4", "合成 · \(completedCornerCount)/4"))
                             }
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.black)
@@ -1150,14 +1150,16 @@ struct CameraScannerView: View {
         if let statusBannerMessage {
             Text(statusBannerMessage)
                 .font(.caption.weight(.semibold))
+                .lineLimit(1)
                 .foregroundStyle(.black)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
                 .background((captureMode == .dualGlare ? Color.cyan : Color.yellow), in: Capsule())
                 .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
         } else if captureMode == .frontAndBack {
-            Text(pendingFrontImageData == nil ? "正反雙面 (1/2)：請對準拍立得【正面】" : "正反雙面 (2/2)：請翻面拍攝【背面手寫】")
+            Text(pendingFrontImageData == nil ? L10n.tr("1/2 · 拍攝正面", "1/2 · 表面を撮影") : L10n.tr("2/2 · 翻面拍背面", "2/2 · 裏面を撮影"))
                 .font(.caption.weight(.semibold))
+                .lineLimit(1)
                 .foregroundStyle(.black)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
@@ -1165,18 +1167,20 @@ struct CameraScannerView: View {
         } else if captureMode == .dualGlare {
             Text(
                 isPhotoScanSessionActive
-                    ? "⚡️ 四邊已固定：請移動至四個角，分別按快門 (\(completedCornerCount)/4)"
-                    : "⚡️ 四角防反光：請先對準拍立得按第 1 次快門固定四邊位置"
+                    ? L10n.tr("對準四個圓點拍攝 · \(completedCornerCount)/4", "4つの点に合わせて撮影 · \(completedCornerCount)/4")
+                    : L10n.tr("對準拍立得按快門鎖定邊框", "チェキに合わせて枠を固定")
             )
             .font(.caption.weight(.semibold))
+            .lineLimit(1)
             .foregroundStyle(.black)
             .padding(.horizontal, 14)
             .padding(.vertical, 6)
             .background(Color.cyan, in: Capsule())
             .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
         } else {
-            Text("已鎖定 86×54mm 拍立得邊框")
+            Text(L10n.tr("已鎖定邊框", "枠をロック中"))
                 .font(.caption2.weight(.semibold))
+                .lineLimit(1)
                 .foregroundStyle(.yellow)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -1332,8 +1336,8 @@ struct CameraScannerView: View {
                         resetPhotoScanState()
                         withAnimation {
                             statusBannerMessage = L10n.tr(
-                                "已重設四邊防反光掃描，請重新按快門固定首張位置",
-                                "四隅の反射防止スキャンをリセットしました。もう一度シャッターを押して枠を固定してください"
+                                "已重設，請重新鎖定邊框",
+                                "リセット完了 · 枠を再固定"
                             )
                         }
                     } else if pendingFrontImageData != nil {
@@ -1343,8 +1347,8 @@ struct CameraScannerView: View {
                             pendingFrontImageData = nil
                             pendingOriginalFrontImageData = nil
                             statusBannerMessage = L10n.tr(
-                                "已取消背面拍攝，重新拍攝正面",
-                                "裏面の撮影をキャンセルしました。表面から撮り直してください"
+                                "已重設，請拍攝正面",
+                                "リセット完了 · 表面を撮影"
                             )
                         }
                     } else {
@@ -1533,8 +1537,8 @@ struct CameraScannerView: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 withAnimation {
                     statusBannerMessage = L10n.tr(
-                        "正面已儲存！請將拍立得翻至背面再按一次快門",
-                        "表面を保存しました！チェキを裏返してもう一度シャッターを押してください"
+                        "正面完成 · 請翻面拍背面",
+                        "表面完了 · 裏面を撮影"
                     )
                 }
             } else {
@@ -1570,8 +1574,8 @@ struct CameraScannerView: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 withAnimation {
                     statusBannerMessage = L10n.tr(
-                        "正反雙面已儲存！背景自動裁切正位中...",
-                        "両面を保存しました！バックグラウンドで自動トリミング中..."
+                        "雙面已儲存 · 裁切中…",
+                        "両面を保存 · 補正中…"
                     )
                 }
 
@@ -1617,8 +1621,8 @@ struct CameraScannerView: View {
                     guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                     withAnimation {
                         self.statusBannerMessage = L10n.tr(
-                            "正反雙面拍立得已完成背景裁切並同步至系統相簿！",
-                            "両面チェキの自動トリミングと「写真」アプリへの同期が完了しました！"
+                            "雙面正位並同步完成",
+                            "両面の補正・同期完了"
                         )
                     }
                 }
@@ -1645,8 +1649,8 @@ struct CameraScannerView: View {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation {
                 statusBannerMessage = L10n.tr(
-                    "已儲存照片！背景自動裁切中...",
-                    "写真を保存しました！バックグラウンドで自動トリミング中..."
+                    "已儲存 · 裁切中…",
+                    "保存完了 · 補正中…"
                 )
             }
 
@@ -1680,8 +1684,8 @@ struct CameraScannerView: View {
                 guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                 withAnimation {
                     self.statusBannerMessage = L10n.tr(
-                        "已自動正位並存入系統相簿",
-                        "自動補正して「写真」アプリに保存しました"
+                        "正位並同步完成",
+                        "補正・同期完了"
                     )
                 }
             }
@@ -1742,8 +1746,8 @@ struct CameraScannerView: View {
         withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
             isPhotoScanSessionActive = true
             statusBannerMessage = L10n.tr(
-                "⚡️ 四邊已固定！請移動至【左上 1】角點並按快門 (0/4)",
-                "⚡️ 枠を固定しました！【左上 1】に合わせてシャッターを押してください (0/4)"
+                "已鎖定邊框 · 對準左上 1 · 0/4",
+                "枠を固定 · 左上 1 へ移動 · 0/4"
             )
         }
     }
@@ -1794,8 +1798,8 @@ struct CameraScannerView: View {
             let nextIdx = activePhotoScanCornerIndex ?? nextUncapturedCornerIndex ?? 0
             withAnimation {
                 statusBannerMessage = L10n.tr(
-                    "已拍 \(cornerNames[index]) (\(doneCount)/4)！請移至【\(cornerNames[nextIdx])】按快門",
-                    "\(cornerNames[index]) を撮影 (\(doneCount)/4)！次は【\(cornerNames[nextIdx])】でシャッターを押してください"
+                    "已完成 \(doneCount)/4 · 下一個：\(cornerNames[nextIdx])",
+                    "\(doneCount)/4 完了 · 次は \(cornerNames[nextIdx])"
                 )
             }
         }
@@ -1847,8 +1851,8 @@ struct CameraScannerView: View {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         withAnimation {
             statusBannerMessage = L10n.tr(
-                "✨ 已儲存照片！背景正在執行四角防反光合成...",
-                "✨ 写真を保存しました！バックグラウンドで四隅の反射除去を合成中..."
+                "已儲存 · 防反光合成中…",
+                "保存完了 · 反射除去合成中…"
             )
         }
 
@@ -1919,8 +1923,8 @@ struct CameraScannerView: View {
                 guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                 withAnimation {
                     self.statusBannerMessage = L10n.tr(
-                        "✨ 四角去反光合成完成！已同步至系統相簿",
-                        "✨ 四隅の反射除去合成が完了し、「写真」アプリに同期しました！"
+                        "防反光合成並同步完成",
+                        "反射除去合成・同期完了"
                     )
                 }
             } else {
@@ -1953,8 +1957,8 @@ struct CameraScannerView: View {
                 guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                 withAnimation {
                     self.statusBannerMessage = L10n.tr(
-                        "已透過反光抑制正位並存入系統相簿",
-                        "反射抑制・自動補正して「写真」アプリに保存しました"
+                        "反光抑制並同步完成",
+                        "反射抑制・同期完了"
                     )
                 }
             }

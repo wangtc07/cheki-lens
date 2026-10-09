@@ -452,7 +452,7 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
         case .mini:   return "Instax Mini"
         case .square: return "Instax Square"
         case .wide:   return "Instax Wide"
-        case .auto:   return L10n.tr("自動識別", "自動判別")
+        case .auto:   return L10n.tr("自動", "自動")
         }
     }
 
@@ -464,10 +464,10 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     /// 含毫米尺寸的完整顯示名稱
     var detailDisplayName: String {
         switch concreteFormat {
-        case .mini:   return "Instax Mini (86×54mm)"
-        case .square: return "Instax Square (86×72mm)"
-        case .wide:   return "Instax Wide (86×108mm)"
-        case .auto:   return "Instax Mini (86×54mm)"
+        case .mini:   return "Instax Mini · 86×54mm"
+        case .square: return "Instax Square · 86×72mm"
+        case .wide:   return "Instax Wide · 86×108mm"
+        case .auto:   return "Instax Mini · 86×54mm"
         }
     }
 }

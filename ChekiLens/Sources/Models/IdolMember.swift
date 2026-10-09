@@ -72,13 +72,9 @@ extension IdolMember {
     /// 顯示名稱：優先藝名
     var displayName: String { stageName }
 
-    /// 成員相冊名稱：有團體時為「人名 (團體)」，無團體時為「人名」
+    /// 成員相冊名稱：直接使用成員名（不加括號）
     var albumTitle: String {
-        if let groupName = group?.name.trimmingCharacters(in: .whitespacesAndNewlines),
-           !groupName.isEmpty {
-            return "\(stageName) (\(groupName))"
-        }
-        return stageName
+        stageName
     }
 
     /// 最新一張拍立得（按 displayDate 排序）

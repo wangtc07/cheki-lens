@@ -274,7 +274,7 @@ struct ChekiDetailView: View {
                             modelContext: modelContext
                         )
                         if didSyncExternal {
-                            showToast(L10n.tr("已同步系統相簿最新調色修改", "「写真」アプリの最新の色調整を同期しました"))
+                            showToast(L10n.tr("已同步系統相簿修改", "写真アプリの編集を同期しました"))
                         }
                         await ensureCoverDateAndFormatNormalized(for: activeItem)
                     }
@@ -286,7 +286,7 @@ struct ChekiDetailView: View {
                                 modelContext: modelContext
                             )
                             if didSync {
-                                showToast(L10n.tr("已同步系統相簿最新調色修改", "「写真」アプリの最新の色調整を同期しました"))
+                                showToast(L10n.tr("已同步系統相簿修改", "写真アプリの編集を同期しました"))
                             }
                         }
                     }
@@ -386,19 +386,19 @@ struct ChekiDetailView: View {
             }
         }
         .confirmationDialog(
-            "確定要刪除此照片嗎？",
+            L10n.tr("刪除此照片？", "この写真を削除しますか？"),
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
-            Button("刪除拍立得", role: .destructive) {
+            Button(L10n.tr("刪除", "削除"), role: .destructive) {
                 deleteCurrentItem()
             }
             Button("取消", role: .cancel) {}
         } message: {
             Text(
                 PhotoLibraryManager.shouldSyncDeleteFromSystemPhotoLibrary(for: currentItemOpt)
-                    ? "此拍立得（含正反面與特典會備忘）將從典藏庫與 iOS 系統相簿中一併刪除。"
-                    : "此拍立得（含背面與特典會備忘）將從典藏庫永久移除。"
+                    ? L10n.tr("將從典藏庫與系統相簿刪除。", "ライブラリと写真アプリから削除されます。")
+                    : L10n.tr("將從典藏庫永久移除。", "ライブラリから完全に削除されます。")
             )
         }
     }
@@ -420,7 +420,7 @@ struct ChekiDetailView: View {
                     .frame(width: buttonSize, height: buttonSize)
                     .background(.ultraThinMaterial, in: Circle())
             }
-            .accessibilityLabel("返回相簿")
+            .accessibilityLabel("返回")
 
             Spacer()
 
@@ -454,7 +454,7 @@ struct ChekiDetailView: View {
                 .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 3)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("檢視拍攝日期與時間資訊")
+            .accessibilityLabel("資訊")
 
             Spacer()
 
@@ -464,7 +464,7 @@ struct ChekiDetailView: View {
                     trigger3DFlip()
                 } label: {
                     Label(
-                        LocalizedStringKey(isShowingBack ? "翻回正面相片" : "3D 翻轉查看背面"),
+                        L10n.tr(isShowingBack ? "正面" : "背面", isShowingBack ? "表面" : "裏面"),
                         systemImage: "rectangle.portrait.rotate"
                     )
                 }
@@ -476,7 +476,7 @@ struct ChekiDetailView: View {
                         showingInAppBacksidePicker = true
                     } label: {
                         Label(
-                            LocalizedStringKey(currentItem.hasBothSides ? "從 App 內替換背面照片" : "從 App 內選取背面照片"),
+                            L10n.tr("App 內照片", "アプリ内の写真"),
                             systemImage: "square.grid.2x2"
                         )
                     }
@@ -485,7 +485,7 @@ struct ChekiDetailView: View {
                         isShowingBacksidePicker = true
                     } label: {
                         Label(
-                            LocalizedStringKey(currentItem.hasBothSides ? "從系統相簿替換背面照片" : "從系統相簿選取背面照片"),
+                            L10n.tr("系統相簿", "写真アプリ"),
                             systemImage: "photo.badge.plus"
                         )
                     }
@@ -496,7 +496,7 @@ struct ChekiDetailView: View {
                         Button {
                             swapCurrentItemSides()
                         } label: {
-                            Label("對調正反面照片", systemImage: "arrow.left.arrow.right")
+                            Label(L10n.tr("正反對調", "表裏を入れ替え"), systemImage: "arrow.left.arrow.right")
                         }
 
                         Button(role: .destructive) {
@@ -509,24 +509,24 @@ struct ChekiDetailView: View {
                                 flipProgress = 0.0
                             }
                         } label: {
-                            Label("移除背面照片", systemImage: "trash")
+                            Label(L10n.tr("背面", "裏面"), systemImage: "trash")
                         }
                     }
                 } label: {
-                    Label("正反雙面管理", systemImage: "rectangle.portrait.on.rectangle.portrait")
+                    Label(L10n.tr("背面設定", "裏面設定"), systemImage: "rectangle.portrait.on.rectangle.portrait")
                 }
 
                 Menu {
                     MemberAssignmentMenuContent(item: currentItem) { showingQuickCreateMember = true }
                 } label: {
-                    Label("指派推角成員", systemImage: "person.crop.circle")
+                    Label(L10n.tr("成員", "メンバー"), systemImage: "person.crop.circle")
                 }
                 .menuActionDismissBehavior(.disabled)
 
                 Button {
                     Task { await syncCurrentItemToSystemPhotos() }
                 } label: {
-                    Label("寫入系統相簿（含 OCR 時間軸）", systemImage: "photo.on.rectangle.angled")
+                    Label(L10n.tr("同步至相簿", "写真アプリに同期"), systemImage: "photo.on.rectangle.angled")
                 }
 
                 Divider()
@@ -534,14 +534,14 @@ struct ChekiDetailView: View {
                 Button {
                     showingAdjustmentSheet = true
                 } label: {
-                    Label("調整邊界與相紙比例", systemImage: "slider.horizontal.3")
+                    Label(L10n.tr("裁切與比例", "トリミングと比率"), systemImage: "slider.horizontal.3")
                 }
 
                 Button {
                     toggleWhiteBalancePickerMode()
                 } label: {
                     Label(
-                        isWhiteBalancePickerActive ? "結束白平衡取樣" : "點選白色部分校正白平衡",
+                        isWhiteBalancePickerActive ? L10n.tr("完成白平衡", "ホワイトバランス完了") : L10n.tr("白平衡", "ホワイトバランス"),
                         systemImage: "eyedropper.halffull"
                     )
                 }
@@ -552,7 +552,7 @@ struct ChekiDetailView: View {
                             await resetWhiteBalanceForCurrentSide()
                         }
                     } label: {
-                        Label("重置白平衡", systemImage: "arrow.counterclockwise")
+                        Label(L10n.tr("白平衡", "ホワイトバランス"), systemImage: "arrow.counterclockwise")
                     }
                 }
 
@@ -560,13 +560,13 @@ struct ChekiDetailView: View {
                     if PhotoLibraryManager.isProLifetimeUnlocked {
                         isShowingModeBSecondAnglePicker = true
                     } else {
-                        showToast("Mode B 雙角度去反光合成為 Pro 買斷版專屬功能")
+                        showToast(L10n.tr("去反光合成為 Pro 功能", "反射除去合成は Pro 機能です"))
                     }
                 } label: {
                     Label(
                         PhotoLibraryManager.isProLifetimeUnlocked
-                            ? "Mode B 雙角度去反光合成"
-                            : "Mode B 雙角度去反光合成 (Pro)",
+                            ? L10n.tr("去反光合成", "反射除去合成")
+                            : L10n.tr("去反光合成 · Pro", "反射除去合成 · Pro"),
                         systemImage: "sparkles.rectangle.stack"
                     )
                 }
@@ -577,14 +577,14 @@ struct ChekiDetailView: View {
                             await revertCurrentItemToOriginal(backside: isShowingBack && currentItem.hasBothSides)
                         }
                     } label: {
-                        Label("復原為原始圖片（取消裁切）", systemImage: "arrow.uturn.backward.circle")
+                        Label(L10n.tr("復原原圖", "元の画像に戻す"), systemImage: "arrow.uturn.backward.circle")
                     }
                 }
 
                 Button {
                     showingInfoSheet = true
                 } label: {
-                    Label("資訊與特典會備忘", systemImage: "info.circle")
+                    Label(L10n.tr("資訊", "情報"), systemImage: "info.circle")
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -593,7 +593,7 @@ struct ChekiDetailView: View {
                     .frame(width: buttonSize, height: buttonSize)
                     .background(.ultraThinMaterial, in: Circle())
             }
-            .accessibilityLabel("更多操作選單")
+            .accessibilityLabel("更多")
         }
         .padding(.horizontal, 16)
         .padding(.top, isLandscape ? 4 : 8)
@@ -832,7 +832,7 @@ struct ChekiDetailView: View {
             HStack(spacing: 3) {
                 Image(systemName: "rectangle.portrait.rotate")
                     .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
-                Text(LocalizedStringKey(isBackFace ? "背面 · 翻面" : (pageItem.hasBothSides ? "正面 · 翻面" : "單面 · 補背面")))
+                Text(L10n.tr(isBackFace ? "背面" : (pageItem.hasBothSides ? "正面" : "單面"), isBackFace ? "裏面" : (pageItem.hasBothSides ? "表面" : "片面")))
                     .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
             }
             .foregroundStyle(.white)
@@ -987,8 +987,8 @@ struct ChekiDetailView: View {
         } else {
             applyCardTapGestures(
                 to: placeholderCardFace(
-                    title: "尚無正面影像",
-                    subtitle: "此拍立得尚未儲存正面照片",
+                    title: L10n.tr("無正面照片", "表面なし"),
+                    subtitle: "",
                     availableSize: availableSize
                 )
             )
@@ -1052,11 +1052,11 @@ struct ChekiDetailView: View {
                         .foregroundStyle(.white.opacity(0.75))
 
                     VStack(spacing: 5) {
-                        Text("尚未綁定背面照片")
+                        Text(L10n.tr("尚無背面照片", "裏面なし"))
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
 
-                        Text("可從 App 內選取現有拍立得作為背面，或從系統相簿匯入背面照片。\n（雙擊卡片可翻回正面）")
+                        Text(L10n.tr("雙擊卡片翻回正面", "ダブルタップで表面へ"))
                             .font(.caption2)
                             .foregroundStyle(.white.opacity(0.68))
                             .multilineTextAlignment(.center)
@@ -1067,7 +1067,7 @@ struct ChekiDetailView: View {
                         Button {
                             showingInAppBacksidePicker = true
                         } label: {
-                            Label("從 App 內選取背面照片", systemImage: "square.grid.2x2")
+                            Label(L10n.tr("App 內照片", "アプリ内の写真"), systemImage: "square.grid.2x2")
                                 .font(.caption.weight(.semibold))
                                 .frame(maxWidth: .infinity)
                         }
@@ -1077,7 +1077,7 @@ struct ChekiDetailView: View {
                         Button {
                             isShowingBacksidePicker = true
                         } label: {
-                            Label("從系統相簿選取背面照片", systemImage: "photo.badge.plus")
+                            Label(L10n.tr("系統相簿", "写真アプリ"), systemImage: "photo.badge.plus")
                                 .font(.caption.weight(.medium))
                                 .frame(maxWidth: .infinity)
                         }
@@ -1116,9 +1116,11 @@ struct ChekiDetailView: View {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white)
-            Text(subtitle)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.6))
+            if !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
         }
         .frame(
             width: min(availableSize.width, min(availableSize.height * 0.65, 280)),
@@ -1139,7 +1141,7 @@ struct ChekiDetailView: View {
                 .foregroundStyle(.white)
 
             VStack(alignment: .leading, spacing: 1.5) {
-                Text("請點選拍立得「白色邊框」自動校正白平衡")
+                Text(L10n.tr("點選白色邊框校正白平衡", "白い枠をタップして補正"))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
                 if let summary = whiteBalanceSummaryText {
@@ -1147,7 +1149,7 @@ struct ChekiDetailView: View {
                         .font(.system(size: 10.5, weight: .medium).monospacedDigit())
                         .foregroundStyle(.white.opacity(0.78))
                 } else {
-                    Text("自動計算色溫 (K) 與色調，並同步記錄至系統相簿")
+                    Text(L10n.tr("自動計算色溫與色調", "色温度と色合いを自動計算"))
                         .font(.system(size: 10.5, weight: .regular))
                         .foregroundStyle(.white.opacity(0.72))
                 }
@@ -1201,7 +1203,7 @@ struct ChekiDetailView: View {
                 .font(.caption)
                 .foregroundStyle(.yellow)
 
-            Text("雙擊卡片可 **3D 翻轉背面** · 向上滑動可記錄 **特典會備忘**")
+            Text(L10n.tr("雙擊翻面 · 上滑備忘", "ダブルタップで裏返す · 上スワイプでメモ"))
                 .font(.caption)
                 .foregroundStyle(.white)
 
@@ -1339,7 +1341,7 @@ struct ChekiDetailView: View {
                     .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("分享拍立得")
+            .accessibilityLabel("分享")
 
             // 中央膠囊：2. 愛心 (Favorite) + 3. 資訊 (Info) + 4. 點選白邊白平衡 (Eyedropper WB) + 5. 調整邊界 (Adjust)
             HStack(spacing: isLandscape ? 2 : 2) {
@@ -1355,7 +1357,7 @@ struct ChekiDetailView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(isFavorite ? "取消最愛" : "加入最愛")
+                .accessibilityLabel(isFavorite ? "取消最愛" : "最愛")
 
                 // 3. ℹ️ 資訊與特典會備忘 (Info & Memo Sheet)
                 Button {
@@ -1378,7 +1380,7 @@ struct ChekiDetailView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("檢視資訊與特典會備忘")
+                .accessibilityLabel("資訊")
 
                 // 4. 點選白色部分校正白平衡 (Auto White Balance Eyedropper)
                 Button {
@@ -1396,7 +1398,7 @@ struct ChekiDetailView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("點選白色部分自動校正白平衡")
+                .accessibilityLabel("白平衡")
 
                 // 5. 調整邊界與比例 (Adjust Border Inset & Format)
                 Button {
@@ -1409,7 +1411,7 @@ struct ChekiDetailView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("調整拍立得邊界與比例")
+                .accessibilityLabel("裁切")
             }
             .padding(.horizontal, isLandscape ? 4 : 4)
             .frame(height: pillHeight)
@@ -1436,7 +1438,7 @@ struct ChekiDetailView: View {
                     .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("刪除拍立得")
+            .accessibilityLabel("刪除")
         }
     }
 
@@ -1752,7 +1754,7 @@ struct ChekiDetailView: View {
 
         guard let sourceData = baseData,
               let sourceImage = UIImage(data: sourceData) else {
-            showToast(L10n.tr("無法讀取拍立得影像進行白平衡校正", "ホワイトバランス補正用の画像を読み込めませんでした"))
+            showToast(L10n.tr("無法讀取影像", "画像を読み込めません"))
             return
         }
 
@@ -1785,27 +1787,18 @@ struct ChekiDetailView: View {
             }
 
             Task { @MainActor in
-                let didSyncSystem = await PhotoLibraryManager.shared.syncWhiteBalanceEditToSystemPhotoLibrary(
+                let _ = await PhotoLibraryManager.shared.syncWhiteBalanceEditToSystemPhotoLibrary(
                     for: target,
                     backside: editingBack,
                     outcome: outcome,
                     normalizedTapPoint: normalizedPoint
                 )
-                if didSyncSystem {
-                    showToast(
-                        L10n.tr(
-                            "已校正白平衡（\(summary)）並記錄至系統相簿",
-                            "ホワイトバランスを補正（\(summary)）し「写真」に記録しました"
-                        )
+                showToast(
+                    L10n.tr(
+                        "白平衡 · \(summary)",
+                        "ホワイトバランス · \(summary)"
                     )
-                } else {
-                    showToast(
-                        L10n.tr(
-                            "已校正白平衡（\(summary)）",
-                            "ホワイトバランスを補正しました（\(summary)）"
-                        )
-                    )
-                }
+                )
             }
         }
     }
@@ -1850,7 +1843,7 @@ struct ChekiDetailView: View {
             whiteBalanceSummaryText = nil
         }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        showToast(L10n.tr("已還原白平衡校正前狀態", "ホワイトバランス補正前の状態に戻しました"))
+        showToast(L10n.tr("已還原白平衡", "ホワイトバランスをリセット"))
     }
 
     private func navigateFilmstrip(offset: Int) {
@@ -1917,11 +1910,7 @@ struct ChekiDetailView: View {
         }
 
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        showToast(
-            backside
-                ? L10n.tr("已復原背面為原始未裁切圖片", "裏面を元の未トリミング画像に戻しました")
-                : L10n.tr("已復原為原始未裁切圖片", "元の未トリミング画像に戻しました")
-        )
+        showToast(L10n.tr("已復原原圖", "元の画像に戻しました"))
     }
 
     @MainActor
@@ -1984,11 +1973,11 @@ struct ChekiDetailView: View {
     @MainActor
     private func synthesizeModeBSecondAnglePhoto(from pickerItem: PhotosPickerItem) async {
         guard PhotoLibraryManager.isProLifetimeUnlocked else {
-            showToast(L10n.tr("Mode B 雙角度去反光合成為 Pro 專屬功能", "Mode B マルチアングル反射除去は Pro 限定機能です"))
+            showToast(L10n.tr("去反光合成為 Pro 功能", "反射除去合成は Pro 機能です"))
             return
         }
         guard let secondData = try? await pickerItem.loadTransferable(type: Data.self) else {
-            showToast(L10n.tr("無法讀取第二角度照片", "2枚目の写真を読み込めませんでした"))
+            showToast(L10n.tr("無法讀取照片", "写真を読み込めません"))
             return
         }
 
@@ -1998,13 +1987,13 @@ struct ChekiDetailView: View {
             : (currentItem.originalFrontImageData ?? currentItem.frontImageData)
 
         guard let primaryData = primarySourceData else {
-            showToast(L10n.tr("無法讀取主角度照片", "メインの写真を読み込めませんでした"))
+            showToast(L10n.tr("無法讀取照片", "写真を読み込めません"))
             return
         }
 
         let insetRatio = currentItem.borderInsetRatio
         let preferredFmt = currentItem.filmFormat
-        showToast(L10n.tr("正在合成雙角度去反光⋯", "マルチアングル反射除去を合成中⋯"))
+        showToast(L10n.tr("去反光合成中⋯", "反射除去を合成中⋯"))
 
         let fusedOutcome: (fusedCardJPEG: Data, fusedOriginalJPEG: Data?, cornersJSON: String?)? = await Task.detached(priority: .userInitiated) { () -> (fusedCardJPEG: Data, fusedOriginalJPEG: Data?, cornersJSON: String?)? in
             guard let primaryCG = UIImage(data: primaryData)?.normalizedImage.cgImage,
@@ -2045,11 +2034,11 @@ struct ChekiDetailView: View {
             }
             try? modelContext.save()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            showToast(L10n.tr("✨ 已完成 Mode B 雙角度去反光合成", "✨ Mode B マルチアングル反射除去が完了しました"))
+            showToast(L10n.tr("已完成去反光合成", "反射除去合成が完了しました"))
             await syncCurrentItemToSystemPhotos()
         } else {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
-            showToast(L10n.tr("雙角度對位失敗，請確認兩張皆包含完整拍立得邊框", "位置合わせに失敗しました。両方の写真にチェキの枠が含まれているか確認してください"))
+            showToast(L10n.tr("對位失敗，請確認四邊完整", "位置合わせに失敗しました"))
         }
     }
 
@@ -2087,7 +2076,7 @@ struct ChekiDetailView: View {
         withAnimation(flipAnimation) {
             flipProgress = 1.0
         }
-        showToast(L10n.tr("已從 App 內選取並綁定背面照片", "アプリ内の写真を裏面に設定しました"))
+        showToast(L10n.tr("已設定背面照片", "裏面を設定しました"))
 
         if UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary") {
             Task {
@@ -2138,12 +2127,12 @@ struct ChekiDetailView: View {
             currentItem.isDateWrittenToAlbum = (currentItem.ocrDate != nil)
             try? modelContext.save()
             if PhotoLibraryManager.isProLifetimeUnlocked {
-                showToast(L10n.tr("已原地更新系統相簿裁切圖（\(albumName)）", "「写真」アプリのトリミング画像を更新しました（\(albumName)）"))
+                showToast(L10n.tr("已更新系統相簿 · \(albumName)", "写真アプリを更新 · \(albumName)"))
             } else {
-                showToast(L10n.tr("已同步至系統相簿（免費版保留未裁切原圖）", "「写真」アプリに同期しました（無料版は未トリミングの元画像を保持）"))
+                showToast(L10n.tr("已同步至系統相簿", "写真アプリに同期しました"))
             }
         } catch {
-            showToast(L10n.tr("相簿同步需要開啟照片存取權限", "写真アルバムとの同期にはアクセス許可が必要です"))
+            showToast(L10n.tr("請開啟照片存取權限", "写真へのアクセス許可が必要です"))
         }
     }
 
@@ -2186,7 +2175,7 @@ struct ChekiDetailView: View {
         guard !shareItems.isEmpty else { return }
 
         if !isPro && !canUseDailyFreeQuota {
-            showToast(L10n.tr("今日免費高畫質額度已滿（1/1），目前為 SNS 畫質＋浮水印", "本日の無料高画質枠（1/1）は使用済みです。SNS画質＋透かしで出力します"))
+            showToast(L10n.tr("今日免費高畫質已用畢，以 SNS 畫質輸出", "本日の無料高画質枠は使用済みです"))
         }
 
         let activityVC = UIActivityViewController(activityItems: shareItems, applicationActivities: nil)
@@ -2195,7 +2184,7 @@ struct ChekiDetailView: View {
             Task { @MainActor in
                 if canUseDailyFreeQuota {
                     StoreKitManager.shared.consumeDailyFreeQuotaIfAvailable()
-                    showToast(L10n.tr("已使用今日免費高畫質無浮水印輸出（1/1）", "本日の無料高画質（透かしなし）枠（1/1）を使用しました"))
+                    showToast(L10n.tr("已使用今日免費高畫質輸出", "本日の無料高画質出力を使用しました"))
                 }
             }
         }
@@ -2412,7 +2401,7 @@ private struct ChekiQuadCropEditorView: View {
                         ProgressView()
                             .controlSize(.large)
                             .tint(.white)
-                        Text("正在套用四頂點透視裁切...")
+                        Text(L10n.tr("裁切中…", "トリミング中…"))
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                     }
@@ -2634,7 +2623,7 @@ private struct ChekiQuadCropEditorView: View {
                                 Image(systemName: "hand.point.up.left.and.text")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.yellow)
-                                Text("四個頂點可拖曳至相片外・雙指可縮放畫面")
+                                Text(L10n.tr("拖曳四角微調 · 雙指縮放", "四隅をドラッグ · ピンチで拡大"))
                                     .font(.caption2.weight(.medium))
                                     .foregroundStyle(.white.opacity(0.85))
                             }
@@ -2650,7 +2639,7 @@ private struct ChekiQuadCropEditorView: View {
                 .coordinateSpace(name: "QuadCropViewport")
                 .clipped()
             } else {
-                ContentUnavailableView("無法載入拍立得影像", systemImage: "photo.badge.exclamationmark")
+                ContentUnavailableView(L10n.tr("無法載入影像", "画像を読み込めません"), systemImage: "photo.badge.exclamationmark")
             }
         }
     }
@@ -2906,7 +2895,7 @@ private struct ChekiQuadCropEditorView: View {
                     VStack(spacing: 4) {
                         Image(systemName: "viewfinder.rectangular")
                             .font(.system(size: 18, weight: .semibold))
-                        Text("自動吸附")
+                        Text(L10n.tr("自動", "自動"))
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -2919,7 +2908,7 @@ private struct ChekiQuadCropEditorView: View {
                     VStack(spacing: 4) {
                         Image(systemName: "rotate.left")
                             .font(.system(size: 18, weight: .semibold))
-                        Text("旋轉 90°")
+                        Text("90°")
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -2940,7 +2929,7 @@ private struct ChekiQuadCropEditorView: View {
                     VStack(spacing: 4) {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                             .font(.system(size: 17, weight: .semibold))
-                        Text("展開四點")
+                        Text(L10n.tr("展開", "展開"))
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -2953,7 +2942,7 @@ private struct ChekiQuadCropEditorView: View {
                     VStack(spacing: 4) {
                         Image(systemName: "slider.horizontal.below.square.and.square.filled")
                             .font(.system(size: 17, weight: .semibold))
-                        Text(abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "邊界 %+.1f%%", defaultBorderInsetPercentage) : "邊界設定")
+                        Text(abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "%+.1f%%", defaultBorderInsetPercentage) : L10n.tr("邊界", "余白"))
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -2966,7 +2955,7 @@ private struct ChekiQuadCropEditorView: View {
                     VStack(spacing: 4) {
                         Image(systemName: "photo.badge.plus")
                             .font(.system(size: 17, weight: .semibold))
-                        Text(item.hasBothSides ? "換背面圖" : "補背面圖")
+                        Text(L10n.tr("背面", "裏面"))
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -3121,12 +3110,12 @@ private struct ChekiQuadCropEditorView: View {
             if abs(defaultBorderInsetPercentage) > 0.05 {
                 showBanner(
                     L10n.tr(
-                        String(format: "已自動吸附頂點（套用邊界微調 %+.1f%%）", defaultBorderInsetPercentage),
-                        String(format: "四隅を自動吸着しました（余白微調整 %+.1f%% 適用）", defaultBorderInsetPercentage)
+                        String(format: "已自動吸附 · %+.1f%%", defaultBorderInsetPercentage),
+                        String(format: "自動吸着 · %+.1f%%", defaultBorderInsetPercentage)
                     )
                 )
             } else {
-                showBanner(L10n.tr("已自動吸附拍立得四個頂點", "チェキの四隅を自動吸着しました"))
+                showBanner(L10n.tr("已自動吸附", "自動吸着しました"))
             }
         } else {
             let basePixels = Self.defaultQuadCorners.map {
@@ -3146,7 +3135,7 @@ private struct ChekiQuadCropEditorView: View {
                 }
             }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            showBanner(L10n.tr("已重設為標準拍立得四頂點範圍", "標準のチェキ四隅範囲にリセットしました"))
+            showBanner(L10n.tr("已重設範圍", "範囲をリセットしました"))
         }
     }
 
@@ -3192,11 +3181,7 @@ private struct ChekiQuadCropEditorView: View {
         }
 
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        onAppliedToast(
-            editingBackside
-                ? L10n.tr("已復原背面為原始未裁切圖片", "裏面を元の未トリミング画像に戻しました")
-                : L10n.tr("已復原為原始未裁切圖片", "元の未トリミング画像に戻しました")
-        )
+        onAppliedToast(L10n.tr("已復原原圖", "元画像に戻しました"))
         dismiss()
     }
 
@@ -3300,15 +3285,11 @@ private struct ChekiQuadCropEditorView: View {
                 }
 
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
-                if PhotoLibraryManager.isProLifetimeUnlocked {
-                    onAppliedToast(L10n.tr("已原地修改裁切並保留原始圖片", "元画像を保持したままトリミングを更新しました"))
-                } else {
-                    onAppliedToast(L10n.tr("已更新 App 內裁切預覽（免費版原生相簿保留原圖）", "アプリ内のトリミングを更新しました（無料版は写真アプリの元画像を保持）"))
-                }
+                onAppliedToast(L10n.tr("已儲存裁切", "トリミングを保存しました"))
                 dismiss()
             }
         } else {
-            showBanner(L10n.tr("裁切範圍無效，請確認四個頂點未交錯", "トリミング範囲が無効です。四隅が交差していないか確認してください"))
+            showBanner(L10n.tr("頂點不可交錯", "四隅が交差しています"))
         }
     }
 
@@ -3521,11 +3502,11 @@ private struct InAppBacksidePickerSheet: View {
         var displayName: String {
             switch self {
             case .all:
-                return L10n.tr("全部照片", "すべての写真")
+                return L10n.tr("全部", "すべて")
             case .sameAlbum:
-                return L10n.tr("同相冊", "同じアルバム")
+                return L10n.tr("同相冊", "同アルバム")
             case .singleOnly:
-                return L10n.tr("僅單面", "片面のみ")
+                return L10n.tr("單面", "片面")
             }
         }
     }
@@ -3582,7 +3563,7 @@ private struct InAppBacksidePickerSheet: View {
                         Picker("篩選範圍", selection: $filterScope.animation(.snappy(duration: 0.2))) {
                             ForEach(availableScopes) { scope in
                                 if scope == .sameAlbum, let name = targetItem.idolMember?.stageName {
-                                    Text("同相冊 (\(name))").tag(scope)
+                                    Text("\(scope.displayName) · \(name)").tag(scope)
                                 } else {
                                     Text(scope.displayName).tag(scope)
                                 }
@@ -3593,9 +3574,9 @@ private struct InAppBacksidePickerSheet: View {
 
                     Toggle(isOn: $mergeAndRemoveSource) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("合併並移除原獨立項目")
+                            Text(L10n.tr("合併原項目", "元項目を統合"))
                                 .font(.subheadline.weight(.medium))
-                            Text("設為背面後自動移除原本多出的單張項目，避免相簿重複")
+                            Text(L10n.tr("避免重複顯示", "重複表示を防ぎます"))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -3610,9 +3591,7 @@ private struct InAppBacksidePickerSheet: View {
 
                 if filteredCandidates.isEmpty {
                     ContentUnavailableView {
-                        Label("無可選取的 App 內照片", systemImage: "photo.on.rectangle.angled")
-                    } description: {
-                        Text("目前篩選條件下沒有其他可作為背面的拍立得照片。")
+                        Label(L10n.tr("無可用照片", "写真なし"), systemImage: "photo.on.rectangle.angled")
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -3627,7 +3606,7 @@ private struct InAppBacksidePickerSheet: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("從 App 內選取背面")
+            .navigationTitle(L10n.tr("選擇背面", "裏面を選択"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -3636,7 +3615,7 @@ private struct InAppBacksidePickerSheet: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("設為背面") {
+                    Button(L10n.tr("完成", "完了")) {
                         if let chosen = selectedCandidate {
                             onSelectItem(chosen, mergeAndRemoveSource)
                             dismiss()

@@ -34,32 +34,34 @@ struct OnboardingView: View {
 
     private let totalPages = 3
 
-    private let features: [OnboardingFeature] = [
-        OnboardingFeature(
-            icon: "viewfinder.rectangular",
-            iconColor: .blue,
-            title: "AI 自動偵測邊框與正位",
-            description: "自動辨識拍立得四角並進行透視校正，精準還原 86×54mm 實體比例。"
-        ),
-        OnboardingFeature(
-            icon: "rectangle.portrait.rotate",
-            iconColor: .purple,
-            title: "正反面雙面數位典藏",
-            description: "將拍立得正面照片與背面簽名留言配對綁定，支援 3D 翻轉檢視。"
-        ),
-        OnboardingFeature(
-            icon: "text.viewfinder",
-            iconColor: .orange,
-            title: "手寫日期 OCR 智慧辨識",
-            description: "自動讀取拍立得上的手寫拍攝日期，並寫入相片 EXIF 時間軸。"
-        ),
-        OnboardingFeature(
-            icon: "person.2.crop.square.stack.fill",
-            iconColor: .green,
-            title: "團體與推角成員分類",
-            description: "依偶像團體、成員與活動 #標籤整理，打造專屬的數位拍立得相冊。"
-        )
-    ]
+    private var features: [OnboardingFeature] {
+        [
+            OnboardingFeature(
+                icon: "viewfinder.rectangular",
+                iconColor: .blue,
+                title: L10n.tr("AI 自動正位", "AI自動補正"),
+                description: L10n.tr("自動偵測拍立得四角並還原 86×54mm 比例", "チェキ四隅を検出し86×54mm比率に自動補正")
+            ),
+            OnboardingFeature(
+                icon: "rectangle.portrait.rotate",
+                iconColor: .purple,
+                title: L10n.tr("正反雙面典藏", "両面デジタル保存"),
+                description: L10n.tr("配對正面照片與背面簽名留言，支援 3D 翻轉", "表面写真と裏面メッセージをペア保存・3D反転")
+            ),
+            OnboardingFeature(
+                icon: "text.viewfinder",
+                iconColor: .orange,
+                title: L10n.tr("手寫日期辨識", "手書き日付OCR"),
+                description: L10n.tr("自動辨識手寫日期並寫入相片時間軸", "手書き日付を読み取りEXIF日時へ自動反映")
+            ),
+            OnboardingFeature(
+                icon: "person.2.crop.square.stack.fill",
+                iconColor: .green,
+                title: L10n.tr("團體與成員分類", "グループ・推し分類"),
+                description: L10n.tr("依團體、成員與 #標籤整理專屬相冊", "グループ・メンバー・#タグで整理")
+            )
+        ]
+    }
 
     var body: some View {
         NavigationStack {
@@ -84,7 +86,7 @@ struct OnboardingView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     if currentPage < totalPages - 1 {
-                        Button("略過") {
+                        Button(L10n.tr("略過", "スキップ")) {
                             completeOnboarding()
                         }
                         .foregroundStyle(.secondary)
@@ -110,12 +112,12 @@ struct OnboardingView: View {
                         .foregroundStyle(.blue)
                         .padding(.top, 16)
 
-                    Text("歡迎使用 ChekiLens")
+                    Text(L10n.tr("歡迎使用 ChekiLens", "ChekiLens へようこそ"))
                         .font(.largeTitle)
                         .fontWeight(.bold)
                         .multilineTextAlignment(.center)
 
-                    Text("專為偶像拍立得打造的數位典藏工具")
+                    Text(L10n.tr("專為偶像拍立得打造的數位典藏工具", "アイドルチェキ専用デジタルアーカイブ"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -136,11 +138,11 @@ struct OnboardingView: View {
                                 )
 
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(LocalizedStringKey(feature.title))
+                                Text(feature.title)
                                     .font(.headline)
                                     .foregroundStyle(.primary)
 
-                                Text(LocalizedStringKey(feature.description))
+                                Text(feature.description)
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -166,12 +168,12 @@ struct OnboardingView: View {
         ScrollView {
             VStack(spacing: 20) {
                 VStack(spacing: 8) {
-                    Text("正反面翻轉與透視正位")
+                    Text(L10n.tr("正反面翻轉與透視正位", "両面反転と自動補正"))
                         .font(.title2)
                         .fontWeight(.bold)
                         .padding(.top, 12)
 
-                    Text("點擊下方拍立得體驗 3D 正反面翻轉，或切換透視校正預覽。")
+                    Text(L10n.tr("點擊拍立得體驗 3D 翻轉與正位預覽", "タップで3D反転と自動補正をプレビュー"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -213,7 +215,7 @@ struct OnboardingView: View {
                         isFlippedToBack.toggle()
                     } label: {
                         Label(
-                            isFlippedToBack ? "檢視正面照片" : "翻轉至背面留言",
+                            isFlippedToBack ? L10n.tr("正面", "表面") : L10n.tr("背面", "裏面"),
                             systemImage: "arrow.triangle.2.circlepath"
                         )
                         .font(.subheadline.weight(.medium))
@@ -228,7 +230,7 @@ struct OnboardingView: View {
                         isPerspectiveCorrected.toggle()
                     } label: {
                         Label(
-                            isPerspectiveCorrected ? "已正位 86×54" : "歪斜原圖",
+                            isPerspectiveCorrected ? L10n.tr("已正位", "補正済") : L10n.tr("歪斜原圖", "元画像"),
                             systemImage: isPerspectiveCorrected ? "checkmark.rectangle.portrait.fill" : "crop.rotate"
                         )
                         .font(.subheadline.weight(.medium))
@@ -244,10 +246,10 @@ struct OnboardingView: View {
 
                 // 說明列表
                 VStack(alignment: .leading, spacing: 12) {
-                    Label("Core Image 雙重幾何透視校正，自動裁切雜亂背景", systemImage: "crop")
+                    Label(L10n.tr("自動透視校正並裁切背景", "自動台形補正・背景トリミング"), systemImage: "crop")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Label("正反面配對儲存，匯出至系統相簿時享有相同拍攝秒數", systemImage: "clock.badge.checkmark")
+                    Label(L10n.tr("正反面同秒寫入系統相簿", "表裏を同じ秒数で写真アプリへ保存"), systemImage: "clock.badge.checkmark")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -317,7 +319,7 @@ struct OnboardingView: View {
     private var demoBackCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("背面手寫與備忘", systemImage: "pencil.and.outline")
+                Label(L10n.tr("背面備忘", "裏面メモ"), systemImage: "pencil.and.outline")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.purple)
                 Spacer()
@@ -329,7 +331,7 @@ struct OnboardingView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("OCR 辨識日期")
+                Text(L10n.tr("辨識日期", "認識日付"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text("2026.10.02")
@@ -341,7 +343,7 @@ struct OnboardingView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("對話備忘錄")
+                Text(L10n.tr("備忘錄", "メモ"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text("「今日も来てくれてありがとう！ツアー楽しみにしててね！」")
@@ -353,8 +355,8 @@ struct OnboardingView: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 4) {
-                Text("#全國巡演")
-                Text("#神對應")
+                Text(L10n.tr("#全國巡演", "#全国ツアー"))
+                Text(L10n.tr("#神對應", "#神対応"))
             }
             .font(.caption2.weight(.medium))
             .foregroundStyle(.blue)
@@ -384,11 +386,11 @@ struct OnboardingView: View {
                         .foregroundStyle(.blue)
                         .padding(.top, 16)
 
-                    Text("權限設定與隱私保護")
+                    Text(L10n.tr("權限與隱私", "権限とプライバシー"))
                         .font(.title2)
                         .fontWeight(.bold)
 
-                    Text("ChekiLens 所有影像辨識與資料皆於您的 iPhone 本機端離線完成，絕不上傳雲端伺服器。")
+                    Text(L10n.tr("所有辨識與資料皆於本機離線完成，不上傳雲端", "すべての処理は端末内で完結し、外部へ送信されません"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -399,8 +401,8 @@ struct OnboardingView: View {
                     permissionRow(
                         icon: "photo.on.rectangle.angled",
                         iconColor: .blue,
-                        title: "相簿讀寫權限",
-                        subtitle: "用於匯入拍立得照片，以及將正位後的正反面照片同步回系統相簿。",
+                        title: L10n.tr("相簿權限", "写真アクセス"),
+                        subtitle: L10n.tr("匯入照片並將正反面同步回系統相簿", "写真の読み込みと写真アプリへの同期に使用"),
                         isAuthorized: photoAuthStatus == .authorized || photoAuthStatus == .limited,
                         buttonTitle: photoPermissionButtonTitle,
                         action: requestPhotoPermission
@@ -409,8 +411,8 @@ struct OnboardingView: View {
                     permissionRow(
                         icon: "camera.fill",
                         iconColor: .purple,
-                        title: "相機拍攝權限",
-                        subtitle: "提供即時四角邊框預覽與防反光拍攝輔助（亦可稍後於拍攝時開啟）。",
+                        title: L10n.tr("相機權限", "カメラアクセス"),
+                        subtitle: L10n.tr("提供即時邊框預覽與防反光拍攝", "枠プレビューと反射防止撮影に使用"),
                         isAuthorized: cameraAuthStatus == .authorized,
                         buttonTitle: cameraPermissionButtonTitle,
                         action: requestCameraPermission
@@ -424,9 +426,9 @@ struct OnboardingView: View {
                         .font(.title3)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("100% 裝置端安全運算")
+                        Text(L10n.tr("100% 裝置端安全運算", "100% オンデバイス処理"))
                             .font(.subheadline.weight(.semibold))
-                        Text("使用 Apple 原生 Vision 與 SwiftData 框架，無須註冊帳號即可離線典藏。")
+                        Text(L10n.tr("免註冊帳號，離線安全典藏", "アカウント登録不要・オフラインで安全に保存"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -465,9 +467,9 @@ struct OnboardingView: View {
                 )
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(LocalizedStringKey(title))
+                Text(title)
                     .font(.subheadline.weight(.semibold))
-                Text(LocalizedStringKey(subtitle))
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -476,11 +478,11 @@ struct OnboardingView: View {
             Spacer(minLength: 8)
 
             if isAuthorized {
-                Label("已允許", systemImage: "checkmark.circle.fill")
+                Label(L10n.tr("已允許", "許可済"), systemImage: "checkmark.circle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.green)
             } else {
-                Button(LocalizedStringKey(buttonTitle), action: action)
+                Button(buttonTitle, action: action)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }
@@ -505,7 +507,7 @@ struct OnboardingView: View {
                     completeOnboarding()
                 }
             } label: {
-                Text(currentPage < totalPages - 1 ? "繼續" : "開始使用")
+                Text(currentPage < totalPages - 1 ? L10n.tr("繼續", "次へ") : L10n.tr("開始使用", "はじめる"))
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
@@ -526,9 +528,9 @@ struct OnboardingView: View {
         case .notDetermined:
             return L10n.tr("允許", "許可")
         case .denied, .restricted:
-            return L10n.tr("已拒絕", "拒否済み")
+            return L10n.tr("已拒絕", "拒否")
         default:
-            return L10n.tr("已允許", "許可済み")
+            return L10n.tr("已允許", "許可済")
         }
     }
 
@@ -537,9 +539,9 @@ struct OnboardingView: View {
         case .notDetermined:
             return L10n.tr("允許", "許可")
         case .denied, .restricted:
-            return L10n.tr("已拒絕", "拒否済み")
+            return L10n.tr("已拒絕", "拒否")
         default:
-            return L10n.tr("已允許", "許可済み")
+            return L10n.tr("已允許", "許可済")
         }
     }
 

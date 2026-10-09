@@ -14,19 +14,14 @@ enum BacksideTimelineStrategy: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .sameSecond:
-            return L10n.tr("正反面同一秒（緊密相鄰）", "両面を同じ秒に設定（隣接配置）")
-        case .plusOneSecond:
-            return L10n.tr("背面延後 1 秒（正面固定在左）", "裏面を 1 秒遅らせる（表面を左に固定）")
-        }
-    }
-
-    var shortLabel: String {
-        switch self {
-        case .sameSecond:
             return L10n.tr("同一秒", "同じ秒")
         case .plusOneSecond:
             return L10n.tr("背面 +1 秒", "裏面 +1 秒")
         }
+    }
+
+    var shortLabel: String {
+        displayName
     }
 }
 
@@ -40,9 +35,9 @@ enum OCRMissingYearStrategy: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .importYear:
-            return L10n.tr("相片匯入當年度", "写真を取り込んだ年")
+            return L10n.tr("匯入當年", "取り込み年")
         case .exifYear:
-            return L10n.tr("原圖 EXIF 拍攝年度", "元画像の EXIF 撮影年")
+            return L10n.tr("EXIF 拍攝年", "EXIF 撮影年")
         }
     }
 }
@@ -57,9 +52,9 @@ enum PhotoStorageMode: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .keepOriginal:
-            return L10n.tr("保留原圖格式（不轉換）", "元のフォーマットを維持（変換しない）")
+            return L10n.tr("原圖格式", "元のフォーマット")
         case .convertFormat:
-            return L10n.tr("轉換為指定格式", "指定のフォーマットに変換")
+            return L10n.tr("指定格式", "指定フォーマット")
         }
     }
 }
@@ -76,13 +71,13 @@ enum PreferredExportImageFormat: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .original:
-            return L10n.tr("原圖格式 (不轉換)", "元のフォーマット (変換しない)")
+            return L10n.tr("原圖", "オリジナル")
         case .heic:
-            return L10n.tr("HEIC (節省空間)", "HEIC (容量節約)")
+            return "HEIC"
         case .jpeg:
-            return L10n.tr("JPEG (最佳相容性)", "JPEG (高い互換性)")
+            return "JPEG"
         case .png:
-            return L10n.tr("無失真 PNG (典藏專用)", "ロスレス PNG (アーカイブ用)")
+            return "PNG"
         }
     }
 }
@@ -97,18 +92,18 @@ enum AntiReflectionMode: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .modeA:
-            return L10n.tr("Mode A（單張智慧抑制）", "Mode A（1枚スマート反射抑制）")
+            return L10n.tr("單張抑制", "単枚抑制")
         case .modeB:
-            return L10n.tr("Mode B（雙角度合成 · Pro）", "Mode B（マルチアングル合成 · Pro）")
+            return L10n.tr("雙角度合成 · Pro", "2角度合成 · Pro")
         }
     }
 
     var shortLabel: String {
         switch self {
         case .modeA:
-            return L10n.tr("Mode A (單張)", "Mode A (1枚)")
+            return L10n.tr("單張", "単枚")
         case .modeB:
-            return L10n.tr("Mode B (Pro)", "Mode B (Pro)")
+            return L10n.tr("雙角度 · Pro", "2角度 · Pro")
         }
     }
 }
@@ -124,11 +119,11 @@ enum AppAppearanceMode: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .system:
-            return L10n.tr("跟隨系統", "システム設定に従う")
+            return L10n.tr("跟隨系統", "システム")
         case .dark:
-            return L10n.tr("深色模式", "ダークモード")
+            return L10n.tr("深色", "ダーク")
         case .light:
-            return L10n.tr("淺色模式", "ライトモード")
+            return L10n.tr("淺色", "ライト")
         }
     }
 
@@ -192,7 +187,7 @@ struct SettingsView: View {
     private var appVersionString: String {
         let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-        return "\(shortVersion) (\(buildNumber))"
+        return "\(shortVersion) · \(buildNumber)"
     }
 
     var body: some View {
@@ -211,10 +206,10 @@ struct SettingsView: View {
                 Section {
                     Toggle(isOn: $autoSyncToPhotos) {
                         SettingsRowLabel(
-                            title: "同步至 iOS 系統相簿",
+                            title: L10n.tr("同步至系統相簿", "写真アプリと同期"),
                             subtitle: isProLifetimeUnlocked
-                                ? "Pro：直接於系統相簿非破壞性原地裁切原圖"
-                                : "免費版：同步相簿與時間軸（原生相簿保留未裁切原圖）",
+                                ? L10n.tr("Pro · 原地裁切", "Pro · 直接トリミング")
+                                : L10n.tr("免費版 · 保留未裁切原圖", "無料版 · 元画像を保持"),
                             systemImage: "photo.on.rectangle.angled",
                             iconColor: .blue
                         )
@@ -222,8 +217,8 @@ struct SettingsView: View {
 
                     Toggle(isOn: $createGroupMemberAlbums) {
                         SettingsRowLabel(
-                            title: "團體 / 成員專屬相簿階層",
-                            subtitle: "自動建立 ChekiLens › 團體 › 成員 相簿",
+                            title: L10n.tr("團體 / 成員相簿階層", "グループ / メンバー階層"),
+                            subtitle: nil,
                             systemImage: "folder.fill",
                             iconColor: .green
                         )
@@ -232,8 +227,8 @@ struct SettingsView: View {
 
                     Toggle(isOn: $overwriteExifDateWithOCR) {
                         SettingsRowLabel(
-                            title: "手寫日期覆寫 EXIF 時間軸",
-                            subtitle: "以拍立得手寫日期作為相簿照片拍攝時間",
+                            title: L10n.tr("手寫日期覆寫時間軸", "手書き日付で日時を上書き"),
+                            subtitle: nil,
                             systemImage: "clock.badge.checkmark.fill",
                             iconColor: .orange
                         )
@@ -245,19 +240,19 @@ struct SettingsView: View {
                         }
                     } label: {
                         SettingsRowLabel(
-                            title: "正反面時間軸排序",
+                            title: L10n.tr("正反面排序", "表裏の並び順"),
                             subtitle: nil,
                             systemImage: "arrow.left.arrow.right.square.fill",
                             iconColor: .indigo
                         )
                     }
                 } header: {
-                    Text("iOS 相簿雙向同步與時間軸")
+                    Text(L10n.tr("系統相簿同步", "システムアルバム同期"))
                 } footer: {
                     Text(
                         isProLifetimeUnlocked
-                            ? "Pro 版已啟用：系統相簿採用非破壞性原地修改（In-place Edit），不新增重複照片並保留原始未裁切底圖供隨時復原；開啟同步時刪除照片亦會自系統相簿刪除。"
-                            : "免費版：原生相簿不裁切（保留未裁切原圖），但可同步相簿分類與拍攝時間軸；開啟同步時刪除照片亦會自系統相簿刪除。"
+                            ? L10n.tr("Pro 支援非破壞性原地修改系統相簿原圖並可隨時復原。", "Pro は写真アプリの元画像を非破壊で直接更新し、いつでも復元できます。")
+                            : L10n.tr("免費版同步相簿分類與時間軸，系統相簿保留未裁切原圖。", "無料版はアルバムと日時のみ同期し、写真アプリには元画像を保持します。")
                     )
                 }
 
@@ -265,8 +260,8 @@ struct SettingsView: View {
                 Section {
                     Toggle(isOn: $autoRecognizeOCRDateOnImport) {
                         SettingsRowLabel(
-                            title: "匯入時自動辨識手寫日期",
-                            subtitle: "批次匯入與拍攝後於背景自動執行 OCR 日期提取",
+                            title: L10n.tr("自動辨識手寫日期", "手書き日付を自動認識"),
+                            subtitle: nil,
                             systemImage: "text.viewfinder",
                             iconColor: .purple
                         )
@@ -278,15 +273,15 @@ struct SettingsView: View {
                         }
                     } label: {
                         SettingsRowLabel(
-                            title: "無年份手寫日期補全規則",
-                            subtitle: "當手寫日期僅標註月/日（如 9/17）時",
+                            title: L10n.tr("缺少年份補全", "年号なしの補完"),
+                            subtitle: nil,
                             systemImage: "calendar.badge.clock",
                             iconColor: .teal
                         )
                     }
                     .disabled(!autoRecognizeOCRDateOnImport)
                 } header: {
-                    Text("匯入與手寫日期 OCR 辨識")
+                    Text(L10n.tr("手寫日期辨識", "手書き日付認識"))
                 }
 
                 // 3. 第 3 組：照片儲存格式偏好 (Storage & Export Format)
@@ -317,7 +312,7 @@ struct SettingsView: View {
                         }
                     } label: {
                         SettingsRowLabel(
-                            title: "輸出影像格式",
+                            title: L10n.tr("輸出格式", "出力フォーマット"),
                             subtitle: nil,
                             systemImage: "doc.zipper",
                             iconColor: .blue
@@ -331,9 +326,7 @@ struct SettingsView: View {
                         }
                     }
                 } header: {
-                    Text("照片儲存與輸出格式")
-                } footer: {
-                    Text("選擇「保留原圖格式」將維持原始相片封裝；選擇 HEIC 可節省約 45% 儲存空間，無失真 PNG 則適合長期數位典藏。")
+                    Text(L10n.tr("儲存與輸出", "保存と出力"))
                 }
 
                 // 4. 第 4 組：相機與影像處理偏好 (Scan & Image Processing)
@@ -344,18 +337,18 @@ struct SettingsView: View {
                         }
                     } label: {
                         SettingsRowLabel(
-                            title: "預設相紙規格",
+                            title: L10n.tr("預設相紙", "デフォルト用紙"),
                             subtitle: nil,
                             systemImage: "aspectratio.fill",
                             iconColor: .indigo
                         )
                     }
 
-                    // 自動邊界微調 (Inset / Outset) 滑桿與快速預設
+                    // 自動邊界微調滑桿與快速預設
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             SettingsRowLabel(
-                                title: "自動邊界微調 (Inset / Outset)",
+                                title: L10n.tr("邊界微調", "余白微調整"),
                                 subtitle: nil,
                                 systemImage: "crop",
                                 iconColor: .orange
@@ -370,9 +363,9 @@ struct SettingsView: View {
                             .tint(.blue)
 
                         HStack(spacing: 8) {
-                            borderPresetButton(title: "-2% 去陰影", targetValue: -2.0)
-                            borderPresetButton(title: "0% 標準外框", targetValue: 0.0)
-                            borderPresetButton(title: "+2% 完整留白", targetValue: 2.0)
+                            borderPresetButton(title: "-2%", targetValue: -2.0)
+                            borderPresetButton(title: "0%", targetValue: 0.0)
+                            borderPresetButton(title: "+2%", targetValue: 2.0)
                         }
                     }
                     .padding(.vertical, 4)
@@ -383,7 +376,7 @@ struct SettingsView: View {
                         }
                     } label: {
                         SettingsRowLabel(
-                            title: "反光對策模式",
+                            title: L10n.tr("去反光模式", "反射抑制モード"),
                             subtitle: nil,
                             systemImage: "sun.max.fill",
                             iconColor: .pink
@@ -395,9 +388,9 @@ struct SettingsView: View {
                         }
                     }
                 } header: {
-                    Text("掃描與影像處理")
+                    Text(L10n.tr("掃描與影像", "スキャンと画像"))
                 } footer: {
-                    Text("在自動判斷拍立得邊界時（包含批次匯入背景預裁切、相機拍攝正位、以及手動編輯器的「自動吸附」），會自動依此比例向內收縮（負值去除桌面黑邊陰影）或向外擴張（正值保留完整相紙白邊）。")
+                    Text(L10n.tr("負值內縮去黑邊，正值外擴保留白邊。", "負の値で黒縁を除去、正の値で白枠を保持します。"))
                 }
 
                 // 5. 第 5 組：一般與關於 (General & About)
@@ -421,7 +414,7 @@ struct SettingsView: View {
                         }
                     } label: {
                         SettingsRowLabel(
-                            title: "外觀模式",
+                            title: L10n.tr("外觀", "外観"),
                             subtitle: nil,
                             systemImage: "circle.lefthalf.filled",
                             iconColor: .gray
@@ -439,8 +432,8 @@ struct SettingsView: View {
                     } label: {
                         HStack {
                             SettingsRowLabel(
-                                title: "重新顯示歡迎導引與操作提示",
-                                subtitle: "重置首次配對提示與 3D 翻轉導引",
+                                title: L10n.tr("顯示歡迎與操作提示", "ガイドとヒントを再表示"),
+                                subtitle: nil,
                                 systemImage: "sparkles",
                                 iconColor: .blue
                             )
@@ -459,8 +452,8 @@ struct SettingsView: View {
                     } label: {
                         HStack {
                             SettingsRowLabel(
-                                title: "恢復購買項目 (Restore Purchases)",
-                                subtitle: "從 Apple ID 同步 ChekiLens Pro 終身買斷資格",
+                                title: L10n.tr("恢復購買", "購入を復元"),
+                                subtitle: nil,
                                 systemImage: "arrow.clockwise.circle.fill",
                                 iconColor: .green
                             )
@@ -500,8 +493,8 @@ struct SettingsView: View {
                         } label: {
                             HStack {
                                 SettingsRowLabel(
-                                    title: "切換回免費版（開發測試）",
-                                    subtitle: "重新顯示頂部 Pro 卡片與測試免費版浮水印",
+                                    title: L10n.tr("切換回免費版 · 測試", "無料版に戻す · テスト"),
+                                    subtitle: nil,
                                     systemImage: "hammer.fill",
                                     iconColor: .purple
                                 )
@@ -515,7 +508,7 @@ struct SettingsView: View {
                     }
                     #endif
                 } header: {
-                    Text("一般與關於")
+                    Text(L10n.tr("一般", "一般"))
                 }
             }
             .listStyle(.insetGrouped)
@@ -612,7 +605,7 @@ struct SettingsView: View {
                     .tracking(0.6)
                     .foregroundStyle(Color(red: 0.65, green: 0.71, blue: 0.99))
                 Spacer()
-                Text("今日免費無浮水印 \(usedQuota)/\(dailyLimit)")
+                Text(L10n.tr("今日免費 \(usedQuota)/\(dailyLimit)", "本日無料 \(usedQuota)/\(dailyLimit)"))
                     .font(.caption2.weight(.bold).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.92))
                     .padding(.horizontal, 8)
@@ -620,11 +613,11 @@ struct SettingsView: View {
                     .background(Color.white.opacity(0.16), in: Capsule())
             }
 
-            Text("ChekiLens Pro 終身買斷")
+            Text(L10n.tr("ChekiLens Pro 終身買斷", "ChekiLens Pro 買い切り"))
                 .font(.title3.weight(.heavy))
                 .foregroundStyle(.white)
 
-            Text("原畫質無損輸出 · 雙角度去反光合成 · 完全移除浮水印")
+            Text(L10n.tr("原畫質無損輸出 · 雙角度去反光 · 移除浮水印", "高画質ロスレス出力 · 2角度反射除去 · 透かしなし"))
                 .font(.footnote)
                 .foregroundStyle(.white.opacity(0.84))
                 .lineSpacing(2)
@@ -690,18 +683,12 @@ struct SettingsView: View {
 
         if restored || isProLifetimeUnlocked {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            alertTitle = L10n.tr("恢復購買成功", "購入の復元に成功しました")
-            alertMessage = L10n.tr(
-                "已成功恢復您的 ChekiLens Pro 終身買斷授權！",
-                "ChekiLens Pro 永久ライセンスを正常に復元しました！"
-            )
+            alertTitle = L10n.tr("已恢復購買", "購入を復元しました")
+            alertMessage = L10n.tr("ChekiLens Pro 已啟用。", "ChekiLens Pro が有効になりました。")
         } else {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
-            alertTitle = L10n.tr("恢復購買項目", "購入項目の復元")
-            alertMessage = L10n.tr(
-                "目前此 Apple ID 尚未查找到 ChekiLens Pro 購買紀錄。若於開發環境測試，可點擊頂部卡片進入預覽解鎖。",
-                "この Apple ID では ChekiLens Pro の購入履歴が見つかりませんでした。開発環境でテストする場合は、上部のカードをタップしてプレビュー解除できます。"
-            )
+            alertTitle = L10n.tr("查無購買紀錄", "購入履歴なし")
+            alertMessage = L10n.tr("此 Apple ID 尚無購買紀錄。", "この Apple ID の購入履歴は見つかりませんでした。")
         }
     }
 }
@@ -749,11 +736,28 @@ private struct ProLifetimePaywallSheet: View {
     @State private var isPurchasing: Bool = false
     @State private var purchaseStatusNote: String? = nil
 
-    private let features: [(icon: String, color: Color, title: String, desc: String)] = [
-        ("4k.tv.fill", .indigo, "原畫質無損輸出 · 原生相簿原地裁切", "免費版於系統相簿保留未裁切原圖；升級 Pro 可直接在 iOS 原生相簿非破壞性原地裁切（不新增重複照片、保留原圖可復原）並無損輸出"),
-        ("sun.max.trianglebadge.exclamationmark.fill", .pink, "雙角度去反光合成", "透過 Mode B 兩張微傾角度自動消除塑膠保護套強光反射"),
-        ("sparkles.rectangle.stack.fill", .orange, "完全移除浮水印 · 終身買斷", "移除 App 內裁切檢視與分享輸出時的 ChekiLens 浮水印，一次付費永久解鎖")
-    ]
+    private var features: [(icon: String, color: Color, title: String, desc: String)] {
+        [
+            (
+                "4k.tv.fill",
+                .indigo,
+                L10n.tr("系統相簿原地裁切", "写真アプリで直接トリミング"),
+                L10n.tr("非破壞性修改系統相簿原圖，不產生重複照片", "重複を作らず元画像を非破壊で直接トリミング")
+            ),
+            (
+                "sun.max.trianglebadge.exclamationmark.fill",
+                .pink,
+                L10n.tr("雙角度去反光", "2角度反射除去"),
+                L10n.tr("兩張微傾角度自動消除保護套強光", "2枚の角度からスリーブの反射を自動除去")
+            ),
+            (
+                "sparkles.rectangle.stack.fill",
+                .orange,
+                L10n.tr("移除浮水印", "透かし除去"),
+                L10n.tr("一次買斷永久解鎖所有功能", "買い切りで全機能を永久アンロック")
+            )
+        ]
+    }
 
     var body: some View {
         let priceLabel = StoreKitManager.shared.displayPrice
@@ -782,10 +786,10 @@ private struct ProLifetimePaywallSheet: View {
                         }
                         .padding(.top, 8)
 
-                        Text("ChekiLens Pro 終身買斷")
+                        Text(L10n.tr("ChekiLens Pro 終身買斷", "ChekiLens Pro 買い切り"))
                             .font(.title2.weight(.heavy))
 
-                        Text("一次買斷 \(priceLabel) · 永久解鎖全功能")
+                        Text(L10n.tr("一次買斷 \(priceLabel) · 永久解鎖", "買い切り \(priceLabel) · 永久アンロック"))
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
@@ -801,9 +805,9 @@ private struct ProLifetimePaywallSheet: View {
                                     .background(item.color.gradient, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(LocalizedStringKey(item.title))
+                                    Text(item.title)
                                         .font(.subheadline.weight(.bold))
-                                    Text(LocalizedStringKey(item.desc))
+                                    Text(item.desc)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .fixedSize(horizontal: false, vertical: true)
@@ -838,10 +842,10 @@ private struct ProLifetimePaywallSheet: View {
                                 } else {
                                     Image(systemName: isProUnlocked ? "checkmark.seal.fill" : "lock.open.fill")
                                     if isProUnlocked {
-                                        Text("已解鎖 Pro 終身版（點擊切換測試狀態）")
+                                        Text(L10n.tr("已解鎖 Pro", "Pro アンロック済み"))
                                             .fontWeight(.bold)
                                     } else {
-                                        Text("\(priceLabel) 立即永久解鎖")
+                                        Text(L10n.tr("\(priceLabel) 永久解鎖", "\(priceLabel) で永久アンロック"))
                                             .fontWeight(.bold)
                                     }
                                 }
@@ -871,7 +875,7 @@ private struct ProLifetimePaywallSheet: View {
                                 }
                             }
                         } label: {
-                            Text("恢復購買項目 (Restore Purchases)")
+                            Text(L10n.tr("恢復購買", "購入を復元"))
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .padding(.vertical, 6)
@@ -926,10 +930,7 @@ private struct ProLifetimePaywallSheet: View {
             }
 
         case .pending:
-            purchaseStatusNote = L10n.tr(
-                "交易等待家長或帳號核准中，核准後將自動解鎖 Pro。",
-                "承認待ちです。承認されると自動的に Pro が解除されます。"
-            )
+            purchaseStatusNote = L10n.tr("等待核准中", "承認待ちです")
 
         case .userCancelled:
             break

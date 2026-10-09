@@ -239,15 +239,15 @@ struct LibraryView: View {
                 isPresented: $showDeleteConfirm,
                 titleVisibility: .visible
             ) {
-                Button("刪除 \(selectedItemIDs.count) 張拍立得", role: .destructive) {
+                Button(L10n.tr("刪除 \(selectedItemIDs.count) 張", "\(selectedItemIDs.count)枚を削除"), role: .destructive) {
                     deleteSelectedItems()
                 }
                 Button("取消", role: .cancel) {}
             } message: {
                 Text(
                     autoSyncToPhotos
-                        ? "此操作會將拍立得從 ChekiLens 典藏庫與 iOS 系統相簿中一併刪除。"
-                        : "此操作會將拍立得從 ChekiLens 典藏庫移除，且無法復原。"
+                        ? L10n.tr("將同時從 App 與系統相簿刪除", "アプリと「写真」の両方から削除します")
+                        : L10n.tr("將從典藏庫永久刪除", "ライブラリから完全に削除します")
                 )
             }
             .sheet(isPresented: $showingQuickCreateSheet) {
@@ -364,7 +364,7 @@ struct LibraryView: View {
                     }
                     .buttonStyle(.plain)
                     .fixedSize()
-                    .accessibilityLabel("匯入拍立得照片（進入配對工作台）")
+                    .accessibilityLabel("匯入拍立得照片")
                     .onChange(of: selectedPhotos) { _, newItems in
                         guard !newItems.isEmpty else { return }
                         processingItems = newItems
@@ -373,7 +373,7 @@ struct LibraryView: View {
                     }
 
                     Menu {
-                        Section("顯示密度（亦可雙指縮放）") {
+                        Section(L10n.tr("顯示密度", "表示列数")) {
                             ForEach(Self.supportedColumnCounts, id: \.self) { count in
                                 Button {
                                     withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
@@ -413,13 +413,13 @@ struct LibraryView: View {
                             Button {
                                 showingQuickCreateSheet = true
                             } label: {
-                                Label("新增團體 / 成員", systemImage: "person.badge.plus")
+                                Label(L10n.tr("團體 / 成員", "グループ / メンバー"), systemImage: "person.badge.plus")
                             }
 
                             Button {
                                 showingSettingsSheet = true
                             } label: {
-                                Label("設定（自動邊界微調）", systemImage: "gearshape")
+                                Label("設定", systemImage: "gearshape")
                             }
                         }
                     } label: {
@@ -559,7 +559,7 @@ struct LibraryView: View {
                 Menu {
                     MemberAssignmentMenuContent(item: item) { showingQuickCreateSheet = true }
                 } label: {
-                    Label("指派推角成員", systemImage: "person.crop.circle.badge.plus")
+                    Label(L10n.tr("成員", "メンバー"), systemImage: "person.crop.circle")
                 }
                 .menuActionDismissBehavior(.disabled)
 
@@ -570,7 +570,7 @@ struct LibraryView: View {
                         await PhotoLibraryManager.shared.deleteItemsAsync([item], modelContext: modelContext)
                     }
                 } label: {
-                    Label("刪除此拍立得", systemImage: "trash")
+                    Label(L10n.tr("刪除", "削除"), systemImage: "trash")
                 }
             }
         }
@@ -580,7 +580,7 @@ struct LibraryView: View {
         ContentUnavailableView {
             Label("尚無拍立得典藏", systemImage: "photo.stack")
         } description: {
-            Text(L10n.tr("從系統相簿匯入或開啟相機翻拍您的拍立得照片，建立專屬相冊與正反面典藏。", "写真ライブラリから取り込むかカメラでチェキをスキャンして、アルバムと両面コレクションを作成しましょう。"))
+            Text(L10n.tr("由右上角拍照或從相簿匯入", "右上から撮影またはアルバム読込"))
         } actions: {
             VStack(spacing: 12) {
                 PhotosPicker(
@@ -589,7 +589,7 @@ struct LibraryView: View {
                     matching: .images,
                     photoLibrary: .shared()
                 ) {
-                    Label("從相簿選擇照片（不限張數）", systemImage: "photo.badge.plus")
+                    Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -918,13 +918,13 @@ struct AlbumsRootView: View {
                 CameraScannerView(defaultMember: actionTargetMember)
             }
             .alert(
-                L10n.tr("修改團體名", "グループ名を変更"),
+                L10n.tr("團體名", "グループ名"),
                 isPresented: Binding(
                     get: { renamingGroup != nil },
                     set: { if !$0 { renamingGroup = nil } }
                 )
             ) {
-                TextField(L10n.tr("輸入新的團體名稱", "新しいグループ名を入力"), text: $renameText)
+                TextField(L10n.tr("團體名稱", "グループ名"), text: $renameText)
                 Button(L10n.tr("取消", "キャンセル"), role: .cancel) {
                     renamingGroup = nil
                 }
@@ -938,13 +938,13 @@ struct AlbumsRootView: View {
                 }
             }
             .alert(
-                L10n.tr("修改成員名", "メンバー名を変更"),
+                L10n.tr("成員名", "メンバー名"),
                 isPresented: Binding(
                     get: { renamingMember != nil },
                     set: { if !$0 { renamingMember = nil } }
                 )
             ) {
-                TextField(L10n.tr("輸入新的成員名稱", "新しいメンバー名を入力"), text: $renameText)
+                TextField(L10n.tr("成員名稱", "メンバー名"), text: $renameText)
                 Button(L10n.tr("取消", "キャンセル"), role: .cancel) {
                     renamingMember = nil
                 }
@@ -1005,7 +1005,7 @@ struct AlbumsRootView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("新增團體或成員相冊")
+                    .accessibilityLabel("團體 / 成員")
 
                     Rectangle()
                         .fill(.white.opacity(0.22))
@@ -1016,14 +1016,14 @@ struct AlbumsRootView: View {
                             actionTargetMember = nil
                             showingCameraScanner = true
                         } label: {
-                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                            Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
                         }
 
                         Button {
                             actionTargetMember = nil
                             showingAlbumPhotosPicker = true
                         } label: {
-                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                            Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
                         }
 
                         if hierarchyMode == .groups && !sortedGroups.isEmpty {
@@ -1037,7 +1037,7 @@ struct AlbumsRootView: View {
                                     }
                                 }
                             } label: {
-                                Label(L10n.tr("修改團體名", "グループ名を変更"), systemImage: "pencil")
+                                Label(L10n.tr("團體名", "グループ名"), systemImage: "pencil")
                             }
                         } else if hierarchyMode == .members && !allExpandedMembers.isEmpty {
                             Menu {
@@ -1050,7 +1050,7 @@ struct AlbumsRootView: View {
                                     }
                                 }
                             } label: {
-                                Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
+                                Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
                             }
                         }
 
@@ -1071,7 +1071,7 @@ struct AlbumsRootView: View {
                                 }
                             }
                         } label: {
-                            Label(L10n.tr("排序方法", "並び替え"), systemImage: "arrow.up.arrow.down")
+                            Label(L10n.tr("排序", "並び順"), systemImage: "arrow.up.arrow.down")
                         }
 
                         Menu {
@@ -1085,7 +1085,7 @@ struct AlbumsRootView: View {
                                 }
                             }
                         } label: {
-                            Label(L10n.tr("顯示方式", "表示形式"), systemImage: displayMode.iconName)
+                            Label(L10n.tr("顯示", "表示"), systemImage: displayMode.iconName)
                         }
 
                         Divider()
@@ -1102,7 +1102,7 @@ struct AlbumsRootView: View {
                             .frame(width: 40, height: 36)
                             .contentShape(Rectangle())
                     }
-                    .accessibilityLabel("更多選項與設定")
+                    .accessibilityLabel("更多")
                 }
                 .darkSystemUnifiedCapsuleContainer()
             }
@@ -1127,12 +1127,14 @@ struct AlbumsRootView: View {
     private var groupsAlbumGrid: some View {
         if sortedGroups.isEmpty && uncategorizedItems.isEmpty {
             ContentUnavailableView {
-                Label("尚無團體相冊", systemImage: "rectangle.stack")
+                Label(L10n.tr("尚無團體", "グループなし"), systemImage: "rectangle.stack")
             } description: {
-                Text("建立團體與推角成員，即可按「團體 ＞ 成員」階層管理拍立得相冊。")
+                Text(L10n.tr("按團體與成員分類拍立得", "グループとメンバーでチェキを整理"))
             } actions: {
-                Button("新增團體與成員") {
+                Button {
                     showingQuickCreateSheet = true
+                } label: {
+                    Label(L10n.tr("團體 / 成員", "グループ / メンバー"), systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -1206,14 +1208,14 @@ struct AlbumsRootView: View {
                 actionTargetMember = group.sortedMembers.first
                 showingCameraScanner = true
             } label: {
-                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
             }
 
             Button {
                 actionTargetMember = group.sortedMembers.first
                 showingAlbumPhotosPicker = true
             } label: {
-                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
             }
 
             Divider()
@@ -1222,7 +1224,7 @@ struct AlbumsRootView: View {
                 renameText = group.name
                 renamingGroup = group
             } label: {
-                Label(L10n.tr("修改團體名", "グループ名を変更"), systemImage: "pencil")
+                Label(L10n.tr("團體名", "グループ名"), systemImage: "pencil")
             }
         }
     }
@@ -1233,12 +1235,14 @@ struct AlbumsRootView: View {
     private var allMembersAlbumGrid: some View {
         if allExpandedMembers.isEmpty && uncategorizedItems.isEmpty {
             ContentUnavailableView {
-                Label("尚無成員相冊", systemImage: "person.2.crop.square.stack")
+                Label(L10n.tr("尚無成員", "メンバーなし"), systemImage: "person.2.crop.square.stack")
             } description: {
-                Text("新增您的推角成員，直接展開瀏覽所有成員的專屬相冊。")
+                Text(L10n.tr("集中瀏覽所有成員相冊", "全メンバーのアルバムを一括表示"))
             } actions: {
-                Button("新增推角成員") {
+                Button {
                     showingQuickCreateSheet = true
+                } label: {
+                    Label(L10n.tr("成員", "メンバー"), systemImage: "plus")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -1312,14 +1316,14 @@ struct AlbumsRootView: View {
                 actionTargetMember = member
                 showingCameraScanner = true
             } label: {
-                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
             }
 
             Button {
                 actionTargetMember = member
                 showingAlbumPhotosPicker = true
             } label: {
-                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
             }
 
             Divider()
@@ -1328,7 +1332,7 @@ struct AlbumsRootView: View {
                 renameText = member.stageName
                 renamingMember = member
             } label: {
-                Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
+                Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
             }
         }
     }
@@ -1358,14 +1362,14 @@ struct AlbumsRootView: View {
                 actionTargetMember = nil
                 showingCameraScanner = true
             } label: {
-                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
             }
 
             Button {
                 actionTargetMember = nil
                 showingAlbumPhotosPicker = true
             } label: {
-                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
             }
         }
     }
@@ -1641,12 +1645,14 @@ private struct GroupMembersAlbumView: View {
         ScrollView {
             if displayedMembers.isEmpty {
                 ContentUnavailableView {
-                    Label("此團體尚無成員", systemImage: "person.badge.plus")
+                    Label(L10n.tr("尚無成員", "メンバーなし"), systemImage: "person.badge.plus")
                 } description: {
-                    Text("點擊右上角「+」為 \(group.name) 新增成員相冊。")
+                    Text(L10n.tr("點擊右上角 ＋ 建立成員相冊", "右上の ＋ から作成"))
                 } actions: {
-                    Button("新增成員") {
+                    Button {
                         showingQuickCreateSheet = true
+                    } label: {
+                        Label(L10n.tr("成員", "メンバー"), systemImage: "plus")
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -1710,21 +1716,21 @@ private struct GroupMembersAlbumView: View {
                             actionTargetMember = displayedMembers.first
                             showingCameraScanner = true
                         } label: {
-                            Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                            Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
                         }
 
                         Button {
                             actionTargetMember = displayedMembers.first
                             showingAlbumPhotosPicker = true
                         } label: {
-                            Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                            Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
                         }
 
                         Button {
                             renameText = group.name
                             showingRenameGroupAlert = true
                         } label: {
-                            Label(L10n.tr("修改團體名", "グループ名を変更"), systemImage: "pencil")
+                            Label(L10n.tr("團體名", "グループ名"), systemImage: "pencil")
                         }
 
                         if !displayedMembers.isEmpty {
@@ -1738,7 +1744,7 @@ private struct GroupMembersAlbumView: View {
                                     }
                                 }
                             } label: {
-                                Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "person.text.rectangle")
+                                Label(L10n.tr("成員名", "メンバー名"), systemImage: "person.text.rectangle")
                             }
                         }
 
@@ -1759,7 +1765,7 @@ private struct GroupMembersAlbumView: View {
                                 }
                             }
                         } label: {
-                            Label(L10n.tr("排序方法", "並び替え"), systemImage: "arrow.up.arrow.down")
+                            Label(L10n.tr("排序", "並び順"), systemImage: "arrow.up.arrow.down")
                         }
 
                         Menu {
@@ -1773,7 +1779,7 @@ private struct GroupMembersAlbumView: View {
                                 }
                             }
                         } label: {
-                            Label(L10n.tr("顯示方式", "表示形式"), systemImage: displayMode.iconName)
+                            Label(L10n.tr("顯示", "表示"), systemImage: displayMode.iconName)
                         }
 
                         Divider()
@@ -1812,10 +1818,10 @@ private struct GroupMembersAlbumView: View {
             CameraScannerView(defaultMember: actionTargetMember)
         }
         .alert(
-            L10n.tr("修改團體名", "グループ名を変更"),
+            L10n.tr("團體名", "グループ名"),
             isPresented: $showingRenameGroupAlert
         ) {
-            TextField(L10n.tr("輸入新的團體名稱", "新しいグループ名を入力"), text: $renameText)
+            TextField(L10n.tr("團體名稱", "グループ名"), text: $renameText)
             Button(L10n.tr("取消", "キャンセル"), role: .cancel) {}
             Button(L10n.tr("儲存", "保存")) {
                 let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1826,13 +1832,13 @@ private struct GroupMembersAlbumView: View {
             }
         }
         .alert(
-            L10n.tr("修改成員名", "メンバー名を変更"),
+            L10n.tr("成員名", "メンバー名"),
             isPresented: Binding(
                 get: { renamingMember != nil },
                 set: { if !$0 { renamingMember = nil } }
             )
         ) {
-            TextField(L10n.tr("輸入新的成員名稱", "新しいメンバー名を入力"), text: $renameText)
+            TextField(L10n.tr("成員名稱", "メンバー名"), text: $renameText)
             Button(L10n.tr("取消", "キャンセル"), role: .cancel) {
                 renamingMember = nil
             }
@@ -1891,14 +1897,14 @@ private struct GroupMembersAlbumView: View {
                 actionTargetMember = member
                 showingCameraScanner = true
             } label: {
-                Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
             }
 
             Button {
                 actionTargetMember = member
                 showingAlbumPhotosPicker = true
             } label: {
-                Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
             }
 
             Divider()
@@ -1907,7 +1913,7 @@ private struct GroupMembersAlbumView: View {
                 renameText = member.stageName
                 renamingMember = member
             } label: {
-                Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
+                Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
             }
         }
     }
@@ -2071,9 +2077,9 @@ struct AlbumHeroDetailView: View {
 
                         if displayedItems.isEmpty && defaultMember == nil {
                             ContentUnavailableView {
-                                Label("尚無拍立得項目", systemImage: "photo.on.rectangle")
+                                Label(L10n.tr("尚無拍立得", "チェキなし"), systemImage: "photo.on.rectangle")
                             } description: {
-                                Text("點擊右上角「＋」或「⋯」匯入或拍攝拍立得至此相冊。")
+                                Text(L10n.tr("由右上角 ＋ 加入拍立得", "右上の ＋ から追加"))
                             }
                             .padding(.vertical, 48)
                         } else {
@@ -2105,9 +2111,9 @@ struct AlbumHeroDetailView: View {
 
                             if displayedItems.isEmpty {
                                 ContentUnavailableView {
-                                    Label(L10n.tr("尚無拍立得項目", "チェキがまだありません"), systemImage: "photo.on.rectangle")
+                                    Label(L10n.tr("尚無拍立得", "チェキなし"), systemImage: "photo.on.rectangle")
                                 } description: {
-                                    Text(L10n.tr("點擊上方「＋」從 App 內挑選照片加入，或由右上角匯入／拍攝。", "上の「＋」からアプリ内の写真を追加するか、右上から読み込んでください。"))
+                                    Text(L10n.tr("點擊 ＋ 加入", "＋ から追加"))
                                 }
                                 .padding(.vertical, 28)
                             }
@@ -2178,7 +2184,7 @@ struct AlbumHeroDetailView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("從相簿追加拍立得至此相冊")
+                            .accessibilityLabel("相簿")
 
                             Rectangle()
                                 .fill(.white.opacity(0.22))
@@ -2188,7 +2194,7 @@ struct AlbumHeroDetailView: View {
                                 Button {
                                     showingCameraScanner = true
                                 } label: {
-                                    Label(L10n.tr("攝影追加", "撮影して追加"), systemImage: "camera")
+                                    Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
                                 }
 
                                 PhotosPicker(
@@ -2197,7 +2203,7 @@ struct AlbumHeroDetailView: View {
                                     matching: .images,
                                     photoLibrary: .shared()
                                 ) {
-                                    Label(L10n.tr("從相冊讀入", "アルバムから読み込む"), systemImage: "photo.badge.plus")
+                                    Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
                                 }
 
                                 if let defaultMember {
@@ -2205,7 +2211,7 @@ struct AlbumHeroDetailView: View {
                                         renameMemberText = defaultMember.stageName
                                         showingRenameMemberAlert = true
                                     } label: {
-                                        Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
+                                        Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
                                     }
                                 }
 
@@ -2216,11 +2222,11 @@ struct AlbumHeroDetailView: View {
                                                 columnCount = count
                                             }
                                         } label: {
-                                            Label("\(count) 欄網格", systemImage: columnCount == count ? "checkmark" : "square.grid.3x3")
+                                            Label(L10n.tr("\(count) 欄", "\(count) 列"), systemImage: columnCount == count ? "checkmark" : "square.grid.3x3")
                                         }
                                     }
                                 } label: {
-                                    Label("網格密度", systemImage: "square.grid.3x3")
+                                    Label(L10n.tr("顯示密度", "表示密度"), systemImage: "square.grid.3x3")
                                 }
 
                                 Menu {
@@ -2238,10 +2244,10 @@ struct AlbumHeroDetailView: View {
                                     Button {
                                         filterDualSideOnly.toggle()
                                     } label: {
-                                        Label("僅顯示正反雙面", systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait")
+                                        Label(L10n.tr("僅雙面", "両面のみ"), systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait")
                                     }
                                 } label: {
-                                    Label("排序與篩選", systemImage: "line.3.horizontal.decrease")
+                                    Label(L10n.tr("排序", "並び順"), systemImage: "line.3.horizontal.decrease")
                                 }
 
                                 Divider()
@@ -2249,7 +2255,7 @@ struct AlbumHeroDetailView: View {
                                 Button {
                                     showingSettingsSheet = true
                                 } label: {
-                                    Label("設定（自動邊界微調）", systemImage: "gearshape")
+                                    Label("設定", systemImage: "gearshape")
                                 }
                             } label: {
                                 Image(systemName: "ellipsis")
@@ -2319,11 +2325,11 @@ struct AlbumHeroDetailView: View {
             }
         }
         .confirmationDialog(
-            "確定要刪除\(selectedItemIDs.count)張照片嗎？",
+            L10n.tr("刪除 \(selectedItemIDs.count) 張照片？", "\(selectedItemIDs.count)枚の写真を削除しますか？"),
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
-            Button("刪除 \(selectedItemIDs.count) 張拍立得", role: .destructive) {
+            Button(L10n.tr("刪除 \(selectedItemIDs.count) 張", "\(selectedItemIDs.count)枚を削除"), role: .destructive) {
                 let itemsToDelete = displayedItems.filter { selectedItemIDs.contains($0.persistentModelID) }
                 isSelectionMode = false
                 selectedItemIDs.removeAll()
@@ -2335,8 +2341,8 @@ struct AlbumHeroDetailView: View {
         } message: {
             Text(
                 autoSyncToPhotos
-                    ? "此操作會將拍立得從 ChekiLens 典藏庫與 iOS 系統相簿中一併刪除。"
-                    : "此操作會將拍立得從 ChekiLens 典藏庫移除，且無法復原。"
+                    ? L10n.tr("將從典藏庫與系統相簿刪除。", "ライブラリと写真アプリから削除されます。")
+                    : L10n.tr("將從典藏庫移除且無法復原。", "ライブラリから削除され、元に戻せません。")
             )
         }
         .sheet(isPresented: $showingSettingsSheet, onDismiss: {
@@ -2383,10 +2389,10 @@ struct AlbumHeroDetailView: View {
             }
         }
         .alert(
-            L10n.tr("修改成員名", "メンバー名を変更"),
+            L10n.tr("成員名", "メンバー名"),
             isPresented: $showingRenameMemberAlert
         ) {
-            TextField(L10n.tr("輸入新的成員名稱", "新しいメンバー名を入力"), text: $renameMemberText)
+            TextField(L10n.tr("成員名稱", "メンバー名"), text: $renameMemberText)
             Button(L10n.tr("取消", "キャンセル"), role: .cancel) {}
             Button(L10n.tr("儲存", "保存")) {
                 let trimmed = renameMemberText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2517,7 +2523,7 @@ struct AlbumHeroDetailView: View {
                     HStack(spacing: 5) {
                         Image(systemName: "rectangle.stack")
                             .font(.caption)
-                        Text("\(displayedItems.count) 個項目")
+                        Text(L10n.tr("\(displayedItems.count) 張", "\(displayedItems.count)枚"))
                             .font(.subheadline.weight(.medium))
                     }
                     .foregroundStyle(.white.opacity(0.88))
@@ -2575,7 +2581,7 @@ struct AlbumHeroDetailView: View {
                 .contentShape(RoundedRectangle(cornerRadius: cellCornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(L10n.tr("從 App 內挑選照片加入此相冊", "アプリ内の写真からこのアルバムに追加"))
+        .accessibilityLabel(L10n.tr("加入照片", "写真を追加"))
     }
 
     @ViewBuilder
@@ -2611,8 +2617,10 @@ struct AlbumHeroDetailView: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
-                Menu("指派推角成員") {
+                Menu {
                     MemberAssignmentMenuContent(item: item) { showingQuickCreateMember = true }
+                } label: {
+                    Label(L10n.tr("成員", "メンバー"), systemImage: "person.crop.circle")
                 }
                 .menuActionDismissBehavior(.disabled)
 
@@ -2623,7 +2631,7 @@ struct AlbumHeroDetailView: View {
                         await PhotoLibraryManager.shared.deleteItemsAsync([item], modelContext: modelContext)
                     }
                 } label: {
-                    Label("刪除拍立得", systemImage: "trash")
+                    Label(L10n.tr("刪除", "削除"), systemImage: "trash")
                 }
             }
         }
@@ -2827,7 +2835,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),
-                prompt: L10n.tr("搜尋照片、成員、團體或 #標籤", "写真、メンバー、グループ、#タグを検索")
+                prompt: L10n.tr("成員、團體、#標籤", "メンバー・グループ・#タグ")
             )
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -2848,7 +2856,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
                     Button {
                         commitPickedItems()
                     } label: {
-                        Text(selectedItemIDs.isEmpty ? L10n.tr("加入", "追加") : L10n.tr("加入(\(selectedItemIDs.count))", "追加(\(selectedItemIDs.count))"))
+                        Text(selectedItemIDs.isEmpty ? L10n.tr("加入", "追加") : L10n.tr("加入 · \(selectedItemIDs.count)", "追加 · \(selectedItemIDs.count)"))
                             .fontWeight(.semibold)
                     }
                     .disabled(selectedItemIDs.isEmpty)
@@ -2859,8 +2867,8 @@ private struct InAppAlbumPhotoPickerSheet: View {
                     Spacer()
                     Text(
                         selectedItemIDs.isEmpty
-                            ? L10n.tr("選擇要加入「\(targetMember.stageName)」的拍立得", "「\(targetMember.stageName)」に追加するチェキを選択")
-                            : L10n.tr("已選擇 \(selectedItemIDs.count) 張拍立得", "\(selectedItemIDs.count)枚のチェキを選択中")
+                            ? L10n.tr("加入 \(targetMember.stageName)", "\(targetMember.stageName) に追加")
+                            : L10n.tr("已選 \(selectedItemIDs.count) 張", "\(selectedItemIDs.count)枚選択中")
                     )
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -2917,7 +2925,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
                     }
 
                     if !ungroupedMembers.isEmpty {
-                        Section(L10n.tr("未分組", "グループなし")) {
+                        Section(L10n.tr("未分團", "未所属")) {
                             ForEach(ungroupedMembers) { member in
                                 Button {
                                     toggleFilterMember(member.id)
@@ -2937,7 +2945,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
                         Button(role: .destructive) {
                             filterMemberIDs.removeAll()
                         } label: {
-                            Label(L10n.tr("清除成員過濾", "メンバー絞り込みを解除"), systemImage: "xmark.circle")
+                            Label(L10n.tr("清除", "クリア"), systemImage: "xmark.circle")
                         }
                     }
                 } label: {
@@ -2946,8 +2954,8 @@ private struct InAppAlbumPhotoPickerSheet: View {
                             .font(.caption.weight(.semibold))
                         Text(
                             filterMemberIDs.isEmpty
-                                ? L10n.tr("選成員", "メンバーを選択")
-                                : L10n.tr("選成員 (\(filterMemberIDs.count))", "メンバー (\(filterMemberIDs.count))")
+                                ? L10n.tr("成員", "メンバー")
+                                : L10n.tr("成員 · \(filterMemberIDs.count)", "メンバー · \(filterMemberIDs.count)")
                         )
                         .font(.subheadline.weight(.medium))
                         Image(systemName: "chevron.down")
@@ -2994,7 +3002,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left")
                         .font(.subheadline.weight(.semibold))
-                    Text(L10n.tr("返回相冊", "アルバム一覧"))
+                    Text(L10n.tr("相冊", "アルバム"))
                         .font(.subheadline.weight(.medium))
                 }
             }
@@ -3012,7 +3020,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
     private func photoSelectionGrid(items: [ChekiItem]) -> some View {
         if items.isEmpty {
             ContentUnavailableView {
-                Label(L10n.tr("沒有符合條件的拍立得", "条件に一致するチェキがありません"), systemImage: "photo.on.rectangle")
+                Label(L10n.tr("無符合項目", "該当なし"), systemImage: "photo.on.rectangle")
             }
             .frame(maxHeight: .infinity)
         } else {
@@ -3024,7 +3032,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
                         AlbumSquareThumbnailCell(item: item, cornerRadius: 6)
                             .overlay(alignment: .topLeading) {
                                 if alreadyInAlbum {
-                                    Text(L10n.tr("已在相冊", "追加済"))
+                                    Text(L10n.tr("已加入", "追加済"))
                                         .font(.system(size: 10, weight: .bold))
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 6)
@@ -3089,7 +3097,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
 
                 if !idolMembers.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.tr("成員相冊", "メンバーアルバム"))
+                        Text(L10n.tr("成員", "メンバー"))
                             .font(.headline)
                             .padding(.horizontal, 16)
 
@@ -3113,7 +3121,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
 
                 if !idolGroups.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(L10n.tr("團體相冊", "グループアルバム"))
+                        Text(L10n.tr("團體", "グループ"))
                             .font(.headline)
                             .padding(.horizontal, 16)
 
@@ -3294,7 +3302,7 @@ struct LibrarySearchView: View {
                         if searchText.isEmpty {
                             if !availableHashtags.isEmpty {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text("熱門 #標籤")
+                                    Text(L10n.tr("#標籤", "#タグ"))
                                         .font(.headline)
                                         .padding(.horizontal, 16)
 
@@ -3324,7 +3332,7 @@ struct LibrarySearchView: View {
 
                             if !idolMembers.isEmpty {
                                 VStack(alignment: .leading, spacing: 12) {
-                                    Text("成員相冊")
+                                    Text(L10n.tr("成員", "メンバー"))
                                         .font(.headline)
                                         .padding(.horizontal, 16)
 
@@ -3347,7 +3355,7 @@ struct LibrarySearchView: View {
                             ContentUnavailableView.search(text: searchText)
                                 .padding(.top, 48)
                         } else {
-                            Text("\(filteredItems.count) 個項目")
+                            Text(L10n.tr("\(filteredItems.count) 張", "\(filteredItems.count)枚"))
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 16)
@@ -3395,7 +3403,7 @@ struct LibrarySearchView: View {
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "搜尋成員、團體、活動或 #標籤"
+                prompt: L10n.tr("成員、團體、#標籤", "メンバー・グループ・#タグ")
             )
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -3447,14 +3455,14 @@ struct QuickCreateIdolSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("推角成員資訊") {
+                Section(L10n.tr("成員與團體", "メンバー・グループ")) {
                     TextField("姓名", text: $stageName)
                     TextField("團體", text: $groupName)
                     TextField("標籤", text: $tagsText)
                 }
 
                 if !groups.isEmpty {
-                    Section("快速帶入現有團體") {
+                    Section(L10n.tr("現有團體", "既存グループ")) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
                                 ForEach(groups) { group in
@@ -3469,7 +3477,7 @@ struct QuickCreateIdolSheet: View {
                     }
                 }
             }
-            .navigationTitle("新增成員與團體")
+            .navigationTitle(L10n.tr("團體 / 成員", "グループ / メンバー"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -3629,12 +3637,12 @@ private struct ApplePhotosSelectionBottomBar: View {
             .buttonStyle(.plain)
             .disabled(selectedCount == 0)
             .opacity(selectedCount == 0 ? 0.42 : 1.0)
-            .accessibilityLabel("分享已選取的拍立得")
+            .accessibilityLabel("分享")
 
             Spacer()
 
-            // 中央已選取張數狀態文字（對齊 Apple 原生相簿「2枚の写真を選択 / 已選取 N 張照片」）
-            Text(selectedCount == 0 ? "選擇項目" : "已選取 \(selectedCount) 張照片")
+            // 中央已選取張數狀態文字（對齊 Apple 原生相簿「2枚選択中 / 已選 N 張」）
+            Text(selectedCount == 0 ? L10n.tr("選擇項目", "項目を選択") : L10n.tr("已選 \(selectedCount) 張", "\(selectedCount)枚選択中"))
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
                 .contentTransition(.numericText())
@@ -3662,7 +3670,7 @@ private struct ApplePhotosSelectionBottomBar: View {
             .buttonStyle(.plain)
             .disabled(selectedCount == 0)
             .opacity(selectedCount == 0 ? 0.42 : 1.0)
-            .accessibilityLabel("刪除已選取的拍立得")
+            .accessibilityLabel("刪除")
         }
         .padding(.horizontal, 20)
         .padding(.top, 10)
