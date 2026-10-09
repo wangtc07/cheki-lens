@@ -512,29 +512,6 @@ struct SettingsView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                    } else if dailyFreeQuotaUsedCount > 0 {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            StoreKitManager.shared.resetDailyFreeQuota()
-                            dailyFreeQuotaUsedCount = 0
-                        } label: {
-                            HStack {
-                                SettingsRowLabel(
-                                    title: "重置今日免費 1 張額度（開發測試）",
-                                    subtitle: L10n.tr(
-                                        "目前使用進度 \(min(StoreKitManager.dailyFreeLimit, dailyFreeQuotaUsedCount))/\(StoreKitManager.dailyFreeLimit)（點擊重置為 0/1）",
-                                        "本日の無料枠使用状況 \(min(StoreKitManager.dailyFreeLimit, dailyFreeQuotaUsedCount))/\(StoreKitManager.dailyFreeLimit)（タップして 0/1 にリセット）"
-                                    ),
-                                    systemImage: "arrow.counterclockwise.circle.fill",
-                                    iconColor: .purple
-                                )
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        .buttonStyle(.plain)
                     }
                     #endif
                 } header: {

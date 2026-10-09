@@ -94,7 +94,6 @@ struct LibraryView: View {
     @State private var showingSettingsSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
     @State private var showingBatchPairingSheet: Bool = false
-    @State private var systemPhotoSeedAlertMessage: String? = nil
 
     // 排序與篩選
     @State private var sortAscending: Bool = false
@@ -287,24 +286,6 @@ struct LibraryView: View {
                 ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
                     .toolbar(.hidden, for: .tabBar)
             }
-            .alert(
-                "iOS 系統相簿測試相片",
-                isPresented: Binding(
-                    get: { systemPhotoSeedAlertMessage != nil },
-                    set: { if !$0 { systemPhotoSeedAlertMessage = nil } }
-                )
-            ) {
-                Button("好", role: .cancel) {
-                    systemPhotoSeedAlertMessage = nil
-                }
-            } message: {
-                Text(systemPhotoSeedAlertMessage ?? "")
-            }
-            .task {
-                #if DEBUG
-                _ = try? await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: false)
-                #endif
-            }
         }
     }
 
@@ -414,40 +395,9 @@ struct LibraryView: View {
 
                         Section("管理") {
                             Button {
-                                processingItems = []
-                                showingBatchPairingSheet = true
-                            } label: {
-                                Label("批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
-                            }
-
-                            Button {
-                                Task {
-                                    do {
-                                        let count = try await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: true)
-                                        systemPhotoSeedAlertMessage = L10n.tr(
-                                            "已成功將 \(count) 張帶封面手寫日期的拍立得相片寫入 iOS 原生相簿 (Photos.app)。\n\n現在請點選右上角「＋」從系統相簿選取相片，即可實測導入與自動日期判斷！",
-                                            "日付入りのチェキ写真 \(count) 枚を iOS 標準の「写真」アプリに保存しました。\n\n右上の「＋」から写真を選択して、取り込みと日付の自動認識をお試しください！"
-                                        )
-                                    } catch {
-                                        systemPhotoSeedAlertMessage = error.localizedDescription
-                                    }
-                                }
-                            } label: {
-                                Label("寫入 10 張帶日期拍立得至系統相簿 (Photos.app)", systemImage: "photo.badge.plus")
-                            }
-
-                            Button {
                                 showingQuickCreateSheet = true
                             } label: {
                                 Label("新增團體 / 成員", systemImage: "person.badge.plus")
-                            }
-
-                            Button {
-                                withAnimation {
-                                    PreviewData.populate(into: modelContext)
-                                }
-                            } label: {
-                                Label("載入範例測試資料", systemImage: "sparkles.rectangle.stack")
                             }
 
                             Button {
@@ -606,7 +556,7 @@ struct LibraryView: View {
         ContentUnavailableView {
             Label("尚無拍立得典藏", systemImage: "photo.stack")
         } description: {
-            Text("從系統相簿匯入您的拍立得照片，或載入範例測試資料體驗完整相冊與正反面典藏功能。")
+            Text(L10n.tr("從系統相簿匯入或開啟相機翻拍您的拍立得照片，建立專屬相冊與正反面典藏。", "写真ライブラリから取り込むかカメラでチェキをスキャンして、アルバムと両面コレクションを作成しましょう。"))
         } actions: {
             VStack(spacing: 12) {
                 PhotosPicker(
@@ -618,23 +568,6 @@ struct LibraryView: View {
                     Label("從相簿選擇照片（不限張數）", systemImage: "photo.badge.plus")
                 }
                 .buttonStyle(.borderedProminent)
-
-                Button {
-                    processingItems = []
-                    showingBatchPairingSheet = true
-                } label: {
-                    Label("開啟批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
-                }
-                .buttonStyle(.bordered)
-
-                Button {
-                    withAnimation {
-                        PreviewData.populate(into: modelContext)
-                    }
-                } label: {
-                    Label("載入範例測試資料", systemImage: "sparkles.rectangle.stack")
-                }
-                .buttonStyle(.bordered)
             }
         }
     }
@@ -1100,24 +1033,6 @@ struct AlbumsRootView: View {
                             }
                         } label: {
                             Label(L10n.tr("顯示方式", "表示形式"), systemImage: displayMode.iconName)
-                        }
-
-                        Divider()
-
-                        Button {
-                            pendingBatchPhotos = []
-                            actionTargetMember = nil
-                            showingBatchPairingSheet = true
-                        } label: {
-                            Label("批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
-                        }
-
-                        Button {
-                            withAnimation {
-                                PreviewData.populate(into: modelContext)
-                            }
-                        } label: {
-                            Label("載入範例測試資料", systemImage: "sparkles.rectangle.stack")
                         }
 
                         Divider()
@@ -2219,13 +2134,6 @@ struct AlbumHeroDetailView: View {
                                     } label: {
                                         Label(L10n.tr("修改成員名", "メンバー名を変更"), systemImage: "pencil")
                                     }
-                                }
-
-                                Button {
-                                    processingItems = []
-                                    showingBatchPairingSheet = true
-                                } label: {
-                                    Label("開啟批次配對工作台（含測試資料）", systemImage: "rectangle.portrait.on.rectangle.portrait.angled")
                                 }
 
                                 Menu {

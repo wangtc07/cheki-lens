@@ -296,8 +296,6 @@ struct BatchPairingView: View {
     @State private var processedCount: Int = 0
     @State private var totalToProcess: Int = 0
     @State private var hasInitialized: Bool = false
-    @State private var isUsingSimulatedSample: Bool = false
-    @State private var systemPhotoSeedAlertMessage: String? = nil
 
     init(
         initialPickerItems: [PhotosPickerItem] = [],
@@ -433,28 +431,6 @@ struct BatchPairingView: View {
                         .accessibilityLabel("從相簿追加照片（不限張數）")
 
                         Menu {
-                            Button {
-                                Task {
-                                    do {
-                                        let count = try await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: true)
-                                        systemPhotoSeedAlertMessage = L10n.tr(
-                                            "已成功將 \(count) 張帶封面手寫日期的拍立得相片寫入 iOS 原生相簿 (Photos.app)。\n\n現在可點選上方「＋」直接從系統相簿選取這 \(count) 張相片進行導入與自動日期判斷測試！",
-                                            "日付入りのチェキ写真 \(count) 枚を iOS 標準の「写真」アプリに保存しました。\n\n上部の「＋」からこれら \(count) 枚の写真を選択して、取り込みと日付の自動認識をテストできます！"
-                                        )
-                                    } catch {
-                                        systemPhotoSeedAlertMessage = error.localizedDescription
-                                    }
-                                }
-                            } label: {
-                                Label("寫入 10 張帶日期拍立得至系統相簿 (Photos.app)", systemImage: "photo.badge.plus")
-                            }
-
-                            Button {
-                                loadSimulatedBatchSample()
-                            } label: {
-                                Label("載入 8 張內建測試組（多人＋雙正面警示）", systemImage: "sparkles.rectangle.stack")
-                            }
-
                             if totalWarningCount > 0 {
                                 Button {
                                     withAnimation(.snappy(duration: 0.25)) {
@@ -475,7 +451,6 @@ struct BatchPairingView: View {
                                         selectedFirstSlotID = nil
                                         isSelectingPhotosToApply = false
                                         selectedSlotIDsForApply.removeAll()
-                                        isUsingSimulatedSample = false
                                     }
                                 } label: {
                                     Label("清空工作台", systemImage: "trash")
@@ -484,7 +459,7 @@ struct BatchPairingView: View {
                         } label: {
                             Image(systemName: "ellipsis.circle")
                         }
-                        .disabled(isProcessingBatch)
+                        .disabled(isProcessingBatch || allPhotos.isEmpty)
                     }
                 }
             }
@@ -515,29 +490,13 @@ struct BatchPairingView: View {
                     selectTargetMember(newestMember, replacingAt: nil)
                 }
             }
-            .alert(
-                "iOS 系統相簿測試相片",
-                isPresented: Binding(
-                    get: { systemPhotoSeedAlertMessage != nil },
-                    set: { if !$0 { systemPhotoSeedAlertMessage = nil } }
-                )
-            ) {
-                Button("好", role: .cancel) {
-                    systemPhotoSeedAlertMessage = nil
-                }
-            } message: {
-                Text(systemPhotoSeedAlertMessage ?? "")
-            }
             .task {
                 guard !hasInitialized else { return }
                 hasInitialized = true
                 defaultFallbackMember = defaultMember
                 selectedTargetMembers = defaultMember.map { [$0] } ?? []
                 if !initialPickerItems.isEmpty {
-                    isUsingSimulatedSample = false
                     await appendPickerItems(initialPickerItems)
-                } else {
-                    loadSimulatedBatchSample()
                 }
             }
             .onChange(of: additionalPickerItems) { _, newItems in
@@ -545,12 +504,6 @@ struct BatchPairingView: View {
                 let itemsToLoad = newItems
                 additionalPickerItems = []
                 Task {
-                    if isUsingSimulatedSample {
-                        allPhotos.removeAll()
-                        slots.removeAll()
-                        photoMemberAssignment.removeAll()
-                        isUsingSimulatedSample = false
-                    }
                     await appendPickerItems(itemsToLoad)
                 }
             }
@@ -2069,13 +2022,6 @@ struct BatchPairingView: View {
                     Label("從相簿選取照片（無張數上限）", systemImage: "photo.badge.plus")
                 }
                 .buttonStyle(.borderedProminent)
-
-                Button {
-                    loadSimulatedBatchSample()
-                } label: {
-                    Label("載入 8 張測試照片組", systemImage: "sparkles.rectangle.stack")
-                }
-                .buttonStyle(.bordered)
             }
         }
     }
@@ -3060,144 +3006,6 @@ struct BatchPairingView: View {
         }
 
         return (.likelyFront, "Vision 偵測為拍立得正面影像窗")
-    }
-
-    // MARK: - 9. 豐富擬真測試資料集（8 張涵蓋多位不同成員、正反撲克牌配對、⚠️ 雙正面防呆警示、⚠️ 正反顛倒、有日期與無日期空白對照）
-
-    private func loadSimulatedBatchSample() {
-        let sampleSpecs: [(seq: Int, title: String, side: DetectedPhotoSide, note: String, colors: [UIColor], isBackLook: Bool, dateText: String, memberIdx: Int)] = [
-            // Pair 1 (成員 0): 正常正反配對 (#1 正面 + #2 背面，有日期)
-            (1, "夏巡舞台服特寫", .likelyFront, "Vision 偵測到正面人物主體", [.systemIndigo, .systemPink], false, "2026.09.24", 0),
-            (2, "夏巡簽名背面",   .likelyBack,  "Vision 偵測到 instax 背面標記", [.darkGray, .black], true, "2026.09.24", 0),
-            // Pair 2 (成員 1 & 2): ⚠️ 雙正面防呆警示案例 (#3 有日期 + #4 無日期空白)
-            (3, "浴衣造型正面",   .likelyFront, "Vision 偵測到正面人物主體", [.systemTeal, .systemBlue], false, "2026.09.28", 1),
-            (4, "生誕祭私服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemOrange, .systemPink], false, "", 2),
-            // Pair 3 (成員 2): ⚠️ 正反順序顛倒警示案例 (#5 背面 + #6 正面)
-            (5, "握手會背面留言", .likelyBack,  "Vision 偵測到 instax 背面標記", [.systemGray, .darkGray], true, "2026.10.02", 2),
-            (6, "握手會比愛心正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPurple, .systemIndigo], false, "2026.10.02", 2),
-            // Pair 4 (成員 3): 正常正反配對 (#7 正面 + #8 背面，無日期空白)
-            (7, "五週年紀念服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPink, .systemRed], false, "", 3),
-            (8, "五週年感謝留言背面", .likelyBack, "Vision 偵測到 instax 背面標記", [.darkGray, .systemIndigo], true, "", 3)
-        ]
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dateFormatter.dateFormat = "yyyy.MM.dd"
-
-        var generated: [StagingChekiPhoto] = []
-        var assignments: [UUID: [IdolMember]] = [:]
-
-        for spec in sampleSpecs {
-            let img = Self.renderSampleChekiImage(
-                sequence: spec.seq,
-                title: spec.title,
-                colors: spec.colors,
-                isBackside: spec.isBackLook,
-                dateText: spec.dateText
-            )
-            let data = img.jpegData(compressionQuality: 0.9) ?? Data()
-            let photoID = UUID()
-            let parsedDate = spec.dateText.isEmpty ? nil : dateFormatter.date(from: spec.dateText)
-            assignments[photoID] = []
-            generated.append(
-                StagingChekiPhoto(
-                    id: photoID,
-                    sequenceNumber: spec.seq,
-                    title: spec.title,
-                    imageData: data,
-                    uiImage: img,
-                    detectedSide: spec.side,
-                    detectionNote: spec.note,
-                    croppedImageData: data,
-                    croppedUIImage: img,
-                    detectedOCRDate: parsedDate,
-                    resolvedFilmFormat: .mini,
-                    isDetectingBoundary: false,
-                    hasCompletedBoundaryDetection: true
-                )
-            )
-        }
-
-        withAnimation(.snappy(duration: 0.25)) {
-            isUsingSimulatedSample = true
-            photoMemberAssignment = assignments
-            allPhotos = generated
-            pairingMode = .autoPair
-            applyPairingMode(.autoPair)
-        }
-    }
-
-    private static func renderSampleChekiImage(
-        sequence: Int,
-        title: String,
-        colors: [UIColor],
-        isBackside: Bool,
-        dateText: String
-    ) -> UIImage {
-        let size = CGSize(width: 540, height: 860)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { ctx in
-            let cg = ctx.cgContext
-            cg.setFillColor(UIColor(white: isBackside ? 0.16 : 0.98, alpha: 1.0).cgColor)
-            cg.fill(CGRect(origin: .zero, size: size))
-
-            let innerRect = CGRect(x: 40, y: 52, width: 460, height: 616)
-            cg.saveGState()
-            cg.addRect(innerRect)
-            cg.clip()
-
-            let cgColors = colors.map {
-                isBackside ? $0.withAlphaComponent(0.35).cgColor : $0.cgColor
-            } as CFArray
-
-            if let gradient = CGGradient(
-                colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                colors: cgColors,
-                locations: [0.0, 1.0]
-            ) {
-                cg.drawLinearGradient(
-                    gradient,
-                    start: CGPoint(x: innerRect.minX, y: innerRect.minY),
-                    end: CGPoint(x: innerRect.maxX, y: innerRect.maxY),
-                    options: []
-                )
-            }
-
-            if !isBackside {
-                cg.setFillColor(UIColor.white.withAlphaComponent(0.28).cgColor)
-                cg.fillEllipse(in: CGRect(x: 195, y: 170, width: 150, height: 150))
-                cg.fillEllipse(in: CGRect(x: 120, y: 340, width: 300, height: 280))
-            } else {
-                let backAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 28, weight: .bold),
-                    .foregroundColor: UIColor.white
-                ]
-                NSAttributedString(string: "いつもありがとう！♡\nまた来週のライブでね", attributes: backAttrs)
-                    .draw(in: CGRect(x: 72, y: 220, width: 396, height: 150))
-
-                let instaxAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.monospacedSystemFont(ofSize: 22, weight: .bold),
-                    .foregroundColor: UIColor(white: 0.78, alpha: 1.0)
-                ]
-                NSAttributedString(string: "FUJIFILM instax", attributes: instaxAttrs)
-                    .draw(at: CGPoint(x: 165, y: 590))
-            }
-            cg.restoreGState()
-
-            let dateAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.monospacedSystemFont(ofSize: 28, weight: .bold),
-                .foregroundColor: isBackside ? UIColor(white: 0.85, alpha: 1.0) : UIColor(white: 0.22, alpha: 1.0)
-            ]
-            NSAttributedString(string: dateText, attributes: dateAttrs)
-                .draw(at: CGPoint(x: 56, y: 720))
-
-            let seqAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 20, weight: .medium),
-                .foregroundColor: isBackside ? UIColor(white: 0.70, alpha: 1.0) : UIColor.secondaryLabel
-            ]
-            NSAttributedString(string: "#\(sequence) \(title)", attributes: seqAttrs)
-                .draw(at: CGPoint(x: 56, y: 765))
-        }
     }
 
     // MARK: - 10. 執行批次歸檔儲存（直接重用背景已完成的邊界預裁切與 OCR 結果，不新增重複照片、直接修改原圖並保留原始圖片可復原）
