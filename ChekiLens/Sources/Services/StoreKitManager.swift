@@ -19,10 +19,10 @@ final class StoreKitManager {
     static let dailyQuotaUsedCountStorageKey = "dailyFreeQuotaUsedCount"
 
     /// 正式 Non-Consumable 終身買斷商品 ID
-    static let proLifetimeProductID = "com.chekilens.pro.lifetime"
+    nonisolated static let proLifetimeProductID = "com.chekilens.pro.lifetime"
 
     /// 相容 Bundle ID 前綴之候選商品 ID 清單
-    static let supportedProductIDs: Set<String> = [
+    nonisolated static let supportedProductIDs: Set<String> = [
         "com.chekilens.pro.lifetime",
         "wangtc07.ChekiLens.pro.lifetime"
     ]

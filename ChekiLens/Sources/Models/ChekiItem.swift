@@ -383,10 +383,10 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     case auto   = "auto"
 
     /// 三種實體拍立得規格（資訊卡片中固定顯示與切換此三種）
-    static let concreteFormats: [FilmFormat] = [.mini, .square, .wide]
+    nonisolated static let concreteFormats: [FilmFormat] = [.mini, .square, .wide]
 
     /// 若為 `.auto` 則正規化為三種具體規格之一（預設 `.mini`）
-    var concreteFormat: FilmFormat {
+    nonisolated var concreteFormat: FilmFormat {
         switch self {
         case .mini, .square, .wide:
             return self
@@ -396,7 +396,7 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     }
 
     /// 根據使用者偏好、Vision 透視規格或裁切尺寸，解析為三種具體規格之一（基本上為 `.mini`）
-    static func resolvedConcreteFormat(
+    nonisolated static func resolvedConcreteFormat(
         preferred: FilmFormat = .auto,
         specName: String? = nil,
         outputSize: CGSize? = nil
@@ -428,7 +428,7 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     }
 
     /// 長邊 / 短邊比例（用於 CIPerspectiveCorrection 比例鎖定）
-    var aspectRatio: Double {
+    nonisolated var aspectRatio: Double {
         switch self {
         case .mini:   return 86.0 / 54.0   // ≈ 1.593
         case .square: return 86.0 / 72.0   // ≈ 1.194
@@ -438,7 +438,7 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     }
 
     /// 物理尺寸（mm）：(長邊, 短邊)
-    var physicalSizeMM: (width: Double, height: Double) {
+    nonisolated var physicalSizeMM: (width: Double, height: Double) {
         switch self {
         case .mini:   return (86, 54)
         case .square: return (86, 72)
