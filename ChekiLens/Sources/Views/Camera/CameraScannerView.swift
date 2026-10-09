@@ -872,8 +872,9 @@ struct CameraScannerView: View {
                 .foregroundStyle(abs(camera.exposureBias) > 0.05 ? .yellow : .white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(.white.opacity(0.14), in: Capsule())
+                .cameraLiquidGlassCapsule()
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("曝光補償")
 
             Spacer()
@@ -916,14 +917,15 @@ struct CameraScannerView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(.white.opacity(0.16), in: Circle())
+                    .cameraLiquidGlassCircle(size: 32)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("關閉相機")
         }
         .padding(.horizontal, 18)
         .padding(.top, 10)
         .padding(.bottom, 8)
+        .environment(\.colorScheme, .dark)
     }
 
     private var secondaryControlsDrawer: some View {
@@ -1362,10 +1364,10 @@ struct CameraScannerView: View {
                     Image(systemName: isWaitingSecondStep ? "arrow.counterclockwise" : "rectangle.portrait.rotate")
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle((captureMode == .frontAndBack || isWaitingSecondStep) ? .yellow : .white)
-                        .frame(width: 48, height: 48)
-                        .background(.white.opacity(0.15), in: Circle())
+                        .cameraLiquidGlassCircle(size: 48)
                 }
                 .buttonStyle(.plain)
+                .environment(\.colorScheme, .dark)
                 .accessibilityLabel("切換正反雙面拍攝模式或重設")
             }
             .padding(.horizontal, 32)
@@ -2263,6 +2265,42 @@ private struct AppleFocusBoxIndicator: View {
                 .foregroundStyle(.yellow)
         }
         .allowsHitTesting(false)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func cameraLiquidGlassCircle(size: CGFloat) -> some View {
+        if #available(iOS 26.0, *) {
+            self
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+                .glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            self
+                .frame(width: size, height: size)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .strokeBorder(.white.opacity(0.16), lineWidth: 0.6)
+                )
+        }
+    }
+
+    @ViewBuilder
+    func cameraLiquidGlassCapsule() -> some View {
+        if #available(iOS 26.0, *) {
+            self
+                .contentShape(Capsule())
+                .glassEffect(.regular.interactive(), in: .capsule)
+        } else {
+            self
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(.white.opacity(0.16), lineWidth: 0.6)
+                )
+        }
     }
 }
 

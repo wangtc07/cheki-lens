@@ -681,7 +681,7 @@ struct BatchPairingView: View {
                         .foregroundStyle(.primary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5.5)
-                        .background(Color(.tertiarySystemFill), in: Capsule())
+                        .pairingLiquidGlassCapsule()
                 }
                 .buttonStyle(.plain)
 
@@ -694,12 +694,12 @@ struct BatchPairingView: View {
                         .foregroundStyle(isSelectingPhotosToApply ? .white : .blue)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5.5)
-                        .background(
-                            isSelectingPhotosToApply
-                                ? AnyShapeStyle(Color.blue)
-                                : AnyShapeStyle(Color.blue.opacity(0.14)),
-                            in: Capsule()
-                        )
+                        .background {
+                            if isSelectingPhotosToApply {
+                                Capsule().fill(Color.blue)
+                            }
+                        }
+                        .modifier(PairingOptionalLiquidGlassCapsuleModifier(isEnabled: !isSelectingPhotosToApply))
                 }
                 .buttonStyle(.plain)
             }
@@ -773,7 +773,7 @@ struct BatchPairingView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("移除\(member.stageName)")
         }
-        .background(Color(.tertiarySystemFill), in: Capsule())
+        .pairingLiquidGlassCapsule()
     }
 
     /// 未選擇的成員多層下拉選單膠囊
@@ -798,7 +798,7 @@ struct BatchPairingView: View {
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 6)
-            .background(Color(.tertiarySystemFill), in: Capsule())
+            .pairingLiquidGlassCapsule()
         }
         .menuActionDismissBehavior(.disabled)
         .buttonStyle(.plain)
@@ -3602,9 +3602,9 @@ private struct StagingPhotoQuadCropEditorView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.14), in: Circle())
+                    .pairingLiquidGlassCircle(size: 36)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("取消裁切")
 
             Spacer()
@@ -3620,8 +3620,9 @@ private struct StagingPhotoQuadCropEditorView: View {
                         .foregroundStyle(.yellow)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .background(Color.white.opacity(0.14), in: Capsule())
+                        .pairingLiquidGlassCapsule()
                 }
+                .buttonStyle(.plain)
             }
 
             Button {
@@ -3641,6 +3642,7 @@ private struct StagingPhotoQuadCropEditorView: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 8)
+        .environment(\.colorScheme, .dark)
     }
 
     // MARK: - 2. 中央互動畫布（透明灰色切除遮罩 + 四頂點拖曳 + 雙指縮放 + 放大鏡十字準星）
@@ -4303,6 +4305,65 @@ private struct StagingPhotoQuadCropEditorView: View {
             width: min(max(pan.width, -maxOffsetX), maxOffsetX),
             height: min(max(pan.height, -maxOffsetY), maxOffsetY)
         )
+    }
+}
+
+private struct PairingOptionalLiquidGlassCapsuleModifier: ViewModifier {
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            if #available(iOS 26.0, *) {
+                content
+                    .contentShape(Capsule())
+                    .glassEffect(.regular.interactive(), in: .capsule)
+            } else {
+                content
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(.primary.opacity(0.14), lineWidth: 0.6)
+                    )
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func pairingLiquidGlassCircle(size: CGFloat) -> some View {
+        if #available(iOS 26.0, *) {
+            self
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+                .glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            self
+                .frame(width: size, height: size)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .strokeBorder(.primary.opacity(0.14), lineWidth: 0.6)
+                )
+        }
+    }
+
+    @ViewBuilder
+    func pairingLiquidGlassCapsule() -> some View {
+        if #available(iOS 26.0, *) {
+            self
+                .contentShape(Capsule())
+                .glassEffect(.regular.interactive(), in: .capsule)
+        } else {
+            self
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(.primary.opacity(0.14), lineWidth: 0.6)
+                )
+        }
     }
 }
 

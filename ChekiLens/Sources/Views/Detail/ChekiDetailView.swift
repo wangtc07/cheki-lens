@@ -410,21 +410,21 @@ struct ChekiDetailView: View {
         let iconSize: CGFloat = isLandscape ? 13 : 15.5
 
         return HStack(alignment: .center, spacing: 10) {
-            // 左側：圓形毛玻璃返回按鈕
+            // 左側：圓形液態玻璃返回按鈕
             Button {
                 triggerAnimatedDismissToGrid()
             } label: {
                 Image(systemName: "chevron.backward")
                     .font(.system(size: iconSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: buttonSize, height: buttonSize)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .detailLiquidGlassCircle(size: buttonSize)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("返回")
 
             Spacer()
 
-            // 中央：半透明日期時間藥丸 (如：9月17日 / 16:26 · 河田陽菜)
+            // 中央：液態玻璃日期時間藥丸 (如：9月17日 / 16:26 · 河田陽菜)
             Button {
                 showingInfoSheet = true
             } label: {
@@ -450,15 +450,14 @@ struct ChekiDetailView: View {
                 }
                 .padding(.horizontal, isLandscape ? 12 : 18)
                 .padding(.vertical, isLandscape ? 2.5 : 5)
-                .background(.ultraThinMaterial, in: Capsule())
-                .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 3)
+                .detailLiquidGlassCapsule()
             }
             .buttonStyle(.plain)
             .accessibilityLabel("資訊")
 
             Spacer()
 
-            // 右側：圓形毛玻璃更多選單 (`⋯`)
+            // 右側：圓形液態玻璃更多選單 (`⋯`)
             Menu {
                 Button {
                     trigger3DFlip()
@@ -590,8 +589,7 @@ struct ChekiDetailView: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: iconSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: buttonSize, height: buttonSize)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .detailLiquidGlassCircle(size: buttonSize)
             }
             .accessibilityLabel("更多")
         }
@@ -838,16 +836,13 @@ struct ChekiDetailView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, isLandscape ? 7 : 9)
             .padding(.vertical, isLandscape ? 3 : 4.5)
-            .background(.black.opacity(0.62), in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
-            )
+            .detailLiquidGlassCapsule()
         }
         .buttonStyle(.plain)
         .padding(isLandscape ? 6 : 8)
         .opacity(shouldShow ? 1.0 : 0.0)
         .allowsHitTesting(shouldShow)
+        .environment(\.colorScheme, .dark)
     }
 
     /// 卡片本體的單擊（沉浸模式切換 / 白平衡點選取樣）與雙擊（3D 翻轉 / 重置縮放）手勢，綁定在底圖上以避免干擾右上角翻轉按鈕
@@ -1187,12 +1182,7 @@ struct ChekiDetailView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(
-            Capsule()
-                .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.7)
-        )
-        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
+        .detailLiquidGlassCapsule(interactive: false)
         .padding(.horizontal, 12)
         .environment(\.colorScheme, .dark)
     }
@@ -1220,7 +1210,7 @@ struct ChekiDetailView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
-        .background(.ultraThinMaterial, in: Capsule())
+        .detailLiquidGlassCapsule(interactive: false)
         .environment(\.colorScheme, .dark)
     }
 
@@ -1332,13 +1322,7 @@ struct ChekiDetailView: View {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: iconFontSize, weight: .medium))
                     .foregroundStyle(.white)
-                    .frame(width: pillHeight, height: pillHeight)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(
-                        Circle()
-                            .strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
-                    )
-                    .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+                    .detailLiquidGlassCircle(size: pillHeight)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("分享")
@@ -1415,12 +1399,7 @@ struct ChekiDetailView: View {
             }
             .padding(.horizontal, isLandscape ? 4 : 4)
             .frame(height: pillHeight)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
-            )
-            .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+            .detailLiquidGlassCapsule()
 
             // 右側獨立圓形膠囊：5. 垃圾桶 (Delete)
             Button(role: .destructive) {
@@ -1429,13 +1408,7 @@ struct ChekiDetailView: View {
                 Image(systemName: "trash")
                     .font(.system(size: iconFontSize, weight: .medium))
                     .foregroundStyle(.white)
-                    .frame(width: pillHeight, height: pillHeight)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(
-                        Circle()
-                            .strokeBorder(.white.opacity(0.14), lineWidth: 0.6)
-                    )
-                    .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+                    .detailLiquidGlassCircle(size: pillHeight)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("刪除")
@@ -2437,9 +2410,9 @@ private struct ChekiQuadCropEditorView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(Color.white.opacity(0.14), in: Circle())
+                    .detailLiquidGlassCircle(size: 38)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("取消裁切")
 
             Spacer()
@@ -2469,7 +2442,7 @@ private struct ChekiQuadCropEditorView: View {
                     }
                 }
                 .padding(3)
-                .background(Color.white.opacity(0.14), in: Capsule())
+                .detailLiquidGlassCapsule()
 
                 Spacer()
             }
@@ -2486,8 +2459,9 @@ private struct ChekiQuadCropEditorView: View {
                         .foregroundStyle(.yellow)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .background(Color.white.opacity(0.14), in: Capsule())
+                        .detailLiquidGlassCapsule()
                 }
+                .buttonStyle(.plain)
             }
 
             // 右側：完成 (✓)
@@ -2509,6 +2483,7 @@ private struct ChekiQuadCropEditorView: View {
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 8)
+        .environment(\.colorScheme, .dark)
     }
 
     // MARK: - 2. 中央互動畫布（透明灰色切除遮罩 + 四頂點可移出相片外拖曳 + 雙指縮放 + 放大鏡）
@@ -3688,6 +3663,47 @@ private struct InAppBacksidePickerSheet: View {
             }
         }
         .buttonStyle(.plain)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func detailLiquidGlassCircle(size: CGFloat) -> some View {
+        if #available(iOS 26.0, *) {
+            self
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+                .glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            self
+                .frame(width: size, height: size)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .strokeBorder(.white.opacity(0.16), lineWidth: 0.6)
+                )
+        }
+    }
+
+    @ViewBuilder
+    func detailLiquidGlassCapsule(interactive: Bool = true) -> some View {
+        if #available(iOS 26.0, *) {
+            if interactive {
+                self
+                    .contentShape(Capsule())
+                    .glassEffect(.regular.interactive(), in: .capsule)
+            } else {
+                self
+                    .glassEffect(.regular, in: .capsule)
+            }
+        } else {
+            self
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(.white.opacity(0.16), lineWidth: 0.6)
+                )
+        }
     }
 }
 

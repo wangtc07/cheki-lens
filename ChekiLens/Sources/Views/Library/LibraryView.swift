@@ -323,141 +323,7 @@ struct LibraryView: View {
 
             Spacer()
 
-            HStack(spacing: 8) {
-                if isSelectionMode {
-                    Button {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        if selectedItemIDs.count == displayedItems.count {
-                            selectedItemIDs.removeAll()
-                        } else {
-                            selectedItemIDs = Set(displayedItems.map(\.persistentModelID))
-                        }
-                    } label: {
-                        Text(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選")
-                            .font(.subheadline.weight(.semibold))
-                            .fixedSize(horizontal: true, vertical: false)
-                            .darkSystemCapsuleChrome(height: 36)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Button {
-                        showingCameraScanner = true
-                    } label: {
-                        Image(systemName: "camera.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .darkSystemCircleChrome(size: 36)
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                    .accessibilityLabel("開啟相機拍攝拍立得")
-
-                    PhotosPicker(
-                        selection: $selectedPhotos,
-                        maxSelectionCount: nil,
-                        matching: .images,
-                        preferredItemEncoding: .automatic,
-                        photoLibrary: .shared()
-                    ) {
-                        Image(systemName: "plus")
-                            .font(.subheadline.weight(.semibold))
-                            .darkSystemCircleChrome(size: 36)
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                    .accessibilityLabel("匯入拍立得照片")
-                    .onChange(of: selectedPhotos) { _, newItems in
-                        guard !newItems.isEmpty else { return }
-                        processingItems = newItems
-                        selectedPhotos = []
-                        showingBatchPairingSheet = true
-                    }
-
-                    Menu {
-                        Section(L10n.tr("顯示密度", "表示列数")) {
-                            ForEach(Self.supportedColumnCounts, id: \.self) { count in
-                                Button {
-                                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
-                                        columnCount = count
-                                    }
-                                } label: {
-                                    Label(
-                                        "\(count) 欄顯示",
-                                        systemImage: columnCount == count ? "checkmark" : "square.grid.3x3"
-                                    )
-                                }
-                            }
-                        }
-
-                        Section("排序與篩選") {
-                            Button {
-                                sortAscending = false
-                            } label: {
-                                Label("由新到舊", systemImage: !sortAscending ? "checkmark" : "arrow.down")
-                            }
-                            Button {
-                                sortAscending = true
-                            } label: {
-                                Label("由舊到新", systemImage: sortAscending ? "checkmark" : "arrow.up")
-                            }
-                            Button {
-                                filterDualSideOnly.toggle()
-                            } label: {
-                                Label(
-                                    "僅顯示正反雙面",
-                                    systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait"
-                                )
-                            }
-                        }
-
-                        Section("管理") {
-                            Button {
-                                showingQuickCreateSheet = true
-                            } label: {
-                                Label(L10n.tr("團體 / 成員", "グループ / メンバー"), systemImage: "person.badge.plus")
-                            }
-
-                            Button {
-                                showingSettingsSheet = true
-                            } label: {
-                                Label("設定", systemImage: "gearshape")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease")
-                            .font(.subheadline.weight(.semibold))
-                            .darkSystemCircleChrome(size: 36)
-                    }
-                    .fixedSize()
-                    .accessibilityLabel("篩選與更多設定")
-                }
-
-                if !displayedItems.isEmpty {
-                    Button {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        withAnimation(.snappy(duration: 0.22)) {
-                            isSelectionMode.toggle()
-                            if !isSelectionMode {
-                                selectedItemIDs.removeAll()
-                            }
-                        }
-                    } label: {
-                        if isSelectionMode {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 14, weight: .bold))
-                                .darkSystemCircleChrome(size: 36)
-                        } else {
-                            Text("選取")
-                                .font(.subheadline.weight(.semibold))
-                                .fixedSize(horizontal: true, vertical: false)
-                                .darkSystemCapsuleChrome(height: 36)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                    .layoutPriority(1)
-                    .accessibilityLabel(isSelectionMode ? "完成選取" : "選取拍立得")
-                }
-            }
+            topHeaderActionButtons
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
@@ -465,8 +331,8 @@ struct LibraryView: View {
         .background(
             LinearGradient(
                 colors: [
-                    Color(.systemBackground).opacity(0.92),
                     Color(.systemBackground).opacity(0.65),
+                    Color(.systemBackground).opacity(0.28),
                     Color(.systemBackground).opacity(0.0)
                 ],
                 startPoint: .top,
@@ -474,6 +340,156 @@ struct LibraryView: View {
             )
             .ignoresSafeArea(edges: .top)
         )
+    }
+
+    @ViewBuilder
+    private var topHeaderActionButtons: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 8) {
+                topHeaderActionButtonsContent
+            }
+        } else {
+            topHeaderActionButtonsContent
+        }
+    }
+
+    private var topHeaderActionButtonsContent: some View {
+        HStack(spacing: 8) {
+            if isSelectionMode {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    if selectedItemIDs.count == displayedItems.count {
+                        selectedItemIDs.removeAll()
+                    } else {
+                        selectedItemIDs = Set(displayedItems.map(\.persistentModelID))
+                    }
+                } label: {
+                    Text(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選")
+                        .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .darkSystemCapsuleChrome(height: 36)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    showingCameraScanner = true
+                } label: {
+                    Image(systemName: "camera.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .darkSystemCircleChrome(size: 36)
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .accessibilityLabel("開啟相機拍攝拍立得")
+
+                PhotosPicker(
+                    selection: $selectedPhotos,
+                    maxSelectionCount: nil,
+                    matching: .images,
+                    preferredItemEncoding: .automatic,
+                    photoLibrary: .shared()
+                ) {
+                    Image(systemName: "plus")
+                        .font(.subheadline.weight(.semibold))
+                        .darkSystemCircleChrome(size: 36)
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .accessibilityLabel("匯入拍立得照片")
+                .onChange(of: selectedPhotos) { _, newItems in
+                    guard !newItems.isEmpty else { return }
+                    processingItems = newItems
+                    selectedPhotos = []
+                    showingBatchPairingSheet = true
+                }
+
+                Menu {
+                    Section(L10n.tr("顯示密度", "表示列数")) {
+                        ForEach(Self.supportedColumnCounts, id: \.self) { count in
+                            Button {
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                                    columnCount = count
+                                }
+                            } label: {
+                                Label(
+                                    "\(count) 欄顯示",
+                                    systemImage: columnCount == count ? "checkmark" : "square.grid.3x3"
+                                )
+                            }
+                        }
+                    }
+
+                    Section("排序與篩選") {
+                        Button {
+                            sortAscending = false
+                        } label: {
+                            Label("由新到舊", systemImage: !sortAscending ? "checkmark" : "arrow.down")
+                        }
+                        Button {
+                            sortAscending = true
+                        } label: {
+                            Label("由舊到新", systemImage: sortAscending ? "checkmark" : "arrow.up")
+                        }
+                        Button {
+                            filterDualSideOnly.toggle()
+                        } label: {
+                            Label(
+                                "僅顯示正反雙面",
+                                systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait"
+                            )
+                        }
+                    }
+
+                    Section("管理") {
+                        Button {
+                            showingQuickCreateSheet = true
+                        } label: {
+                            Label(L10n.tr("團體 / 成員", "グループ / メンバー"), systemImage: "person.badge.plus")
+                        }
+
+                        Button {
+                            showingSettingsSheet = true
+                        } label: {
+                            Label("設定", systemImage: "gearshape")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.subheadline.weight(.semibold))
+                        .darkSystemCircleChrome(size: 36)
+                }
+                .tint(.primary)
+                .fixedSize()
+                .accessibilityLabel("篩選與更多設定")
+            }
+
+            if !displayedItems.isEmpty {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.snappy(duration: 0.22)) {
+                        isSelectionMode.toggle()
+                        if !isSelectionMode {
+                            selectedItemIDs.removeAll()
+                        }
+                    }
+                } label: {
+                    if isSelectionMode {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .darkSystemCircleChrome(size: 36)
+                    } else {
+                        Text("選取")
+                            .font(.subheadline.weight(.semibold))
+                            .fixedSize(horizontal: true, vertical: false)
+                            .darkSystemCapsuleChrome(height: 36)
+                    }
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .layoutPriority(1)
+                .accessibilityLabel(isSelectionMode ? "完成選取" : "選取拍立得")
+            }
+        }
     }
 
     // MARK: - Pinch-to-Zoom Gesture (雙指縮放切換 1 / 2 / 3 / 5 欄)
@@ -1000,7 +1016,7 @@ struct AlbumsRootView: View {
                     } label: {
                         Image(systemName: "plus")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .frame(width: 40, height: 36)
                             .contentShape(Rectangle())
                     }
@@ -1008,7 +1024,7 @@ struct AlbumsRootView: View {
                     .accessibilityLabel("團體 / 成員")
 
                     Rectangle()
-                        .fill(.white.opacity(0.22))
+                        .fill(.primary.opacity(0.18))
                         .frame(width: 0.8, height: 18)
 
                     Menu {
@@ -1098,7 +1114,7 @@ struct AlbumsRootView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .frame(width: 40, height: 36)
                             .contentShape(Rectangle())
                     }
@@ -1118,7 +1134,18 @@ struct AlbumsRootView: View {
         .padding(.horizontal, 16)
         .padding(.top, 6)
         .padding(.bottom, 10)
-        .background(.bar)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(.systemBackground).opacity(0.65),
+                    Color(.systemBackground).opacity(0.28),
+                    Color(.systemBackground).opacity(0.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .top)
+        )
     }
 
     // MARK: - 團體相冊網格 / 清單（基本相簿構造：團體 > 成員）
@@ -1694,110 +1721,96 @@ private struct GroupMembersAlbumView: View {
             showingBatchPairingSheet = true
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 0) {
-                    Button {
-                        showingQuickCreateSheet = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 34)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    showingQuickCreateSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("團體 / 成員")
 
-                    Rectangle()
-                        .fill(.white.opacity(0.22))
-                        .frame(width: 0.8, height: 18)
+                Menu {
+                    Button {
+                        actionTargetMember = displayedMembers.first
+                        showingCameraScanner = true
+                    } label: {
+                        Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
+                    }
+
+                    Button {
+                        actionTargetMember = displayedMembers.first
+                        showingAlbumPhotosPicker = true
+                    } label: {
+                        Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
+                    }
+
+                    Button {
+                        renameText = group.name
+                        showingRenameGroupAlert = true
+                    } label: {
+                        Label(L10n.tr("團體名", "グループ名"), systemImage: "pencil")
+                    }
+
+                    if !displayedMembers.isEmpty {
+                        Menu {
+                            ForEach(displayedMembers) { member in
+                                Button {
+                                    renameText = member.stageName
+                                    renamingMember = member
+                                } label: {
+                                    Label(member.stageName, systemImage: "pencil")
+                                }
+                            }
+                        } label: {
+                            Label(L10n.tr("成員名", "メンバー名"), systemImage: "person.text.rectangle")
+                        }
+                    }
+
+                    Divider()
 
                     Menu {
-                        Button {
-                            actionTargetMember = displayedMembers.first
-                            showingCameraScanner = true
-                        } label: {
-                            Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
-                        }
-
-                        Button {
-                            actionTargetMember = displayedMembers.first
-                            showingAlbumPhotosPicker = true
-                        } label: {
-                            Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
-                        }
-
-                        Button {
-                            renameText = group.name
-                            showingRenameGroupAlert = true
-                        } label: {
-                            Label(L10n.tr("團體名", "グループ名"), systemImage: "pencil")
-                        }
-
-                        if !displayedMembers.isEmpty {
-                            Menu {
-                                ForEach(displayedMembers) { member in
-                                    Button {
-                                        renameText = member.stageName
-                                        renamingMember = member
-                                    } label: {
-                                        Label(member.stageName, systemImage: "pencil")
-                                    }
+                        ForEach(AlbumSortMethod.allCases) { method in
+                            Button {
+                                withAnimation(.snappy(duration: 0.22)) {
+                                    sortMethodRaw = method.rawValue
                                 }
                             } label: {
-                                Label(L10n.tr("成員名", "メンバー名"), systemImage: "person.text.rectangle")
-                            }
-                        }
-
-                        Divider()
-
-                        Menu {
-                            ForEach(AlbumSortMethod.allCases) { method in
-                                Button {
-                                    withAnimation(.snappy(duration: 0.22)) {
-                                        sortMethodRaw = method.rawValue
-                                    }
-                                } label: {
-                                    if sortMethod == method {
-                                        Label(method.displayName, systemImage: "checkmark")
-                                    } else {
-                                        Text(method.displayName)
-                                    }
+                                if sortMethod == method {
+                                    Label(method.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(method.displayName)
                                 }
                             }
-                        } label: {
-                            Label(L10n.tr("排序", "並び順"), systemImage: "arrow.up.arrow.down")
-                        }
-
-                        Menu {
-                            ForEach(AlbumDisplayMode.allCases) { mode in
-                                Button {
-                                    withAnimation(.snappy(duration: 0.22)) {
-                                        displayModeRaw = mode.rawValue
-                                    }
-                                } label: {
-                                    Label(mode.displayName, systemImage: displayMode == mode ? "checkmark" : mode.iconName)
-                                }
-                            }
-                        } label: {
-                            Label(L10n.tr("顯示", "表示"), systemImage: displayMode.iconName)
-                        }
-
-                        Divider()
-
-                        Button {
-                            showingSettingsSheet = true
-                        } label: {
-                            Label("設定", systemImage: "gearshape")
                         }
                     } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 34)
-                            .contentShape(Rectangle())
+                        Label(L10n.tr("排序", "並び順"), systemImage: "arrow.up.arrow.down")
                     }
+
+                    Menu {
+                        ForEach(AlbumDisplayMode.allCases) { mode in
+                            Button {
+                                withAnimation(.snappy(duration: 0.22)) {
+                                    displayModeRaw = mode.rawValue
+                                }
+                            } label: {
+                                Label(mode.displayName, systemImage: displayMode == mode ? "checkmark" : mode.iconName)
+                            }
+                        }
+                    } label: {
+                        Label(L10n.tr("顯示", "表示"), systemImage: displayMode.iconName)
+                    }
+
+                    Divider()
+
+                    Button {
+                        showingSettingsSheet = true
+                    } label: {
+                        Label("設定", systemImage: "gearshape")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
-                .darkSystemUnifiedCapsuleContainer()
+                .accessibilityLabel("更多")
             }
         }
         .sheet(isPresented: $showingQuickCreateSheet) {
@@ -1920,42 +1933,69 @@ private struct GroupMembersAlbumView: View {
 }
 
 private extension View {
+    @ViewBuilder
     func darkSystemCircleChrome(size: CGFloat = 36) -> some View {
-        self
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(Color.black.opacity(0.68), in: Circle())
-            .background(.ultraThinMaterial, in: Circle())
-            .overlay(
-                Circle()
-                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.6)
-            )
-            .environment(\.colorScheme, .dark)
+        if #available(iOS 26.0, *) {
+            self
+                .foregroundStyle(.primary)
+                .tint(.primary)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+                .glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            self
+                .foregroundStyle(.primary)
+                .tint(.primary)
+                .frame(width: size, height: size)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .strokeBorder(.primary.opacity(0.14), lineWidth: 0.6)
+                )
+        }
     }
 
+    @ViewBuilder
     func darkSystemCapsuleChrome(height: CGFloat = 36, horizontalPadding: CGFloat = 14) -> some View {
-        self
-            .foregroundStyle(.white)
-            .padding(.horizontal, horizontalPadding)
-            .frame(height: height)
-            .background(Color.black.opacity(0.68), in: Capsule())
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.6)
-            )
-            .environment(\.colorScheme, .dark)
+        if #available(iOS 26.0, *) {
+            self
+                .foregroundStyle(.primary)
+                .tint(.primary)
+                .padding(.horizontal, horizontalPadding)
+                .frame(height: height)
+                .contentShape(Capsule())
+                .glassEffect(.regular.interactive(), in: .capsule)
+        } else {
+            self
+                .foregroundStyle(.primary)
+                .tint(.primary)
+                .padding(.horizontal, horizontalPadding)
+                .frame(height: height)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(.primary.opacity(0.14), lineWidth: 0.6)
+                )
+        }
     }
 
+    @ViewBuilder
     func darkSystemUnifiedCapsuleContainer() -> some View {
-        self
-            .background(Color.black.opacity(0.68), in: Capsule())
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.6)
-            )
-            .environment(\.colorScheme, .dark)
+        if #available(iOS 26.0, *) {
+            self
+                .foregroundStyle(.primary)
+                .tint(.primary)
+                .glassEffect(.regular.interactive(), in: .capsule)
+        } else {
+            self
+                .foregroundStyle(.primary)
+                .tint(.primary)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(.primary.opacity(0.14), lineWidth: 0.6)
+                )
+        }
     }
 }
 
@@ -2151,148 +2191,120 @@ struct AlbumHeroDetailView: View {
             NavigationChromeState.shared.setSelectionMode(false, id: selectionViewID)
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 10) {
-                    if isSelectionMode {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            if selectedItemIDs.count == displayedItems.count {
-                                selectedItemIDs.removeAll()
-                            } else {
-                                selectedItemIDs = Set(displayedItems.map(\.persistentModelID))
-                            }
-                        } label: {
-                            Text(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選")
-                                .font(.subheadline.weight(.semibold))
-                                .fixedSize(horizontal: true, vertical: false)
-                                .darkSystemCapsuleChrome(height: 34)
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if isSelectionMode {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        if selectedItemIDs.count == displayedItems.count {
+                            selectedItemIDs.removeAll()
+                        } else {
+                            selectedItemIDs = Set(displayedItems.map(\.persistentModelID))
                         }
-                        .buttonStyle(.plain)
-                    } else {
-                        HStack(spacing: 0) {
-                            PhotosPicker(
-                                selection: $selectedPhotos,
-                                maxSelectionCount: nil,
-                                matching: .images,
-                                preferredItemEncoding: .automatic,
-                                photoLibrary: .shared()
-                            ) {
-                                Image(systemName: "plus")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 38, height: 34)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("相簿")
-
-                            Rectangle()
-                                .fill(.white.opacity(0.22))
-                                .frame(width: 0.8, height: 18)
-
-                            Menu {
-                                Button {
-                                    showingCameraScanner = true
-                                } label: {
-                                    Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
-                                }
-
-                                PhotosPicker(
-                                    selection: $selectedPhotos,
-                                    maxSelectionCount: nil,
-                                    matching: .images,
-                                    photoLibrary: .shared()
-                                ) {
-                                    Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
-                                }
-
-                                if let defaultMember {
-                                    Button {
-                                        renameMemberText = defaultMember.stageName
-                                        showingRenameMemberAlert = true
-                                    } label: {
-                                        Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
-                                    }
-                                }
-
-                                Menu {
-                                    ForEach(Self.supportedColumnCounts, id: \.self) { count in
-                                        Button {
-                                            withAnimation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15)) {
-                                                columnCount = count
-                                            }
-                                        } label: {
-                                            Label(L10n.tr("\(count) 欄", "\(count) 列"), systemImage: columnCount == count ? "checkmark" : "square.grid.3x3")
-                                        }
-                                    }
-                                } label: {
-                                    Label(L10n.tr("顯示密度", "表示密度"), systemImage: "square.grid.3x3")
-                                }
-
-                                Menu {
-                                    Button {
-                                        sortAscending = false
-                                    } label: {
-                                        Label("由新到舊", systemImage: !sortAscending ? "checkmark" : "arrow.down")
-                                    }
-                                    Button {
-                                        sortAscending = true
-                                    } label: {
-                                        Label("由舊到新", systemImage: sortAscending ? "checkmark" : "arrow.up")
-                                    }
-                                    Divider()
-                                    Button {
-                                        filterDualSideOnly.toggle()
-                                    } label: {
-                                        Label(L10n.tr("僅雙面", "両面のみ"), systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait")
-                                    }
-                                } label: {
-                                    Label(L10n.tr("排序", "並び順"), systemImage: "line.3.horizontal.decrease")
-                                }
-
-                                Divider()
-
-                                Button {
-                                    showingSettingsSheet = true
-                                } label: {
-                                    Label("設定", systemImage: "gearshape")
-                                }
-                            } label: {
-                                Image(systemName: "ellipsis")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 38, height: 34)
-                                    .contentShape(Rectangle())
-                            }
-                        }
-                        .darkSystemUnifiedCapsuleContainer()
-                        .fixedSize()
+                    } label: {
+                        Text(selectedItemIDs.count == displayedItems.count ? "取消全選" : "全選")
+                            .font(.subheadline.weight(.semibold))
                     }
+                } else {
+                    PhotosPicker(
+                        selection: $selectedPhotos,
+                        maxSelectionCount: nil,
+                        matching: .images,
+                        preferredItemEncoding: .automatic,
+                        photoLibrary: .shared()
+                    ) {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("相簿")
 
-                    if !displayedItems.isEmpty {
+                    Menu {
                         Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            withAnimation(.snappy(duration: 0.22)) {
-                                isSelectionMode.toggle()
-                                if !isSelectionMode {
-                                    selectedItemIDs.removeAll()
+                            showingCameraScanner = true
+                        } label: {
+                            Label(L10n.tr("拍照", "カメラ"), systemImage: "camera")
+                        }
+
+                        PhotosPicker(
+                            selection: $selectedPhotos,
+                            maxSelectionCount: nil,
+                            matching: .images,
+                            photoLibrary: .shared()
+                        ) {
+                            Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
+                        }
+
+                        if let defaultMember {
+                            Button {
+                                renameMemberText = defaultMember.stageName
+                                showingRenameMemberAlert = true
+                            } label: {
+                                Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
+                            }
+                        }
+
+                        Menu {
+                            ForEach(Self.supportedColumnCounts, id: \.self) { count in
+                                Button {
+                                    withAnimation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15)) {
+                                        columnCount = count
+                                    }
+                                } label: {
+                                    Label(L10n.tr("\(count) 欄", "\(count) 列"), systemImage: columnCount == count ? "checkmark" : "square.grid.3x3")
                                 }
                             }
                         } label: {
-                            if isSelectionMode {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .darkSystemCircleChrome(size: 34)
-                            } else {
-                                Text("選取")
-                                    .font(.subheadline.weight(.semibold))
-                                    .fixedSize(horizontal: true, vertical: false)
-                                    .darkSystemCapsuleChrome(height: 34)
+                            Label(L10n.tr("顯示密度", "表示密度"), systemImage: "square.grid.3x3")
+                        }
+
+                        Menu {
+                            Button {
+                                sortAscending = false
+                            } label: {
+                                Label("由新到舊", systemImage: !sortAscending ? "checkmark" : "arrow.down")
+                            }
+                            Button {
+                                sortAscending = true
+                            } label: {
+                                Label("由舊到新", systemImage: sortAscending ? "checkmark" : "arrow.up")
+                            }
+                            Divider()
+                            Button {
+                                filterDualSideOnly.toggle()
+                            } label: {
+                                Label(L10n.tr("僅雙面", "両面のみ"), systemImage: filterDualSideOnly ? "checkmark" : "rectangle.portrait.on.rectangle.portrait")
+                            }
+                        } label: {
+                            Label(L10n.tr("排序", "並び順"), systemImage: "line.3.horizontal.decrease")
+                        }
+
+                        Divider()
+
+                        Button {
+                            showingSettingsSheet = true
+                        } label: {
+                            Label("設定", systemImage: "gearshape")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("更多")
+                }
+
+                if !displayedItems.isEmpty {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(.snappy(duration: 0.22)) {
+                            isSelectionMode.toggle()
+                            if !isSelectionMode {
+                                selectedItemIDs.removeAll()
                             }
                         }
-                        .buttonStyle(.plain)
-                        .fixedSize()
-                        .layoutPriority(1)
+                    } label: {
+                        if isSelectionMode {
+                            Image(systemName: "xmark")
+                        } else {
+                            Text("選取")
+                                .font(.subheadline.weight(.semibold))
+                        }
                     }
                 }
             }
@@ -2899,10 +2911,12 @@ private struct InAppAlbumPhotoPickerSheet: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
                     .foregroundStyle(filterUncategorizedOnly ? .white : .primary)
-                    .background(
-                        filterUncategorizedOnly ? Color.accentColor : Color(.secondarySystemFill),
-                        in: Capsule()
-                    )
+                    .background {
+                        if filterUncategorizedOnly {
+                            Capsule().fill(Color.accentColor)
+                        }
+                    }
+                    .modifier(OptionalLiquidGlassCapsuleModifier(isEnabled: !filterUncategorizedOnly))
                 }
                 .buttonStyle(.plain)
 
@@ -2964,10 +2978,12 @@ private struct InAppAlbumPhotoPickerSheet: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
                     .foregroundStyle(!filterMemberIDs.isEmpty ? .white : .primary)
-                    .background(
-                        !filterMemberIDs.isEmpty ? Color.accentColor : Color(.secondarySystemFill),
-                        in: Capsule()
-                    )
+                    .background {
+                        if !filterMemberIDs.isEmpty {
+                            Capsule().fill(Color.accentColor)
+                        }
+                    }
+                    .modifier(OptionalLiquidGlassCapsuleModifier(isEnabled: filterMemberIDs.isEmpty))
                 }
                 .menuActionDismissBehavior(.disabled)
 
@@ -3609,6 +3625,29 @@ private final class ChekiDateFormatter: Sendable {
     }
 }
 
+private struct OptionalLiquidGlassCapsuleModifier: ViewModifier {
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            if #available(iOS 26.0, *) {
+                content
+                    .contentShape(Capsule())
+                    .glassEffect(.regular.interactive(), in: .capsule)
+            } else {
+                content
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(.primary.opacity(0.14), lineWidth: 0.6)
+                    )
+            }
+        } else {
+            content
+        }
+    }
+}
+
 // MARK: - 7. Apple Photos 原生風格選取底部列（左圓分享、中選取張數、右圓刪除）與滑動多選手勢
 
 private struct ApplePhotosSelectionBottomBar: View {
@@ -3618,21 +3657,14 @@ private struct ApplePhotosSelectionBottomBar: View {
 
     var body: some View {
         HStack(alignment: .center) {
-            // 左下圓形毛玻璃分享按鈕
+            // 左下圓形液態玻璃分享按鈕
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 onShare()
             } label: {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 48, height: 48)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(
-                        Circle()
-                            .strokeBorder(.white.opacity(0.18), lineWidth: 0.6)
-                    )
-                    .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+                    .darkSystemCircleChrome(size: 48)
             }
             .buttonStyle(.plain)
             .disabled(selectedCount == 0)
@@ -3651,21 +3683,14 @@ private struct ApplePhotosSelectionBottomBar: View {
 
             Spacer()
 
-            // 右下圓形毛玻璃刪除按鈕
+            // 右下圓形液態玻璃刪除按鈕
             Button(role: .destructive) {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 onDelete()
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 48, height: 48)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(
-                        Circle()
-                            .strokeBorder(.white.opacity(0.18), lineWidth: 0.6)
-                    )
-                    .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+                    .darkSystemCircleChrome(size: 48)
             }
             .buttonStyle(.plain)
             .disabled(selectedCount == 0)
