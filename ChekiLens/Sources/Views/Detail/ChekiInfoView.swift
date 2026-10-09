@@ -145,75 +145,83 @@ struct ChekiInfoView: View {
 
                     // 成員（支援多層多選，點選成員不自動關閉選單，點旁邊 Lose Focus 才關閉）
                     let assignedMembers = item.assignedMembers(from: idolMembers)
-                    VStack(alignment: .leading, spacing: assignedMembers.count > 1 ? 8 : 0) {
-                        HStack {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        isEditingDate = false
+                        isEditingTime = false
+                        isMemoFocused = false
+                        showingMemberPopover = true
+                    } label: {
+                        HStack(spacing: 8) {
                             Text("成員")
                                 .foregroundStyle(.primary)
 
                             Spacer()
 
-                            Menu {
-                                MemberAssignmentMenuContent(item: item) {
-                                    showingQuickCreateMember = true
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(item.assignedMembersDisplayString(from: idolMembers, includeGroupForSingle: true))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                    Image(systemName: "chevron.up.chevron.down")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.tertiary)
-                                }
-                                .contentShape(Rectangle())
+                            HStack(spacing: 4) {
+                                Text(item.assignedMembersDisplayString(from: idolMembers, includeGroupForSingle: true))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
                             }
-                            .menuActionDismissBehavior(.disabled)
                         }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showingMemberPopover, arrowEdge: .top) {
+                        MemberMultiSelectPopoverView(item: item) {
+                            showingQuickCreateMember = true
+                        }
+                        .presentationCompactAdaptation(.popover)
+                    }
 
-                        if !assignedMembers.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 6) {
-                                    ForEach(assignedMembers) { member in
-                                        HStack(spacing: 4) {
-                                            Text(member.albumTitle)
-                                                .font(.caption.weight(.medium))
-                                                .foregroundStyle(.primary)
-                                            Button {
-                                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                                item.toggleAssignedMember(member, allMembers: idolMembers)
-                                                try? modelContext.save()
-                                            } label: {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .font(.system(size: 13))
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            .buttonStyle(.plain)
+                    if !assignedMembers.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(assignedMembers) { member in
+                                    HStack(spacing: 4) {
+                                        Text(member.albumTitle)
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.primary)
+                                        Button {
+                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                            item.toggleAssignedMember(member, allMembers: idolMembers)
+                                            try? modelContext.save()
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(.secondary)
                                         }
-                                        .padding(.horizontal, 9)
-                                        .padding(.vertical, 5)
-                                        .background(Color(.tertiarySystemFill), in: Capsule())
+                                        .buttonStyle(.plain)
                                     }
-
-                                    Menu {
-                                        MemberAssignmentMenuContent(item: item) {
-                                            showingQuickCreateMember = true
-                                        }
-                                    } label: {
-                                        HStack(spacing: 3) {
-                                            Image(systemName: "plus")
-                                                .font(.system(size: 10, weight: .bold))
-                                            Text(L10n.tr("成員", "メンバー"))
-                                                .font(.caption.weight(.medium))
-                                        }
-                                        .foregroundStyle(.secondary)
-                                        .padding(.horizontal, 9)
-                                        .padding(.vertical, 5)
-                                        .background(Color(.tertiarySystemFill), in: Capsule())
-                                    }
-                                    .menuActionDismissBehavior(.disabled)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(Color(.tertiarySystemFill), in: Capsule())
                                 }
-                                .padding(.top, 4)
+
+                                Button {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    isEditingDate = false
+                                    isEditingTime = false
+                                    isMemoFocused = false
+                                    showingMemberPopover = true
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 10, weight: .bold))
+                                        Text(L10n.tr("成員", "メンバー"))
+                                            .font(.caption.weight(.medium))
+                                    }
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(Color(.tertiarySystemFill), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
                             }
+                            .padding(.vertical, 2)
                         }
                     }
                 }

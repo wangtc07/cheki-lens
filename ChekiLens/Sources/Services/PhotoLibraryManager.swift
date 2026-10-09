@@ -1260,6 +1260,8 @@ struct ChekiWatermarkOverlayView: View {
                         Text("ChekiLens")
                             .font(.system(size: fontSize, weight: .bold, design: .rounded))
                             .tracking(0.4)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
                             .foregroundStyle(Color.white.opacity(0.90))
                             .padding(.horizontal, hPad)
                             .padding(.vertical, vPad)

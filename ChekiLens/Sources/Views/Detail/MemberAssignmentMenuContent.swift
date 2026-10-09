@@ -255,6 +255,7 @@ struct MemberMultiSelectPopoverView: View {
                                         .font(.subheadline.weight(isActive ? .bold : .medium))
                                         .foregroundStyle(isActive ? .primary : .secondary)
                                         .lineLimit(1)
+                                        .minimumScaleFactor(0.85)
 
                                     Spacer(minLength: 2)
 
@@ -297,6 +298,7 @@ struct MemberMultiSelectPopoverView: View {
                                         .font(.subheadline.weight(isActive ? .bold : .medium))
                                         .foregroundStyle(isActive ? .primary : .secondary)
                                         .lineLimit(1)
+                                        .minimumScaleFactor(0.85)
 
                                     Spacer(minLength: 2)
 
@@ -328,7 +330,7 @@ struct MemberMultiSelectPopoverView: View {
                     }
                     .padding(6)
                 }
-                .frame(width: 132)
+                .frame(width: 148)
                 .background(Color(.systemGroupedBackground))
 
                 Divider()
@@ -350,6 +352,7 @@ struct MemberMultiSelectPopoverView: View {
                                         .font(.subheadline.weight(isSelected ? .semibold : .regular))
                                         .foregroundStyle(.primary)
                                         .lineLimit(1)
+                                        .minimumScaleFactor(0.85)
 
                                     Spacer(minLength: 0)
                                 }
@@ -366,7 +369,7 @@ struct MemberMultiSelectPopoverView: View {
                     }
                     .padding(6)
                 }
-                .frame(width: 168)
+                .frame(width: 172)
                 .background(Color(.secondarySystemGroupedBackground))
             }
             .frame(height: 230)
@@ -395,7 +398,7 @@ struct MemberMultiSelectPopoverView: View {
             .buttonStyle(.plain)
             .background(Color(.secondarySystemGroupedBackground))
         }
-        .frame(width: 300)
+        .frame(width: 320)
         .onAppear {
             if selectedGroupID == nil {
                 selectedGroupID = activeGroupID
