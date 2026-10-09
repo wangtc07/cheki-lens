@@ -228,6 +228,31 @@ struct ChekiInfoView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    saveMemoTextImmediately(memoText)
+                    isMemoFocused = false
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil,
+                        from: nil,
+                        for: nil
+                    )
+                } label: {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 16, weight: .bold))
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.circle)
+                .tint(.accentColor)
+                .accessibilityLabel(L10n.tr("確認", "確定"))
+            }
+        }
         .sheet(isPresented: $showingQuickCreateMember) {
             QuickCreateIdolSheet()
         }
