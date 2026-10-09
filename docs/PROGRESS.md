@@ -11,7 +11,7 @@
 * **當前所屬階段**：Phase 6.5 — 實機體驗回饋與相冊／調色擴充待辦清單 (UX & Album Polish Todo List)
 * **當前分支**：`main`
 * **當前進行中任務**：已完成 **Phase 6.5 全部 15 個區塊 (`Task 6.5.1` ~ `Task 6.5.15`)** 並完成共用 UI 元件重構與模擬器實機截圖驗證
-* **最新穩定 Git Commit**：refactor(共用UI): 完成 Task 6.5.15 單欄雙層多選成員選單、相機+號圖示、挑選面板符號化與導覽膠囊共用元件重構
+* **最新穩定 Git Commit**：style(相機圖示): 將攝影追加共用圖示還原為 Apple 原生 SF Symbol camera
 * **下一動執行指示**：執行 **Task 6.3**（建立 App 圖示、啟動畫面與 App Store 截圖產生流程）
 
 ---
@@ -287,7 +287,7 @@
 - [x] **Task 6.5.12 (區塊 12)**: 全域中日文固定文字精簡優化（移除非必要括號 `(...)`／`（...）` 改以 `·` 分隔或省略、當圖示已表達新增／刪除／變更語意時省略「を追加／新增／から読み込む」等冗贅動詞、消除硬編碼換行 `\n` 保持單行精簡呈現）
 - [x] **Task 6.5.13 (區塊 13)**: 全頁面頂部漢堡選單與小按鈕 UI 統一採用液態玻璃半透明元件（移除原本頂部深灰不透明圓鈕／膠囊底色，將圖庫首頁、相冊頁、團體與成員相冊內頁、單張全螢幕檢視、四點透視裁切、批次配對工作台與專業相機之頂部／底部小按鈕全面升級為與底部 TabBar 及搜尋頁一致的 iOS 26 `.glassEffect(.regular.interactive())` 液態玻璃設計）
 - [x] **Task 6.5.14 (區塊 14)**: 備忘輸入時於鍵盤上方加入勾勾確認按鈕（`ToolbarItemGroup(placement: .keyboard)` 右側 `checkmark` 圓形確認鈕，點擊後立即儲存備忘並收合關閉鍵盤，同時支援捲動互動收合鍵盤）
-- [x] **Task 6.5.15 (區塊 15)**: 共用 UI 元件重構與 4 項介面一致性修正（建立 `AlbumChrome.swift` 與 `MemberHierarchyMenuContent` 共用元件：將所有成員多選選單統一為與匯入工作台一致的單欄雙層階層式選單且點選不自動關閉；將所有拍照追加入口與長按選單統一改用帶 `+` 角標之相機圖示 `AppIcons.cameraAddImage`；將 `InAppAlbumPhotoPickerSheet` 頂部取消／確認按鈕改為 `xmark` / `checkmark` 符號消除日文擁擠；將 `AlbumsRootView` 與 `GroupMembersAlbumView` 右上導覽按鈕統一為共用 `AlbumNavTrailingToolbar` 液態玻璃膠囊）
+- [x] **Task 6.5.15 (區塊 15)**: 共用 UI 元件重構與 4 項介面一致性修正（建立 `AlbumChrome.swift` 與 `MemberHierarchyMenuContent` 共用元件：將所有成員多選選單統一為與匯入工作台一致的單欄雙層階層式選單且點選不自動關閉；將所有拍照追加入口與長按選單統一收斂至共用 `AppIcons.cameraAddImage`（原生 SF Symbol `camera`）；將 `InAppAlbumPhotoPickerSheet` 頂部取消／確認按鈕改為 `xmark` / `checkmark` 符號消除日文擁擠；將 `AlbumsRootView` 與 `GroupMembersAlbumView` 右上導覽按鈕統一為共用 `AlbumNavTrailingToolbar` 液態玻璃膠囊）
 
 ---
 

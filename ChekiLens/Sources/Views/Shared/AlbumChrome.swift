@@ -1,37 +1,13 @@
 import SwiftUI
 import UIKit
 
-// MARK: - 共用圖示：相機 + 加號（SF Symbols 無此組合，以模板圖自行合成）
+// MARK: - 共用圖示：攝影追加（Apple 原生 SF Symbol `camera`）
 
 enum AppIcons {
-    /// 相機帶 `+` 角標，表示「攝影追加」
-    static let cameraAdd: UIImage = {
-        let size = CGSize(width: 26, height: 22)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let image = renderer.image { ctx in
-            let camConfig = UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)
-            let plusConfig = UIImage.SymbolConfiguration(pointSize: 9, weight: .heavy)
-            if let cam = UIImage(systemName: "camera", withConfiguration: camConfig)?
-                .withTintColor(.black, renderingMode: .alwaysOriginal) {
-                cam.draw(at: CGPoint(x: 0, y: (size.height - cam.size.height) / 2))
-            }
-            let badgeRect = CGRect(x: size.width - 13, y: size.height - 13, width: 13, height: 13)
-            ctx.cgContext.setBlendMode(.clear)
-            ctx.cgContext.fillEllipse(in: badgeRect.insetBy(dx: -1.5, dy: -1.5))
-            ctx.cgContext.setBlendMode(.normal)
-            if let plus = UIImage(systemName: "plus", withConfiguration: plusConfig)?
-                .withTintColor(.black, renderingMode: .alwaysOriginal) {
-                plus.draw(at: CGPoint(
-                    x: badgeRect.midX - plus.size.width / 2,
-                    y: badgeRect.midY - plus.size.height / 2
-                ))
-            }
-        }
-        return image.withRenderingMode(.alwaysTemplate)
-    }()
+    static let cameraAddSymbolName = "camera"
 
     static var cameraAddImage: Image {
-        Image(uiImage: cameraAdd).renderingMode(.template)
+        Image(systemName: cameraAddSymbolName)
     }
 }
 
@@ -40,11 +16,7 @@ enum AppIcons {
 /// 攝影追加（所有「拍照追加」入口共用）
 struct CameraAddLabel: View {
     var body: some View {
-        Label {
-            Text(L10n.tr("拍照", "カメラ"))
-        } icon: {
-            AppIcons.cameraAddImage
-        }
+        Label(L10n.tr("拍照", "カメラ"), systemImage: AppIcons.cameraAddSymbolName)
     }
 }
 
