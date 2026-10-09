@@ -21,23 +21,35 @@ struct ContentView: View {
     var body: some View {
         Group {
             if hasCompletedOnboarding {
-                TabView(selection: $selectedTab) {
-                    Tab("全部", systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
-                        LibraryView()
-                            .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
-                    }
+                ZStack {
+                    TabView(selection: $selectedTab) {
+                        Tab("全部", systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
+                            LibraryView()
+                                .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                        }
 
-                    Tab("相冊", systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
-                        AlbumsRootView()
-                            .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
-                    }
+                        Tab("相冊", systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
+                            AlbumsRootView()
+                                .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                        }
 
-                    Tab("搜尋", systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
-                        LibrarySearchView()
-                            .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                        Tab("搜尋", systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
+                            LibrarySearchView()
+                                .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                        }
+                    }
+                    .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+
+                    if let route = chromeState.activeDetailRoute {
+                        ChekiDetailView(
+                            itemID: route.itemID,
+                            scopedItemIDs: route.scopedItemIDs,
+                            sourceScopeID: route.sourceScopeID
+                        )
+                        .id(route.itemID)
+                        .zIndex(100)
                     }
                 }
-                .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
             } else {
                 OnboardingView()
             }

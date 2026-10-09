@@ -179,29 +179,45 @@ struct LibraryView: View {
                     emptyStateView
                         .padding(.top, 72)
                 } else {
-                    ScrollView {
-                        LazyVGrid(columns: gridColumns, spacing: gridSpacing) {
-                            ForEach(displayedItems) { item in
-                                photoGridCell(for: item)
+                    ScrollViewReader { scrollProxy in
+                        ScrollView {
+                            LazyVGrid(columns: gridColumns, spacing: gridSpacing) {
+                                ForEach(displayedItems) { item in
+                                    photoGridCell(for: item)
+                                        .id(item.id)
+                                }
+                            }
+                            .overlay {
+                                if isSelectionMode {
+                                    ApplePhotosDragSelectOverlay(
+                                        itemIDs: displayedItems.map(\.persistentModelID),
+                                        columnCount: columnCount,
+                                        spacing: gridSpacing,
+                                        cellAspectRatio: 0.75,
+                                        selectedItemIDs: $selectedItemIDs
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, columnCount >= 5 ? 8 : 14)
+                            .padding(.top, 82)
+                            .padding(.bottom, isSelectionMode ? 96 : 32)
+                            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: columnCount)
+                        }
+                        .simultaneousGesture(pinchZoomGesture)
+                        .onChange(of: chromeState.activeZoomItemID) { _, newID in
+                            guard let newID,
+                                  chromeState.activeDetailRoute?.sourceScopeID == "library-all",
+                                  displayedItems.contains(where: { $0.id == newID }) else { return }
+                            let screenHeight = UIScreen.main.bounds.height
+                            if let anchor = chromeState.gridCellAnchor(for: newID, scopeID: "library-all") {
+                                if anchor.globalFrame.minY < 88 || anchor.globalFrame.maxY > screenHeight - 70 {
+                                    scrollProxy.scrollTo(newID, anchor: .center)
+                                }
+                            } else {
+                                scrollProxy.scrollTo(newID, anchor: .center)
                             }
                         }
-                        .overlay {
-                            if isSelectionMode {
-                                ApplePhotosDragSelectOverlay(
-                                    itemIDs: displayedItems.map(\.persistentModelID),
-                                    columnCount: columnCount,
-                                    spacing: gridSpacing,
-                                    cellAspectRatio: 0.75,
-                                    selectedItemIDs: $selectedItemIDs
-                                )
-                            }
-                        }
-                        .padding(.horizontal, columnCount >= 5 ? 8 : 14)
-                        .padding(.top, 82)
-                        .padding(.bottom, isSelectionMode ? 96 : 32)
-                        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: columnCount)
                     }
-                    .simultaneousGesture(pinchZoomGesture)
                 }
 
                 // 頂部懸浮標題與控制列（對齊 Apple 相簿 ライブラリ 頂部位置）
@@ -508,7 +524,7 @@ struct LibraryView: View {
         let cornerRadius: CGFloat = columnCount <= 2 ? 12 : (columnCount == 3 ? 9 : 5)
 
         if isSelectionMode {
-            AppleLibraryPhotoCell(item: item, cornerRadius: cornerRadius)
+            AppleLibraryPhotoCell(item: item, cornerRadius: cornerRadius, scopeID: "library-all")
                 .overlay(alignment: .bottomTrailing) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(columnCount >= 5 ? .subheadline : .title3)
@@ -527,8 +543,16 @@ struct LibraryView: View {
                     }
                 }
         } else {
-            NavigationLink(value: ChekiDetailRoute(itemID: item.id, scopedItemIDs: displayedItems.map(\.id))) {
-                AppleLibraryPhotoCell(item: item, cornerRadius: cornerRadius)
+            Button {
+                NavigationChromeState.shared.presentDetail(
+                    ChekiDetailRoute(
+                        itemID: item.id,
+                        scopedItemIDs: displayedItems.map(\.id),
+                        sourceScopeID: "library-all"
+                    )
+                )
+            } label: {
+                AppleLibraryPhotoCell(item: item, cornerRadius: cornerRadius, scopeID: "library-all")
             }
             .buttonStyle(.plain)
             .contextMenu {
@@ -665,9 +689,13 @@ struct LibraryView: View {
 private struct AppleLibraryPhotoCell: View {
     let item: ChekiItem
     let cornerRadius: CGFloat
+    var scopeID: String? = nil
+    private var chromeState = NavigationChromeState.shared
 
     var body: some View {
         let isValid = !item.isDeleted && item.modelContext != nil
+        let isHiddenForZoom = chromeState.isGridCellHidden(itemID: item.id, scopeID: scopeID)
+
         ZStack(alignment: .topTrailing) {
             if isValid,
                let uiImage = ChekiThumbnailCache.shared.image(for: item) {
@@ -679,6 +707,18 @@ private struct AppleLibraryPhotoCell: View {
                     }
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                     .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
+                    .onGeometryChange(for: CGRect.self) { proxy in
+                        proxy.frame(in: .global)
+                    } action: { newFrame in
+                        guard let scopeID else { return }
+                        NavigationChromeState.shared.updateGridCellAnchor(
+                            itemID: item.id,
+                            scopeID: scopeID,
+                            globalFrame: newFrame,
+                            cornerRadius: cornerRadius,
+                            isSquareCropped: false
+                        )
+                    }
             } else {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(Color(.secondarySystemFill))
@@ -686,6 +726,18 @@ private struct AppleLibraryPhotoCell: View {
                     .overlay {
                         Image(systemName: "photo")
                             .foregroundStyle(.secondary)
+                    }
+                    .onGeometryChange(for: CGRect.self) { proxy in
+                        proxy.frame(in: .global)
+                    } action: { newFrame in
+                        guard let scopeID else { return }
+                        NavigationChromeState.shared.updateGridCellAnchor(
+                            itemID: item.id,
+                            scopeID: scopeID,
+                            globalFrame: newFrame,
+                            cornerRadius: cornerRadius,
+                            isSquareCropped: false
+                        )
                     }
             }
 
@@ -700,6 +752,7 @@ private struct AppleLibraryPhotoCell: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .aspectRatio(0.75, contentMode: .fit)
+        .opacity(isHiddenForZoom ? 0.0 : 1.0)
         .contentShape(Rectangle())
     }
 }
@@ -1999,65 +2052,85 @@ struct AlbumHeroDetailView: View {
         displayedItems.first ?? liveItems.first
     }
 
+    private var gridScopeID: String {
+        "album-\(defaultMember?.id.uuidString ?? primaryTitle)"
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             Color(.systemBackground)
                 .ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 6) {
-                    heroHeaderView
-                        .transaction { transaction in
-                            transaction.animation = nil
-                        }
-
-                    if displayedItems.isEmpty && defaultMember == nil {
-                        ContentUnavailableView {
-                            Label("尚無拍立得項目", systemImage: "photo.on.rectangle")
-                        } description: {
-                            Text("點擊右上角「＋」或「⋯」匯入或拍攝拍立得至此相冊。")
-                        }
-                        .padding(.vertical, 48)
-                    } else {
-                        LazyVGrid(columns: gridColumns, spacing: gridSpacing) {
-                            ForEach(displayedItems) { item in
-                                albumPhotoCell(for: item)
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    VStack(spacing: 6) {
+                        heroHeaderView
+                            .transaction { transaction in
+                                transaction.animation = nil
                             }
 
-                            if defaultMember != nil && !isSelectionMode {
-                                addFromInAppLibraryCell
-                            }
-                        }
-                        .overlay {
-                            if isSelectionMode {
-                                ApplePhotosDragSelectOverlay(
-                                    itemIDs: displayedItems.map(\.persistentModelID),
-                                    columnCount: columnCount,
-                                    spacing: gridSpacing,
-                                    cellAspectRatio: 1.0,
-                                    selectedItemIDs: $selectedItemIDs
-                                )
-                            }
-                        }
-                        .padding(.horizontal, columnCount >= 5 ? 6 : 10)
-                        .padding(.top, 2)
-                        .scaleEffect(livePinchScale, anchor: .top)
-                        .animation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15), value: columnCount)
-
-                        if displayedItems.isEmpty {
+                        if displayedItems.isEmpty && defaultMember == nil {
                             ContentUnavailableView {
-                                Label(L10n.tr("尚無拍立得項目", "チェキがまだありません"), systemImage: "photo.on.rectangle")
+                                Label("尚無拍立得項目", systemImage: "photo.on.rectangle")
                             } description: {
-                                Text(L10n.tr("點擊上方「＋」從 App 內挑選照片加入，或由右上角匯入／拍攝。", "上の「＋」からアプリ内の写真を追加するか、右上から読み込んでください。"))
+                                Text("點擊右上角「＋」或「⋯」匯入或拍攝拍立得至此相冊。")
                             }
-                            .padding(.vertical, 28)
+                            .padding(.vertical, 48)
+                        } else {
+                            LazyVGrid(columns: gridColumns, spacing: gridSpacing) {
+                                ForEach(displayedItems) { item in
+                                    albumPhotoCell(for: item)
+                                        .id(item.id)
+                                }
+
+                                if defaultMember != nil && !isSelectionMode {
+                                    addFromInAppLibraryCell
+                                }
+                            }
+                            .overlay {
+                                if isSelectionMode {
+                                    ApplePhotosDragSelectOverlay(
+                                        itemIDs: displayedItems.map(\.persistentModelID),
+                                        columnCount: columnCount,
+                                        spacing: gridSpacing,
+                                        cellAspectRatio: 1.0,
+                                        selectedItemIDs: $selectedItemIDs
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, columnCount >= 5 ? 6 : 10)
+                            .padding(.top, 2)
+                            .scaleEffect(livePinchScale, anchor: .top)
+                            .animation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15), value: columnCount)
+
+                            if displayedItems.isEmpty {
+                                ContentUnavailableView {
+                                    Label(L10n.tr("尚無拍立得項目", "チェキがまだありません"), systemImage: "photo.on.rectangle")
+                                } description: {
+                                    Text(L10n.tr("點擊上方「＋」從 App 內挑選照片加入，或由右上角匯入／拍攝。", "上の「＋」からアプリ内の写真を追加するか、右上から読み込んでください。"))
+                                }
+                                .padding(.vertical, 28)
+                            }
                         }
                     }
+                    .padding(.bottom, isSelectionMode ? 96 : 40)
                 }
-                .padding(.bottom, isSelectionMode ? 96 : 40)
+                .simultaneousGesture(pinchZoomGesture)
+                .ignoresSafeArea(edges: .top)
+                .onChange(of: chromeState.activeZoomItemID) { _, newID in
+                    guard let newID,
+                          chromeState.activeDetailRoute?.sourceScopeID == gridScopeID,
+                          displayedItems.contains(where: { $0.id == newID }) else { return }
+                    let screenHeight = UIScreen.main.bounds.height
+                    if let anchor = chromeState.gridCellAnchor(for: newID, scopeID: gridScopeID) {
+                        if anchor.globalFrame.minY < 88 || anchor.globalFrame.maxY > screenHeight - 70 {
+                            scrollProxy.scrollTo(newID, anchor: .center)
+                        }
+                    } else {
+                        scrollProxy.scrollTo(newID, anchor: .center)
+                    }
+                }
             }
-            .simultaneousGesture(pinchZoomGesture)
-            .ignoresSafeArea(edges: .top)
         }
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingQuickCreateMember) {
@@ -2455,7 +2528,15 @@ struct AlbumHeroDetailView: View {
                 Spacer()
 
                 if let firstItem = displayedItems.first {
-                    NavigationLink(value: ChekiDetailRoute(itemID: firstItem.id, scopedItemIDs: displayedItems.map(\.id))) {
+                    Button {
+                        NavigationChromeState.shared.presentDetail(
+                            ChekiDetailRoute(
+                                itemID: firstItem.id,
+                                scopedItemIDs: displayedItems.map(\.id),
+                                sourceScopeID: gridScopeID
+                            )
+                        )
+                    } label: {
                         Image(systemName: "play.fill")
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(.white)
@@ -2501,7 +2582,7 @@ struct AlbumHeroDetailView: View {
     private func albumPhotoCell(for item: ChekiItem) -> some View {
         let isSelected = selectedItemIDs.contains(item.persistentModelID)
         if isSelectionMode {
-            AlbumSquareThumbnailCell(item: item, cornerRadius: cellCornerRadius)
+            AlbumSquareThumbnailCell(item: item, cornerRadius: cellCornerRadius, scopeID: gridScopeID)
                 .overlay(alignment: .bottomTrailing) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.headline)
@@ -2517,8 +2598,16 @@ struct AlbumHeroDetailView: View {
                     }
                 }
         } else {
-            NavigationLink(value: ChekiDetailRoute(itemID: item.id, scopedItemIDs: displayedItems.map(\.id))) {
-                AlbumSquareThumbnailCell(item: item, cornerRadius: cellCornerRadius)
+            Button {
+                NavigationChromeState.shared.presentDetail(
+                    ChekiDetailRoute(
+                        itemID: item.id,
+                        scopedItemIDs: displayedItems.map(\.id),
+                        sourceScopeID: gridScopeID
+                    )
+                )
+            } label: {
+                AlbumSquareThumbnailCell(item: item, cornerRadius: cellCornerRadius, scopeID: gridScopeID)
             }
             .buttonStyle(.plain)
             .contextMenu {
@@ -3102,9 +3191,13 @@ private final class ChekiThumbnailCache: @unchecked Sendable {
 private struct AlbumSquareThumbnailCell: View {
     let item: ChekiItem
     var cornerRadius: CGFloat = 5
+    var scopeID: String? = nil
+    private var chromeState = NavigationChromeState.shared
 
     var body: some View {
         let isValid = !item.isDeleted && item.modelContext != nil
+        let isHiddenForZoom = chromeState.isGridCellHidden(itemID: item.id, scopeID: scopeID)
+
         Color(.secondarySystemFill)
             .aspectRatio(1, contentMode: .fit)
             .overlay {
@@ -3134,6 +3227,19 @@ private struct AlbumSquareThumbnailCell: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .opacity(isHiddenForZoom ? 0.0 : 1.0)
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .global)
+            } action: { newFrame in
+                guard let scopeID else { return }
+                NavigationChromeState.shared.updateGridCellAnchor(
+                    itemID: item.id,
+                    scopeID: scopeID,
+                    globalFrame: newFrame,
+                    cornerRadius: cornerRadius,
+                    isSquareCropped: true
+                )
+            }
     }
 }
 
@@ -3182,30 +3288,54 @@ struct LibrarySearchView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if searchText.isEmpty {
-                        if !availableHashtags.isEmpty {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("熱門 #標籤")
-                                    .font(.headline)
-                                    .padding(.horizontal, 16)
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        if searchText.isEmpty {
+                            if !availableHashtags.isEmpty {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("熱門 #標籤")
+                                        .font(.headline)
+                                        .padding(.horizontal, 16)
 
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 8) {
-                                        ForEach(availableHashtags, id: \.self) { tag in
-                                            Button {
-                                                searchText = "#\(tag)"
-                                            } label: {
-                                                Text("#\(tag)")
-                                                    .font(.subheadline.weight(.medium))
-                                                    .padding(.horizontal, 12)
-                                                    .padding(.vertical, 7)
-                                                    .background(
-                                                        Color(.secondarySystemGroupedBackground),
-                                                        in: Capsule()
-                                                    )
-                                                    .foregroundStyle(.blue)
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 8) {
+                                            ForEach(availableHashtags, id: \.self) { tag in
+                                                Button {
+                                                    searchText = "#\(tag)"
+                                                } label: {
+                                                    Text("#\(tag)")
+                                                        .font(.subheadline.weight(.medium))
+                                                        .padding(.horizontal, 12)
+                                                        .padding(.vertical, 7)
+                                                        .background(
+                                                            Color(.secondarySystemGroupedBackground),
+                                                            in: Capsule()
+                                                        )
+                                                        .foregroundStyle(.blue)
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                        .padding(.horizontal, 16)
+                                    }
+                                }
+                            }
+
+                            if !idolMembers.isEmpty {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("成員相冊")
+                                        .font(.headline)
+                                        .padding(.horizontal, 16)
+
+                                    LazyVGrid(columns: twoColumns, spacing: 12) {
+                                        ForEach(idolMembers) { member in
+                                            NavigationLink(value: member) {
+                                                ApplePhotoAlbumTile(
+                                                    primaryTitle: member.albumTitle,
+                                                    secondaryTitle: nil,
+                                                    coverImagesData: AlbumsRootView.memberCoverImages(for: member, allItems: validChekiItems)
+                                                )
                                             }
                                             .buttonStyle(.plain)
                                         }
@@ -3213,50 +3343,50 @@ struct LibrarySearchView: View {
                                     .padding(.horizontal, 16)
                                 }
                             }
-                        }
-
-                        if !idolMembers.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("成員相冊")
-                                    .font(.headline)
-                                    .padding(.horizontal, 16)
-
-                                LazyVGrid(columns: twoColumns, spacing: 12) {
-                                    ForEach(idolMembers) { member in
-                                        NavigationLink(value: member) {
-                                            ApplePhotoAlbumTile(
-                                                primaryTitle: member.albumTitle,
-                                                secondaryTitle: nil,
-                                                coverImagesData: AlbumsRootView.memberCoverImages(for: member, allItems: validChekiItems)
-                                            )
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
+                        } else if filteredItems.isEmpty {
+                            ContentUnavailableView.search(text: searchText)
+                                .padding(.top, 48)
+                        } else {
+                            Text("\(filteredItems.count) 個項目")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.secondary)
                                 .padding(.horizontal, 16)
-                            }
-                        }
-                    } else if filteredItems.isEmpty {
-                        ContentUnavailableView.search(text: searchText)
-                            .padding(.top, 48)
-                    } else {
-                        Text("\(filteredItems.count) 個項目")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 16)
 
-                        LazyVGrid(columns: threeColumns, spacing: 10) {
-                            ForEach(filteredItems) { item in
-                                NavigationLink(value: ChekiDetailRoute(itemID: item.id, scopedItemIDs: filteredItems.map(\.id))) {
-                                    AppleLibraryPhotoCell(item: item, cornerRadius: 9)
+                            LazyVGrid(columns: threeColumns, spacing: 10) {
+                                ForEach(filteredItems) { item in
+                                    Button {
+                                        NavigationChromeState.shared.presentDetail(
+                                            ChekiDetailRoute(
+                                                itemID: item.id,
+                                                scopedItemIDs: filteredItems.map(\.id),
+                                                sourceScopeID: "library-search"
+                                            )
+                                        )
+                                    } label: {
+                                        AppleLibraryPhotoCell(item: item, cornerRadius: 9, scopeID: "library-search")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .id(item.id)
                                 }
-                                .buttonStyle(.plain)
                             }
+                            .padding(.horizontal, 14)
                         }
-                        .padding(.horizontal, 14)
+                    }
+                    .padding(.vertical, 12)
+                }
+                .onChange(of: chromeState.activeZoomItemID) { _, newID in
+                    guard let newID,
+                          chromeState.activeDetailRoute?.sourceScopeID == "library-search",
+                          filteredItems.contains(where: { $0.id == newID }) else { return }
+                    let screenHeight = UIScreen.main.bounds.height
+                    if let anchor = chromeState.gridCellAnchor(for: newID, scopeID: "library-search") {
+                        if anchor.globalFrame.minY < 88 || anchor.globalFrame.maxY > screenHeight - 70 {
+                            scrollProxy.scrollTo(newID, anchor: .center)
+                        }
+                    } else {
+                        scrollProxy.scrollTo(newID, anchor: .center)
                     }
                 }
-                .padding(.vertical, 12)
             }
             .background(Color(.systemBackground))
             .navigationTitle("搜尋")

@@ -4,6 +4,15 @@ import Foundation
 
 // MARK: - NavigationChromeState (控制單張檢視與多選模式時隱藏底部 TabView 導覽列與搜尋鈕)
 
+/// 記錄一覽網格中單一相片格位的全螢幕座標與圓角資訊（供單張檢視下滑跟手縮小與放開縮回原位置動畫使用）
+struct GridCellAnchor: Equatable, Sendable {
+    let itemID: UUID
+    let scopeID: String
+    let globalFrame: CGRect
+    let cornerRadius: CGFloat
+    let isSquareCropped: Bool
+}
+
 @MainActor
 @Observable
 final class NavigationChromeState {
@@ -12,8 +21,75 @@ final class NavigationChromeState {
     private(set) var activeDetailIDs: Set<UUID> = []
     private(set) var activeSelectionIDs: Set<UUID> = []
 
+    /// 當前於最上層展開的單張檢視路由（保留底層一覽畫面於背後，供下滑跟手縮小與縮回原格位動畫使用）
+    var activeDetailRoute: ChekiDetailRoute? = nil
+    /// 當前在單張檢視中正在顯示或縮放過渡的相片 ID（底層一覽對應格位暫時隱藏以避免重影）
+    var activeZoomItemID: UUID? = nil
+
+    @ObservationIgnored
+    private var gridCellAnchorsByScopedKey: [String: GridCellAnchor] = [:]
+    @ObservationIgnored
+    private var latestGridCellAnchorByItemID: [UUID: GridCellAnchor] = [:]
+
     var shouldHideMainTabBar: Bool {
         !activeDetailIDs.isEmpty || !activeSelectionIDs.isEmpty
+    }
+
+    private static func anchorKey(itemID: UUID, scopeID: String) -> String {
+        "\(scopeID)::\(itemID.uuidString)"
+    }
+
+    func updateGridCellAnchor(
+        itemID: UUID,
+        scopeID: String,
+        globalFrame: CGRect,
+        cornerRadius: CGFloat,
+        isSquareCropped: Bool
+    ) {
+        guard globalFrame.width > 8, globalFrame.height > 8 else { return }
+        let anchor = GridCellAnchor(
+            itemID: itemID,
+            scopeID: scopeID,
+            globalFrame: globalFrame,
+            cornerRadius: cornerRadius,
+            isSquareCropped: isSquareCropped
+        )
+        gridCellAnchorsByScopedKey[Self.anchorKey(itemID: itemID, scopeID: scopeID)] = anchor
+        latestGridCellAnchorByItemID[itemID] = anchor
+    }
+
+    func gridCellAnchor(for itemID: UUID, scopeID: String?) -> GridCellAnchor? {
+        if let scopeID,
+           let scoped = gridCellAnchorsByScopedKey[Self.anchorKey(itemID: itemID, scopeID: scopeID)] {
+            return scoped
+        }
+        return latestGridCellAnchorByItemID[itemID]
+    }
+
+    func isGridCellHidden(itemID: UUID, scopeID: String?) -> Bool {
+        guard let scopeID, let route = activeDetailRoute, activeZoomItemID == itemID else { return false }
+        if let routeScope = route.sourceScopeID {
+            return routeScope == scopeID
+        }
+        return true
+    }
+
+    func presentDetail(_ route: ChekiDetailRoute) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            activeZoomItemID = route.itemID
+            activeDetailRoute = route
+        }
+    }
+
+    func dismissDetail() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            activeDetailRoute = nil
+            activeZoomItemID = nil
+        }
     }
 
     func registerDetail(_ id: UUID) {
