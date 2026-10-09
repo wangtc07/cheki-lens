@@ -556,6 +556,57 @@ final class PhotoLibraryManager {
         }
     }
 
+    /// 取消（解除）單張拍立得的背面綁定（不刪除照片）：
+    /// - 若該背面照片原本是從 App 內合併而來（無其他獨立項目持有），自動拆回一張獨立的 `ChekiItem` 保留於 App 圖庫中；
+    /// - 絕不自 iOS 系統相簿刪除該張照片。
+    @MainActor
+    func detachBackside(
+        from item: ChekiItem,
+        modelContext: ModelContext
+    ) {
+        guard !item.isDeleted, item.modelContext != nil,
+              let backData = item.backImageData else { return }
+
+        let backAssetID = item.backAssetIdentifier
+        let allItems = ((try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? [])
+            .filter { !$0.isDeleted && $0.modelContext != nil && $0.id != item.id }
+
+        let alreadyExistsInApp = allItems.contains { existing in
+            if let backAssetID, !backAssetID.isEmpty,
+               (existing.frontAssetIdentifier == backAssetID || existing.backAssetIdentifier == backAssetID) {
+                return true
+            }
+            return existing.frontImageData == backData
+        }
+
+        if !alreadyExistsInApp {
+            let detachedItem = ChekiItem(
+                frontImageData: backData,
+                originalFrontImageData: item.originalBackImageData ?? backData,
+                capturedAt: item.capturedAt,
+                ocrDate: item.ocrDate,
+                isDateWrittenToAlbum: item.isDateWrittenToAlbum,
+                filmFormat: item.filmFormat,
+                detectedAspectRatio: item.detectedAspectRatio,
+                perspectivePointsJSON: item.backPerspectivePointsJSON,
+                detectionMethod: item.detectionMethod,
+                processingState: .completed,
+                isSyncedToPhotoLibrary: (backAssetID?.isEmpty == false),
+                frontAssetIdentifier: backAssetID,
+                idolMember: item.idolMember
+            )
+            detachedItem.assignedMemberIDsJSON = item.assignedMemberIDsJSON
+            modelContext.insert(detachedItem)
+        }
+
+        item.backImageData = nil
+        item.originalBackImageData = nil
+        item.backPerspectivePointsJSON = nil
+        item.backAssetIdentifier = nil
+        try? modelContext.save()
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
     /// 移除單張拍立得的背面照片，並在啟用「系統相簿同步」時一併自 iOS 系統相簿刪除該背面照片
     @MainActor
     func removeBackside(

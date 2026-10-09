@@ -498,6 +498,20 @@ struct ChekiDetailView: View {
                             Label(L10n.tr("正反對調", "表裏を入れ替え"), systemImage: "arrow.left.arrow.right")
                         }
 
+                        Button {
+                            PhotoLibraryManager.shared.detachBackside(
+                                from: currentItem,
+                                modelContext: modelContext
+                            )
+                            isShowingBack = false
+                            withAnimation(flipAnimation) {
+                                flipProgress = 0.0
+                            }
+                            showToast(L10n.tr("已取消背面設定", "裏面設定を解除しました"))
+                        } label: {
+                            Label(L10n.tr("取消背面", "裏面を解除"), systemImage: "rectangle.on.rectangle.slash")
+                        }
+
                         Button(role: .destructive) {
                             PhotoLibraryManager.shared.removeBackside(
                                 from: currentItem,

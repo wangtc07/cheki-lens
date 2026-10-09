@@ -10,7 +10,7 @@
 * **最後更新時間**：2026-10-09
 * **當前所屬階段**：Phase 6.5 — 實機體驗回饋與相冊／調色擴充待辦清單 (UX & Album Polish Todo List)
 * **當前分支**：`main`
-* **當前進行中任務**：已完成 **Phase 6.5 全部 15 個區塊 (`Task 6.5.1` ~ `Task 6.5.15`)**，並完成一覽／相簿／搜尋長按選單新增「選擇背面 (`裏面を選択`)」以及單獨顯示時右上角「表面 / 裏面」文字對調 (`LibraryView.swift`, `MemberAssignmentMenuContent.swift`, `ChekiDetailView.swift`)
+* **當前進行中任務**：已完成 **Phase 6.5 全部 15 個區塊 (`Task 6.5.1` ~ `Task 6.5.15`)**，並完成長按「選擇背面」、單張顯示右上角「表面 / 裏面」對調，以及背面設定新增「取消背面」(解除綁定、不刪除照片，必要時拆回獨立項目) (`LibraryView.swift`, `MemberAssignmentMenuContent.swift`, `ChekiDetailView.swift`, `PhotoLibraryManager.swift`)
 * **最新穩定 Git Commit**：feat(相簿與詳情): 新增照片長按選擇背面選單並對調單張顯示右上角表面與裏面文字
 * **下一動執行指示**：執行 **Task 6.3**（建立 App 圖示、啟動畫面與 App Store 截圖產生流程）
 

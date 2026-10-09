@@ -203,6 +203,15 @@ struct ChekiBacksideAssignmentMenu: View {
                     Label(L10n.tr("正反對調", "表裏を入れ替え"), systemImage: "arrow.left.arrow.right")
                 }
 
+                Button {
+                    PhotoLibraryManager.shared.detachBackside(
+                        from: item,
+                        modelContext: modelContext
+                    )
+                } label: {
+                    Label(L10n.tr("取消背面", "裏面を解除"), systemImage: "rectangle.on.rectangle.slash")
+                }
+
                 Button(role: .destructive) {
                     PhotoLibraryManager.shared.removeBackside(
                         from: item,
