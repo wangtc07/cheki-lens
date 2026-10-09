@@ -671,11 +671,9 @@ struct ChekiDetailView: View {
         baseAvailableSize: CGSize,
         fullScreenAvailableSize: CGSize
     ) -> CGFloat {
-        let activeData = (isShowingBack && pageItem.hasBothSides)
-            ? (pageItem.backImageData ?? pageItem.frontImageData)
-            : pageItem.frontImageData
+        let activeData = pageItem.frontImageData ?? pageItem.backImageData
         let imgSize: CGSize
-        if let activeData, let uiImg = UIImage(data: activeData), uiImg.size.width > 0, uiImg.size.height > 0 {
+        if let activeData, let uiImg = ChekiDetailDecodedImageCache.image(for: activeData), uiImg.size.width > 0, uiImg.size.height > 0 {
             imgSize = uiImg.size
         } else {
             imgSize = CGSize(width: 540, height: 860)
@@ -708,11 +706,9 @@ struct ChekiDetailView: View {
 
         // 計算當前卡片的基準尺寸；當縮回一覽格狀縮圖且該格為 1:1 置中裁切時，平滑轉換為 1:1 正方形框並對齊目標格尺寸
         let activeCardSize: CGSize = {
-            let activeData = (!isDockedToGrid && isShowingBack && pageItem.hasBothSides)
-                ? (pageItem.backImageData ?? pageItem.frontImageData)
-                : pageItem.frontImageData
+            let activeData = pageItem.frontImageData ?? pageItem.backImageData
             let imgSize: CGSize
-            if let activeData, let uiImg = UIImage(data: activeData), uiImg.size.width > 0, uiImg.size.height > 0 {
+            if let activeData, let uiImg = ChekiDetailDecodedImageCache.image(for: activeData), uiImg.size.width > 0, uiImg.size.height > 0 {
                 imgSize = uiImg.size
             } else {
                 imgSize = CGSize(width: 540, height: 860)
@@ -787,7 +783,7 @@ struct ChekiDetailView: View {
                     for: pageItem,
                     isCurrent: isCurrent,
                     availableSize: baseAvailableSize,
-                    overrideCardSize: activeCardSize,
+                    overrideCardSize: isDockedToGrid ? activeCardSize : nil,
                     isSquareCroppedForGrid: isDockedToGrid && (targetAnchor?.isSquareCropped ?? false),
                     cardCornerRadius: dockedCornerRadius,
                     isLandscape: isLandscape
@@ -846,6 +842,9 @@ struct ChekiDetailView: View {
     }
 
     /// 卡片本體的單擊（沉浸模式切換 / 白平衡點選取樣）與雙擊（3D 翻轉 / 重置縮放）手勢，綁定在底圖上以避免干擾右上角翻轉按鈕
+    /// 注意：一般檢視模式下必須依序串接 `.onTapGesture(count: 2)` 再 `.onTapGesture(count: 1)`（不可使用 `.simultaneousGesture`），
+    /// 否則雙擊的第一下會立即觸發 `isChromeHidden.toggle()` 導致卡片先往 Z 軸放大上移再卡一下才翻面。
+    @ViewBuilder
     private func applyCardTapGestures<V: View>(
         to view: V,
         cardSize: CGSize? = nil,
@@ -853,43 +852,48 @@ struct ChekiDetailView: View {
         isCurrent: Bool = false,
         isBackside: Bool = false
     ) -> some View {
-        view
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                guard !isWhiteBalancePickerActive else { return }
-                if isImageZoomed {
-                    withAnimation(pageAndZoomAnimation) {
-                        let returnToFullScreen = isZoomedFromFullScreen
-                        zoomScale = 1.0
-                        activePinchScale = 1.0
-                        zoomPanOffset = .zero
-                        activeZoomPanDelta = .zero
-                        isZoomedFromFullScreen = false
-                        isChromeHidden = returnToFullScreen
-                    }
-                } else {
-                    trigger3DFlip()
-                }
-            }
-            .simultaneousGesture(
-                SpatialTapGesture(count: 1, coordinateSpace: .local)
-                    .onEnded { value in
-                        if isCurrent, isWhiteBalancePickerActive, let cardSize, cardSize.width > 10, cardSize.height > 10 {
-                            let safeScale = max(0.5, insetScale)
-                            let rawNormX = (value.location.x - cardSize.width * 0.5) / (cardSize.width * safeScale) + 0.5
-                            let rawNormY = (value.location.y - cardSize.height * 0.5) / (cardSize.height * safeScale) + 0.5
-                            let clampedPoint = CGPoint(
-                                x: min(max(rawNormX, 0.0), 1.0),
-                                y: min(max(rawNormY, 0.0), 1.0)
-                            )
-                            handleWhiteBalanceTap(at: clampedPoint, isBackside: isBackside)
-                        } else {
-                            withAnimation(pageAndZoomAnimation) {
-                                isChromeHidden.toggle()
+        if isCurrent && isWhiteBalancePickerActive {
+            view
+                .contentShape(Rectangle())
+                .gesture(
+                    SpatialTapGesture(count: 1, coordinateSpace: .local)
+                        .onEnded { value in
+                            if let cardSize, cardSize.width > 10, cardSize.height > 10 {
+                                let safeScale = max(0.5, insetScale)
+                                let rawNormX = (value.location.x - cardSize.width * 0.5) / (cardSize.width * safeScale) + 0.5
+                                let rawNormY = (value.location.y - cardSize.height * 0.5) / (cardSize.height * safeScale) + 0.5
+                                let clampedPoint = CGPoint(
+                                    x: min(max(rawNormX, 0.0), 1.0),
+                                    y: min(max(rawNormY, 0.0), 1.0)
+                                )
+                                handleWhiteBalanceTap(at: clampedPoint, isBackside: isBackside)
                             }
                         }
+                )
+        } else {
+            view
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    if isImageZoomed {
+                        withAnimation(pageAndZoomAnimation) {
+                            let returnToFullScreen = isZoomedFromFullScreen
+                            zoomScale = 1.0
+                            activePinchScale = 1.0
+                            zoomPanOffset = .zero
+                            activeZoomPanDelta = .zero
+                            isZoomedFromFullScreen = false
+                            isChromeHidden = returnToFullScreen
+                        }
+                    } else {
+                        trigger3DFlip()
                     }
-            )
+                }
+                .onTapGesture(count: 1) {
+                    withAnimation(pageAndZoomAnimation) {
+                        isChromeHidden.toggle()
+                    }
+                }
+        }
     }
 
     @ViewBuilder
@@ -946,7 +950,7 @@ struct ChekiDetailView: View {
         let baseInsetScale = CGFloat(1.0 - targetItem.borderInsetRatio * 1.4)
         let effectiveImageScale: CGFloat = isSquareCroppedForGrid ? 1.22 : baseInsetScale
         if let data = targetItem.frontImageData,
-           let uiImage = UIImage(data: data) {
+           let uiImage = ChekiDetailDecodedImageCache.image(for: data) {
             let cardSize = overrideCardSize ?? fittedCardSize(for: uiImage.size, in: availableSize)
             applyCardTapGestures(
                 to: Image(uiImage: uiImage)
@@ -1006,7 +1010,7 @@ struct ChekiDetailView: View {
         isLandscape: Bool
     ) -> some View {
         if let backData = targetItem.backImageData,
-           let uiImage = UIImage(data: backData) {
+           let uiImage = ChekiDetailDecodedImageCache.image(for: backData) {
             let cardSize = fittedCardSize(for: uiImage.size, in: availableSize)
             applyCardTapGestures(
                 to: Image(uiImage: uiImage)
@@ -1641,10 +1645,12 @@ struct ChekiDetailView: View {
 
     private func trigger3DFlip() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        hasSeenDetailCoachMark = true
+        if !hasSeenDetailCoachMark {
+            hasSeenDetailCoachMark = true
+        }
         let nextBack = !isShowingBack
-        isShowingBack = nextBack
         withAnimation(flipAnimation) {
+            isShowingBack = nextBack
             flipProgress = nextBack ? 1.0 : 0.0
         }
     }
@@ -3407,15 +3413,53 @@ private struct ChekiQuadCropEditorView: View {
 }
 
 
+// MARK: - 單張檢視已解碼圖片快取 (Decoded UIImage Cache for Smooth 120fps Flip & Paging)
+
+private enum ChekiDetailDecodedImageCache {
+    private static let cache: NSCache<NSNumber, UIImage> = {
+        let c = NSCache<NSNumber, UIImage>()
+        c.countLimit = 48
+        return c
+    }()
+
+    static func image(for data: Data) -> UIImage? {
+        var hasher = Hasher()
+        hasher.combine(data.count)
+        if data.count <= 256 {
+            hasher.combine(data)
+        } else {
+            hasher.combine(data.prefix(128))
+            hasher.combine(data.suffix(128))
+        }
+        let key = NSNumber(value: hasher.finalize())
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+        guard let decoded = UIImage(data: data) else { return nil }
+        cache.setObject(decoded, forKey: key)
+        return decoded
+    }
+}
+
 // MARK: - 3D 拍立得正反翻轉與 Z 軸浮起容器 (Animatable 3D Flip + Z-Axis Lift)
 
 /// 透過 `Animatable` 連續插值 `flipProgress (0.0 ... 1.0)`：
-/// 1. 保持正反兩面同時駐留於 `ZStack`，於 `90°` 垂直切面瞬間無縫切換正反面可見度，根除視圖重建造成的無動畫問題。
+/// 1. 保持正反兩面同時駐留於 `ZStack`（於 `init` 預先建構視圖，避免 `Animatable` 每幀重跑 closure 與圖片解碼），於 `90°` 垂直切面瞬間無縫切換正反面可見度。
 /// 2. 結合 `sin(flipProgress * .pi)` 在翻轉中段將拍立得沿 Z 軸向觀察者微微浮起 (`scale` 放大) 並向上微移 (`offset.y` 上提)，落定時平滑復原。
 private struct Cheki3DFlipContainer<Front: View, Back: View>: View, Animatable {
     var flipProgress: Double
-    let front: () -> Front
-    let back: () -> Back
+    let front: Front
+    let back: Back
+
+    init(
+        flipProgress: Double,
+        @ViewBuilder front: () -> Front,
+        @ViewBuilder back: () -> Back
+    ) {
+        self.flipProgress = flipProgress
+        self.front = front()
+        self.back = back()
+    }
 
     var animatableData: Double {
         get { flipProgress }
@@ -3435,11 +3479,11 @@ private struct Cheki3DFlipContainer<Front: View, Back: View>: View, Animatable {
         let shadowY = 12.0 + 14.0 * liftPhase
 
         ZStack {
-            front()
+            front
                 .opacity(isBackVisible ? 0.0 : 1.0)
                 .allowsHitTesting(!isBackVisible)
 
-            back()
+            back
                 .rotation3DEffect(
                     .degrees(180),
                     axis: (x: 0, y: 1, z: 0)

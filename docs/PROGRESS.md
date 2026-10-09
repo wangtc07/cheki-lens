@@ -10,8 +10,8 @@
 * **最後更新時間**：2026-10-09
 * **當前所屬階段**：Phase 6.5 — 實機體驗回饋與相冊／調色擴充待辦清單 (UX & Album Polish Todo List)
 * **當前分支**：`main`
-* **當前進行中任務**：已完成 **Phase 6.5 全部 15 個區塊 (`Task 6.5.1` ~ `Task 6.5.15`)** 並完成共用 UI 元件重構與模擬器實機截圖驗證
-* **最新穩定 Git Commit**：style(相機圖示): 將攝影追加共用圖示還原為 Apple 原生 SF Symbol camera
+* **當前進行中任務**：已完成 **Phase 6.5 全部 15 個區塊 (`Task 6.5.1` ~ `Task 6.5.15`)** 並修復單張檢視雙擊 3D 翻轉 Z 軸卡頓與幀率流暢度 (`ChekiDetailView.swift`)
+* **最新穩定 Git Commit**：fix(3D翻轉): 修復雙擊翻面時單擊手勢搶先觸發 Z 軸放大卡頓與 Animatable 幀率優化
 * **下一動執行指示**：執行 **Task 6.3**（建立 App 圖示、啟動畫面與 App Store 截圖產生流程）
 
 ---
