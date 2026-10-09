@@ -826,7 +826,7 @@ struct ChekiDetailView: View {
             HStack(spacing: 3) {
                 Image(systemName: "rectangle.portrait.rotate")
                     .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
-                Text(L10n.tr(isBackFace ? "背面" : (pageItem.hasBothSides ? "正面" : "單面"), isBackFace ? "裏面" : (pageItem.hasBothSides ? "表面" : "片面")))
+                Text(L10n.tr(isBackFace ? "正面" : (pageItem.hasBothSides ? "背面" : "單面"), isBackFace ? "表面" : (pageItem.hasBothSides ? "裏面" : "片面")))
                     .font(.system(size: isLandscape ? 9 : 10.5, weight: .semibold))
             }
             .foregroundStyle(.white)
@@ -3504,7 +3504,7 @@ private struct Cheki3DFlipContainer<Front: View, Back: View>: View, Animatable {
 
 // MARK: - 從 App 內選取背面照片選擇器 (InAppBacksidePickerSheet)
 
-private struct InAppBacksidePickerSheet: View {
+struct InAppBacksidePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let targetItem: ChekiItem

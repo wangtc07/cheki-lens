@@ -94,6 +94,9 @@ struct LibraryView: View {
     @State private var showingSettingsSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
     @State private var showingBatchPairingSheet: Bool = false
+    @State private var inAppBacksideTargetItem: ChekiItem? = nil
+    @State private var photosBacksideTargetItem: ChekiItem? = nil
+    @State private var isShowingPhotosBacksidePicker: Bool = false
 
     // 排序與篩選
     @State private var sortAscending: Bool = false
@@ -298,6 +301,11 @@ struct LibraryView: View {
                     processingOverlay
                 }
             }
+            .chekiBacksidePickerModals(
+                inAppTargetItem: $inAppBacksideTargetItem,
+                photosTargetItem: $photosBacksideTargetItem,
+                isShowingPhotosPicker: $isShowingPhotosBacksidePicker
+            )
             .navigationDestination(for: ChekiDetailRoute.self) { route in
                 ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
                     .toolbar(.hidden, for: .tabBar)
@@ -578,6 +586,17 @@ struct LibraryView: View {
                     Label(L10n.tr("成員", "メンバー"), systemImage: "person.crop.circle")
                 }
                 .menuActionDismissBehavior(.disabled)
+
+                ChekiBacksideAssignmentMenu(
+                    item: item,
+                    onSelectInAppPhoto: {
+                        inAppBacksideTargetItem = item
+                    },
+                    onSelectSystemPhoto: {
+                        photosBacksideTargetItem = item
+                        isShowingPhotosBacksidePicker = true
+                    }
+                )
 
                 Divider()
 
@@ -1845,6 +1864,9 @@ struct AlbumHeroDetailView: View {
     @State private var showingBatchPairingSheet: Bool = false
     @State private var showingRenameMemberAlert: Bool = false
     @State private var renameMemberText: String = ""
+    @State private var inAppBacksideTargetItem: ChekiItem? = nil
+    @State private var photosBacksideTargetItem: ChekiItem? = nil
+    @State private var isShowingPhotosBacksidePicker: Bool = false
 
     @State private var sortAscending: Bool = false
     @State private var filterDualSideOnly: Bool = false
@@ -2219,6 +2241,11 @@ struct AlbumHeroDetailView: View {
                 }
             }
         }
+        .chekiBacksidePickerModals(
+            inAppTargetItem: $inAppBacksideTargetItem,
+            photosTargetItem: $photosBacksideTargetItem,
+            isShowingPhotosPicker: $isShowingPhotosBacksidePicker
+        )
         .alert(
             L10n.tr("成員名", "メンバー名"),
             isPresented: $showingRenameMemberAlert
@@ -2454,6 +2481,17 @@ struct AlbumHeroDetailView: View {
                     Label(L10n.tr("成員", "メンバー"), systemImage: "person.crop.circle")
                 }
                 .menuActionDismissBehavior(.disabled)
+
+                ChekiBacksideAssignmentMenu(
+                    item: item,
+                    onSelectInAppPhoto: {
+                        inAppBacksideTargetItem = item
+                    },
+                    onSelectSystemPhoto: {
+                        photosBacksideTargetItem = item
+                        isShowingPhotosBacksidePicker = true
+                    }
+                )
 
                 Divider()
 
@@ -3072,11 +3110,16 @@ private struct AlbumSquareThumbnailCell: View {
 
 struct LibrarySearchView: View {
 
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var chekiItems: [ChekiItem]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
 
     @State private var searchText: String = ""
     @State private var showingSettingsSheet: Bool = false
+    @State private var showingQuickCreateSheet: Bool = false
+    @State private var inAppBacksideTargetItem: ChekiItem? = nil
+    @State private var photosBacksideTargetItem: ChekiItem? = nil
+    @State private var isShowingPhotosBacksidePicker: Bool = false
     private var chromeState = NavigationChromeState.shared
 
     private let twoColumns = [
@@ -3179,19 +3222,8 @@ struct LibrarySearchView: View {
 
                             LazyVGrid(columns: threeColumns, spacing: 10) {
                                 ForEach(filteredItems) { item in
-                                    Button {
-                                        NavigationChromeState.shared.presentDetail(
-                                            ChekiDetailRoute(
-                                                itemID: item.id,
-                                                scopedItemIDs: filteredItems.map(\.id),
-                                                sourceScopeID: "library-search"
-                                            )
-                                        )
-                                    } label: {
-                                        AppleLibraryPhotoCell(item: item, cornerRadius: 9, scopeID: "library-search")
-                                    }
-                                    .buttonStyle(.plain)
-                                    .id(item.id)
+                                    searchPhotoGridCell(for: item)
+                                        .id(item.id)
                                 }
                             }
                             .padding(.horizontal, 14)
@@ -3238,6 +3270,14 @@ struct LibrarySearchView: View {
             .sheet(isPresented: $showingSettingsSheet) {
                 SettingsView()
             }
+            .sheet(isPresented: $showingQuickCreateSheet) {
+                QuickCreateIdolSheet()
+            }
+            .chekiBacksidePickerModals(
+                inAppTargetItem: $inAppBacksideTargetItem,
+                photosTargetItem: $photosBacksideTargetItem,
+                isShowingPhotosPicker: $isShowingPhotosBacksidePicker
+            )
             .navigationDestination(for: ChekiDetailRoute.self) { route in
                 ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
                     .toolbar(.hidden, for: .tabBar)
@@ -3249,6 +3289,51 @@ struct LibrarySearchView: View {
                     items: validChekiItems.filter { $0.isAssigned(to: member) },
                     defaultMember: member
                 )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func searchPhotoGridCell(for item: ChekiItem) -> some View {
+        Button {
+            NavigationChromeState.shared.presentDetail(
+                ChekiDetailRoute(
+                    itemID: item.id,
+                    scopedItemIDs: filteredItems.map(\.id),
+                    sourceScopeID: "library-search"
+                )
+            )
+        } label: {
+            AppleLibraryPhotoCell(item: item, cornerRadius: 9, scopeID: "library-search")
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Menu {
+                MemberAssignmentMenuContent(item: item) { showingQuickCreateSheet = true }
+            } label: {
+                Label(L10n.tr("成員", "メンバー"), systemImage: "person.crop.circle")
+            }
+            .menuActionDismissBehavior(.disabled)
+
+            ChekiBacksideAssignmentMenu(
+                item: item,
+                onSelectInAppPhoto: {
+                    inAppBacksideTargetItem = item
+                },
+                onSelectSystemPhoto: {
+                    photosBacksideTargetItem = item
+                    isShowingPhotosBacksidePicker = true
+                }
+            )
+
+            Divider()
+
+            Button(role: .destructive) {
+                Task { @MainActor in
+                    await PhotoLibraryManager.shared.deleteItemsAsync([item], modelContext: modelContext)
+                }
+            } label: {
+                Label(L10n.tr("刪除", "削除"), systemImage: "trash")
             }
         }
     }
