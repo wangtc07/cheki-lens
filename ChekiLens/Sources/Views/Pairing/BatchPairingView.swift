@@ -699,7 +699,7 @@ struct BatchPairingView: View {
                                 Capsule().fill(Color.blue)
                             }
                         }
-                        .modifier(PairingOptionalLiquidGlassCapsuleModifier(isEnabled: !isSelectingPhotosToApply))
+                        .modifier(OptionalLiquidGlassCapsuleModifier(isEnabled: !isSelectingPhotosToApply))
                 }
                 .buttonStyle(.plain)
             }
@@ -804,73 +804,27 @@ struct BatchPairingView: View {
         .buttonStyle(.plain)
     }
 
-    /// 多層級成員選單內容
+    /// 多層級成員選單內容（共用 MemberHierarchyMenuContent）
     @ViewBuilder
     private func memberHierarchyMenuContent(replacingAt index: Int?) -> some View {
-        let ungroupedMembers = idolMembers.filter { $0.group == nil }
-
-        Section(L10n.tr("成員", "メンバー")) {
-            ForEach(idolGroups) { group in
-                let groupMembers = idolMembers.filter { $0.group?.id == group.id }
-                if !groupMembers.isEmpty {
-                    Menu(group.name) {
-                        ForEach(groupMembers) { member in
-                            let isAlreadyInList = selectedTargetMembers.contains(where: { $0.id == member.id })
-                            Button {
-                                selectTargetMember(member, replacingAt: index)
-                            } label: {
-                                Label(
-                                    member.stageName,
-                                    systemImage: isAlreadyInList ? "checkmark.circle.fill" : "circle"
-                                )
-                            }
-                            .menuActionDismissBehavior(.disabled)
-                        }
-                    }
-                    .menuActionDismissBehavior(.disabled)
-                }
-            }
-
-            if !ungroupedMembers.isEmpty {
-                Menu(L10n.tr("未分團", "未所属")) {
-                    ForEach(ungroupedMembers) { member in
-                        let isAlreadyInList = selectedTargetMembers.contains(where: { $0.id == member.id })
-                        Button {
-                            selectTargetMember(member, replacingAt: index)
-                        } label: {
-                            Label(
-                                member.stageName,
-                                systemImage: isAlreadyInList ? "checkmark.circle.fill" : "circle"
-                            )
-                        }
-                        .menuActionDismissBehavior(.disabled)
-                    }
-                }
-                .menuActionDismissBehavior(.disabled)
-            }
-        }
-
-        if !selectedTargetMembers.isEmpty {
-            Divider()
-            Button(role: .destructive) {
+        MemberHierarchyMenuContent(
+            selectedMemberIDs: Set(selectedTargetMembers.map(\.id)),
+            showsUncategorizedOption: !selectedTargetMembers.isEmpty,
+            uncategorizedTitle: L10n.tr("未分類", "未分類"),
+            uncategorizedIcon: "tray",
+            isUncategorizedDestructive: true,
+            onToggleMember: { member in
+                selectTargetMember(member, replacingAt: index)
+            },
+            onClearSelection: {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 selectedTargetMembers.removeAll()
                 defaultFallbackMember = nil
-            } label: {
-                Label(L10n.tr("未分類", "未分類"), systemImage: "tray")
+            },
+            onCreateMember: {
+                showingQuickCreateMemberSheet = true
             }
-            .menuActionDismissBehavior(.disabled)
-        }
-
-        Divider()
-
-        // 最後一項：新增成員（圖示已表示追加）
-        Button {
-            showingQuickCreateMemberSheet = true
-        } label: {
-            Label(L10n.tr("成員", "メンバー"), systemImage: "person.badge.plus")
-        }
-        .menuActionDismissBehavior(.enabled)
+        )
     }
 
     // MARK: - 3. 格狀卡片單元：撲克牌兩張展開樣式 (Playing-Card Fan) & 單張直立樣式
@@ -1285,67 +1239,19 @@ struct BatchPairingView: View {
 
     /// 每組拍立得卡片正下方的「多層多選成員膠囊」
     private func perSlotMemberSelectorPill(for slot: ChekiPairingSlot) -> some View {
-        let ungroupedMembers = idolMembers.filter { $0.group == nil }
-
-        return Menu {
-            Section(L10n.tr("成員", "メンバー")) {
-                ForEach(idolGroups) { group in
-                    let groupMembers = idolMembers.filter { $0.group?.id == group.id }
-                    if !groupMembers.isEmpty {
-                        Menu(group.name) {
-                            ForEach(groupMembers) { member in
-                                let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
-                                Button {
-                                    toggleMember(member, forSlotID: slot.id)
-                                } label: {
-                                    Label(
-                                        member.stageName,
-                                        systemImage: isAssigned ? "checkmark.circle.fill" : "circle"
-                                    )
-                                }
-                                .menuActionDismissBehavior(.disabled)
-                            }
-                        }
-                        .menuActionDismissBehavior(.disabled)
-                    }
+        Menu {
+            MemberHierarchyMenuContent(
+                selectedMemberIDs: Set(slot.assignedMembers.map(\.id)),
+                onToggleMember: { member in
+                    toggleMember(member, forSlotID: slot.id)
+                },
+                onClearSelection: {
+                    setMembers([], forSlotID: slot.id)
+                },
+                onCreateMember: {
+                    showingQuickCreateMemberSheet = true
                 }
-
-                if !ungroupedMembers.isEmpty {
-                    Menu(L10n.tr("未分團", "未所属")) {
-                        ForEach(ungroupedMembers) { member in
-                            let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
-                            Button {
-                                toggleMember(member, forSlotID: slot.id)
-                            } label: {
-                                Label(
-                                    member.stageName,
-                                    systemImage: isAssigned ? "checkmark.circle.fill" : "circle"
-                                )
-                            }
-                            .menuActionDismissBehavior(.disabled)
-                        }
-                    }
-                    .menuActionDismissBehavior(.disabled)
-                }
-            }
-
-            Divider()
-
-            Button {
-                setMembers([], forSlotID: slot.id)
-            } label: {
-                Label(L10n.tr("未分類", "未分類"), systemImage: slot.assignedMembers.isEmpty ? "checkmark" : "tray")
-            }
-            .menuActionDismissBehavior(.disabled)
-
-            Divider()
-
-            Button {
-                showingQuickCreateMemberSheet = true
-            } label: {
-                Label(L10n.tr("成員", "メンバー"), systemImage: "person.badge.plus")
-            }
-            .menuActionDismissBehavior(.enabled)
+            )
         } label: {
             HStack(spacing: 6) {
                 if let primary = slot.assignedMembers.first {
@@ -1419,8 +1325,6 @@ struct BatchPairingView: View {
 
     @ViewBuilder
     private func slotContextMenu(for slot: ChekiPairingSlot) -> some View {
-        let ungroupedMembers = idolMembers.filter { $0.group == nil }
-
         Button {
             openMagnifiedPreview(slotID: slot.id, side: .front)
         } label: {
@@ -1448,50 +1352,18 @@ struct BatchPairingView: View {
         }
 
         Menu {
-            ForEach(idolGroups) { group in
-                let groupMembers = idolMembers.filter { $0.group?.id == group.id }
-                if !groupMembers.isEmpty {
-                    Menu(group.name) {
-                        ForEach(groupMembers) { member in
-                            let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
-                            Button {
-                                toggleMember(member, forSlotID: slot.id)
-                            } label: {
-                                Label(member.stageName, systemImage: isAssigned ? "checkmark.circle.fill" : "circle")
-                            }
-                            .menuActionDismissBehavior(.disabled)
-                        }
-                    }
-                    .menuActionDismissBehavior(.disabled)
+            MemberHierarchyMenuContent(
+                selectedMemberIDs: Set(slot.assignedMembers.map(\.id)),
+                onToggleMember: { member in
+                    toggleMember(member, forSlotID: slot.id)
+                },
+                onClearSelection: {
+                    setMembers([], forSlotID: slot.id)
+                },
+                onCreateMember: {
+                    showingQuickCreateMemberSheet = true
                 }
-            }
-            if !ungroupedMembers.isEmpty {
-                Menu(L10n.tr("未分團", "未所属")) {
-                    ForEach(ungroupedMembers) { member in
-                        let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
-                        Button {
-                            toggleMember(member, forSlotID: slot.id)
-                        } label: {
-                            Label(member.stageName, systemImage: isAssigned ? "checkmark.circle.fill" : "circle")
-                        }
-                        .menuActionDismissBehavior(.disabled)
-                    }
-                }
-                .menuActionDismissBehavior(.disabled)
-            }
-            Divider()
-            Button {
-                setMembers([], forSlotID: slot.id)
-            } label: {
-                Label(L10n.tr("未分類", "未分類"), systemImage: slot.assignedMembers.isEmpty ? "checkmark" : "tray")
-            }
-            .menuActionDismissBehavior(.disabled)
-            Button {
-                showingQuickCreateMemberSheet = true
-            } label: {
-                Label(L10n.tr("成員", "メンバー"), systemImage: "person.badge.plus")
-            }
-            .menuActionDismissBehavior(.enabled)
+            )
         } label: {
             Label(L10n.tr("成員", "メンバー"), systemImage: "person.crop.circle")
         }
@@ -4305,65 +4177,6 @@ private struct StagingPhotoQuadCropEditorView: View {
             width: min(max(pan.width, -maxOffsetX), maxOffsetX),
             height: min(max(pan.height, -maxOffsetY), maxOffsetY)
         )
-    }
-}
-
-private struct PairingOptionalLiquidGlassCapsuleModifier: ViewModifier {
-    let isEnabled: Bool
-
-    func body(content: Content) -> some View {
-        if isEnabled {
-            if #available(iOS 26.0, *) {
-                content
-                    .contentShape(Capsule())
-                    .glassEffect(.regular.interactive(), in: .capsule)
-            } else {
-                content
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(.primary.opacity(0.14), lineWidth: 0.6)
-                    )
-            }
-        } else {
-            content
-        }
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func pairingLiquidGlassCircle(size: CGFloat) -> some View {
-        if #available(iOS 26.0, *) {
-            self
-                .frame(width: size, height: size)
-                .contentShape(Circle())
-                .glassEffect(.regular.interactive(), in: .circle)
-        } else {
-            self
-                .frame(width: size, height: size)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(
-                    Circle()
-                        .strokeBorder(.primary.opacity(0.14), lineWidth: 0.6)
-                )
-        }
-    }
-
-    @ViewBuilder
-    func pairingLiquidGlassCapsule() -> some View {
-        if #available(iOS 26.0, *) {
-            self
-                .contentShape(Capsule())
-                .glassEffect(.regular.interactive(), in: .capsule)
-        } else {
-            self
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(.primary.opacity(0.14), lineWidth: 0.6)
-                )
-        }
     }
 }
 
