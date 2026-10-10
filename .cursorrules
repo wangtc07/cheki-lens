@@ -15,3 +15,8 @@ You are developing ChekiLens, an iOS 18 native Polaroid/Cheki scanning and idol 
 - Apple Vision framework (`VNDetectRectanglesRequest`, `VNRecognizeTextRequest`).
 - Core Image (`CIPerspectiveCorrection`).
 - Avoid third-party dependencies unless strictly necessary.
+
+## UI Work (Mandatory):
+- Before touching anything under `ChekiLens/Sources/Views/` (UI, UX, animation, gesture), read `docs/UI_AGENT_GUIDELINES.md` and follow it. It overrides existing per-screen code.
+- Use shared chrome components only (44 pt circle/capsule), `xmark` / `checkmark` for toolbar cancel/confirm, yellow for active camera states, `ChekiMotion` for animations, and "live-follow pinch, commit on release" for grid zoom.
+- After a UI task, update §9 of `docs/UI_AGENT_GUIDELINES.md` as well as `docs/PROGRESS.md`.

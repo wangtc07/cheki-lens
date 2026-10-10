@@ -24,3 +24,7 @@
    - Core Image + Vision Framework for cheki crop, perspective correction & OCR.
    - Photos Framework for album organization.
    - StoreKit 2 for lifetime IAP.
+
+5. **UI／UX 修正**：
+ - 任何 UI、動畫、手勢相關工作，動手前先讀 `docs/UI_AGENT_GUIDELINES.md`，並依其 §10 稽核指令與 §11 驗證清單執行。
+ - 完成後除 `docs/PROGRESS.md` 外，同步更新該文件 §9 偏差表。

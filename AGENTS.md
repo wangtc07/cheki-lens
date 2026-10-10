@@ -50,3 +50,9 @@
   * 手寫日期 OCR 覆寫 EXIF 時間軸。
 * **商業化**：StoreKit 2（`Product.purchase()` Non-Consumable 買斷制，NT$120 / ¥600）
 * **並行性與安全**：Swift 6 Concurrency (`async/await`, `@MainActor`, `Sendable`)，絕不阻塞主執行緒。
+
+---
+
+## 🎨 UI／UX 修正專章
+
+任何涉及 UI、UX、動畫、手勢的工作（新增、修改、檢查、重構），**動手前必須先讀 `docs/UI_AGENT_GUIDELINES.md`**，並遵守其中的 chrome 尺寸與位置、狀態色彩、取消／確認圖示化、動畫與縮放手勢標準。與該文件衝突時以該文件為準。
