@@ -409,6 +409,7 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
                 .fixedSize()
                 .accessibilityLabel("開啟相機拍攝拍立得")
+                .accessibilityIdentifier(ChromeID.libraryCamera)
 
                 PhotosPicker(
                     selection: $selectedPhotos,
@@ -424,6 +425,7 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
                 .fixedSize()
                 .accessibilityLabel("匯入拍立得照片")
+                .accessibilityIdentifier(ChromeID.libraryImport)
                 .onChange(of: selectedPhotos) { _, newItems in
                     guard !newItems.isEmpty else { return }
                     processingItems = newItems
@@ -505,6 +507,7 @@ struct LibraryView: View {
                 .tint(.primary)
                 .fixedSize()
                 .accessibilityLabel("篩選與更多設定")
+                .accessibilityIdentifier(ChromeID.libraryFilter)
             }
 
             if !displayedItems.isEmpty {

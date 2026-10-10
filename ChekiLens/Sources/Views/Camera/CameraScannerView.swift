@@ -2117,42 +2117,6 @@ private struct AppleFocusBoxIndicator: View {
     }
 }
 
-private extension View {
-    @ViewBuilder
-    func cameraLiquidGlassCircle(size: CGFloat) -> some View {
-        if #available(iOS 26.0, *) {
-            self
-                .frame(width: size, height: size)
-                .contentShape(Circle())
-                .glassEffect(.regular.interactive(), in: .circle)
-        } else {
-            self
-                .frame(width: size, height: size)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(
-                    Circle()
-                        .strokeBorder(.white.opacity(0.16), lineWidth: 0.6)
-                )
-        }
-    }
-
-    @ViewBuilder
-    func cameraLiquidGlassCapsule() -> some View {
-        if #available(iOS 26.0, *) {
-            self
-                .contentShape(Capsule())
-                .glassEffect(.regular.interactive(), in: .capsule)
-        } else {
-            self
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(.white.opacity(0.16), lineWidth: 0.6)
-                )
-        }
-    }
-}
-
 #Preview {
     CameraScannerView()
         .modelContainer(try! ModelContainerProvider.preview(withSampleData: true))

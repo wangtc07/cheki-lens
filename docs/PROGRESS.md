@@ -10,9 +10,9 @@
 - **最後更新時間**：2026-10-11
 - **當前所屬階段**：Phase 6.6 — UI／UX 一致性重整 (iOS 26 UI Consistency Pass)
 - **當前分支**：`main`
-- **當前進行中任務**：已完成 **Task 6.6.0**。已完成全 App UI 稽核，並建立 `docs/UI_AGENT_GUIDELINES.md`（chrome 尺寸／位置、狀態色、取消確認圖示化、動畫與縮放手勢標準、11 項已知偏差）。本輪未修改任何 Swift 程式碼。
-- **最新穩定 Git Commit**：fix(拍攝與編輯): 拍完沿用讀入工作台，並修正首次照片空白、選取對比與單張旋轉
-- **下一動執行指示**：執行 **Task 6.6.1**（建立 `ChromeMetrics` 與共用 chrome 按鈕元件，合併 4 套重複玻璃修飾器）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md`。Task 6.3 排在 Phase 6.6 之後。
+- **當前進行中任務**：已完成 **Task 6.6.1**。液態玻璃收成 `Chrome.swift` 單一來源，並建立 `ChromeMetrics` 與共用按鈕。全部頁右上圓鈕 frame 斷言為 36 pt 且彼此對齊（本任務不改尺寸）。
+- **最新穩定 Git Commit**：feat(UI): 完成 Task 6.6.1 共用液態玻璃與 chrome 元件
+- **下一動執行指示**：執行 **Task 6.6.2**（工具列取消／完成改為 `xmark`／`checkmark`）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md`。
 
 ---
 
@@ -342,7 +342,7 @@
 *原則：遵循 Apple HIG／iOS 26 Liquid Glass，但不強制全透明——需要辨識狀態處使用語意色；跨畫面按鈕尺寸／位置一致；縮放手勢統一為「跟手縮放，放開才定位」。*
 
 - [x] **Task 6.6.0**: 全面 UI 稽核並建立 UI 修正代理人規範文件（`docs/UI_AGENT_GUIDELINES.md`；並於 `AGENTS.md`、`.cursorrules`、`CLAUDE.md` 加入指標）
-- [ ] **Task 6.6.1**: 建立 `ChromeMetrics`（圓鈕／膠囊高度 44 pt、邊距、圖示字級）與共用 `ChromeCircleButton`、`ChromeCapsuleButton`、`CloseToolbarButton`（xmark）、`ConfirmToolbarButton`（checkmark）；將 `AlbumChrome.swift`、`ChekiDetailView`、`CameraScannerView`、`BatchPairingView` 內 4 套重複玻璃修飾器合併為單一來源（對應 A1，只做元件與替換修飾器，不改版面）
+- [x] **Task 6.6.1**: 建立 `ChromeMetrics`（圓鈕／膠囊高度 44 pt、邊距、圖示字級）與共用 `ChromeCircleButton`、`ChromeCapsuleButton`、`CloseToolbarButton`（xmark）、`ConfirmToolbarButton`（checkmark）；將 4 套重複玻璃修飾器合併為 `Chrome.swift` 單一來源（對應 A1。呼叫端尺寸維持原值，iPhone 12 mini 上 `chrome.library.camera` 與 `chrome.library.filter` 皆為 36×36 pt、同一水平線）
 - [ ] **Task 6.6.2**: 全 App 工具列／chrome 的「取消／完成」文字改為 `xmark`／`checkmark` 圖示，消除日文過長導致標題不置中（對應 A2；alert／confirmationDialog 內文字按鈕保留）
 - [ ] **Task 6.6.3**: 批次工作台 ↔ 單張預覽 ↔ 裁切編輯頁的頂部與底部 chrome 對齊：右上關閉鈕位置／尺寸／玻璃風格與工作台 `+ ⋯` 一致、底部圓鈕與膠囊統一 44 pt 同圓角、裁切頁底部功能列風格對齊（對應 A3、A4、A5）
 - [ ] **Task 6.6.4**: 相機畫面狀態色與頂部 chrome：閃光燈／補光燈開啟為黃色、九宮格與進階控制啟用狀態不再只靠透明度、頂部圖示統一 44 pt 玻璃（對應 A6）
