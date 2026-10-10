@@ -118,4 +118,63 @@ final class ChekiLensUITests: XCTestCase {
         )
         saveAuditScreenshot(app, name: "task_6_6_2_create_ja")
     }
+
+    /// Task 6.6.3：從系統相簿讀入一張照片後，預覽頁的關閉、裁切、旋轉圓鈕與日期膠囊同為 44 pt 且底部對齊。
+    @MainActor
+    func testPairingPreviewChromeIsUniform44() throws {
+        let app = launchLibraryApp()
+        let importer = app.buttons["chrome.library.import"]
+        XCTAssertTrue(importer.waitForExistence(timeout: 12))
+        importer.tap()
+
+        let cancelPicker = app.buttons["取消"]
+        let cancelPickerEn = app.buttons["Cancel"]
+        let pickerVisible = cancelPicker.waitForExistence(timeout: 6) || cancelPickerEn.waitForExistence(timeout: 2)
+        XCTAssertTrue(pickerVisible, "沒有打開系統相簿選擇器。\(app.debugDescription)")
+
+        let pickerPhoto = app.images.matching(
+            NSPredicate(format: "identifier == 'PXGGridLayout-Info'")
+        ).element(boundBy: 0)
+        XCTAssertTrue(pickerPhoto.waitForExistence(timeout: 6), "相簿選擇器沒有可點的照片")
+        pickerPhoto.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+
+        let done = app.buttons["完了"]
+        XCTAssertTrue(done.waitForExistence(timeout: 4), "選取照片後沒有出現完成")
+        done.tap()
+
+        let close = app.buttons["chrome.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 20), "沒有進入批次工作台。\(app.debugDescription)")
+        let readyToArchive = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '歸檔'")).firstMatch
+        XCTAssertTrue(readyToArchive.waitForExistence(timeout: 40), "照片尚未完成偵測")
+
+        let workbenchPhoto = app.images["chrome.workbench.photo"]
+        XCTAssertTrue(workbenchPhoto.waitForExistence(timeout: 4))
+        workbenchPhoto.tap()
+
+        let previewClose = app.buttons["chrome.preview.close"]
+        XCTAssertTrue(previewClose.waitForExistence(timeout: 6), "沒有打開單張預覽。\(app.debugDescription)")
+        let crop = app.buttons["chrome.preview.crop"]
+        let rotate = app.buttons["chrome.preview.rotate"]
+        let date = app.buttons["chrome.preview.date"]
+        XCTAssertTrue(crop.waitForExistence(timeout: 2))
+        XCTAssertTrue(rotate.waitForExistence(timeout: 2))
+        XCTAssertTrue(date.waitForExistence(timeout: 2))
+
+        XCTAssertEqual(previewClose.frame.width, 44, accuracy: 1, "關閉鈕 \(previewClose.frame)")
+        XCTAssertEqual(previewClose.frame.height, 44, accuracy: 1, "關閉鈕 \(previewClose.frame)")
+        assertCircleFramesMatch(crop, rotate, expectedSide: 44)
+        XCTAssertEqual(date.frame.height, 44, accuracy: 1, "日期膠囊應與圓鈕同高 \(date.frame)")
+        XCTAssertEqual(crop.frame.midY, date.frame.midY, accuracy: 1, "底部按鈕應同一水平線 crop \(crop.frame) date \(date.frame)")
+        saveAuditScreenshot(app, name: "task_6_6_3_preview")
+
+        crop.tap()
+        let cropClose = app.buttons["chrome.crop.close"]
+        let cropRotate = app.buttons["chrome.crop.rotate"]
+        XCTAssertTrue(cropClose.waitForExistence(timeout: 6), "沒有進入裁切頁")
+        XCTAssertTrue(cropRotate.waitForExistence(timeout: 2))
+        XCTAssertEqual(cropClose.frame.width, 44, accuracy: 1, "裁切關閉鈕 \(cropClose.frame)")
+        XCTAssertEqual(cropClose.frame.height, 44, accuracy: 1, "裁切關閉鈕 \(cropClose.frame)")
+        XCTAssertEqual(cropRotate.frame.height, 44, accuracy: 1, "裁切底部鈕 \(cropRotate.frame)")
+        saveAuditScreenshot(app, name: "task_6_6_3_crop")
+    }
 }

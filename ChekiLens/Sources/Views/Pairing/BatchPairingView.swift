@@ -1146,6 +1146,7 @@ struct BatchPairingView: View {
                 )
                 .shadow(color: .black.opacity(0.22), radius: 7, x: 0, y: 3)
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityIdentifier("chrome.workbench.photo")
                 .onTapGesture {
                     if isSelectingPhotosToApply {
                         handleCellTap(on: slot)
@@ -1623,16 +1624,16 @@ struct BatchPairingView: View {
                             dismissMagnifiedPreview()
                         } label: {
                             Image(systemName: "xmark")
-                                .font(.system(size: 14, weight: .bold))
+                                .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .background(Color.black.opacity(0.50), in: Circle())
+                                .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(L10n.tr("關閉", "閉じる"))
+                        .accessibilityIdentifier("chrome.preview.close")
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.top, 12)
+                    .padding(.horizontal, ChromeMetrics.edgeHorizontal)
+                    .padding(.top, 8)
 
                     // 中央：放大拍立得本體
                     ZStack {
@@ -1694,28 +1695,26 @@ struct BatchPairingView: View {
                             }
                         } label: {
                             Image(systemName: "crop")
-                                .font(.system(size: 17, weight: .bold))
+                                .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .frame(width: 44, height: 44)
-                                .background(Color.white.opacity(0.18), in: Circle())
-                                .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
+                                .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(L10n.tr("調整邊界", "境界を調整"))
+                        .accessibilityIdentifier("chrome.preview.crop")
 
                         Button {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                             rotateStagingPhotoQuarterTurn(photoID: activePhoto.id)
                         } label: {
                             Image(systemName: "rotate.left")
-                                .font(.system(size: 17, weight: .bold))
+                                .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .frame(width: 44, height: 44)
-                                .background(Color.white.opacity(0.18), in: Circle())
-                                .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
+                                .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(L10n.tr("旋轉", "回転"))
+                        .accessibilityIdentifier("chrome.preview.rotate")
 
                         Button {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -1724,15 +1723,21 @@ struct BatchPairingView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "calendar")
                                     .font(.system(size: 14, weight: .semibold))
-                                Text("規格與日期")
+                                Text(L10n.tr("規格與日期", "サイズと日付"))
                                     .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                             }
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 11)
-                            .background(Color.white.opacity(0.18), in: Capsule())
+                            .liquidGlassCapsule(
+                                height: ChromeMetrics.capsuleHeight,
+                                horizontalPadding: ChromeMetrics.capsuleHPadding,
+                                ink: .white,
+                                fallbackStroke: .white
+                            )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("chrome.preview.date")
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 18)
@@ -3592,12 +3597,13 @@ private struct StagingPhotoQuadCropEditorView: View {
                 onClose()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .pairingLiquidGlassCircle(size: 36)
+                    .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("取消裁切")
+            .accessibilityLabel(L10n.tr("取消", "キャンセル"))
+            .accessibilityIdentifier("chrome.crop.close")
 
             Spacer()
 
@@ -3625,9 +3631,12 @@ private struct StagingPhotoQuadCropEditorView: View {
                 Image(systemName: "checkmark")
                     .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .pairingLiquidGlassCapsule()
+                    .liquidGlassCapsule(
+                        height: ChromeMetrics.capsuleHeight,
+                        horizontalPadding: ChromeMetrics.capsuleHPadding,
+                        ink: .white,
+                        fallbackStroke: .white
+                    )
             }
             .disabled(isProcessingCrop)
             .accessibilityLabel(L10n.tr("完成", "完了"))
@@ -3941,36 +3950,14 @@ private struct StagingPhotoQuadCropEditorView: View {
                 .padding(.horizontal, 20)
             }
 
-            HStack(spacing: 16) {
-                Button {
-                    Task {
-                        await runAutoDetectCorners()
-                    }
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "viewfinder.rectangular")
-                            .font(.system(size: 18, weight: .semibold))
-                        Text(L10n.tr("自動", "自動"))
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: ChromeMetrics.groupSpacing) {
+                cropToolCapsule(systemName: "viewfinder.rectangular", title: L10n.tr("自動", "自動"), identifier: "chrome.crop.auto") {
+                    Task { await runAutoDetectCorners() }
                 }
-
-                Button {
+                cropToolCapsule(systemName: "rotate.left", title: L10n.tr("旋轉", "回転"), identifier: "chrome.crop.rotate") {
                     rotateSourceImage90DegreesCounterClockwise()
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "rotate.left")
-                            .font(.system(size: 18, weight: .semibold))
-                        Text(L10n.tr("旋轉", "回転"))
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
                 }
-
-                Button {
+                cropToolCapsule(systemName: "arrow.up.left.and.arrow.down.right", title: L10n.tr("展開", "展開"), identifier: "chrome.crop.expand") {
                     withAnimation(.snappy(duration: 0.22)) {
                         normalizedCorners = [
                             CGPoint(x: 0.04, y: 0.04),
@@ -3980,35 +3967,38 @@ private struct StagingPhotoQuadCropEditorView: View {
                         ]
                     }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 17, weight: .semibold))
-                        Text(L10n.tr("展開", "展開"))
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
                 }
-
-                Button {
+                cropToolCapsule(
+                    systemName: "slider.horizontal.below.square.and.square.filled",
+                    title: abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "%+.1f%%", defaultBorderInsetPercentage) : L10n.tr("邊界", "余白"),
+                    identifier: "chrome.crop.inset"
+                ) {
                     showingSettingsSheet = true
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "slider.horizontal.below.square.and.square.filled")
-                            .font(.system(size: 17, weight: .semibold))
-                        Text(abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "%+.1f%%", defaultBorderInsetPercentage) : L10n.tr("邊界", "余白"))
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 12)
+            .padding(.horizontal, ChromeMetrics.edgeHorizontal)
+            .padding(.bottom, ChromeMetrics.edgeBottom)
         }
         .padding(.top, 10)
-        .background(Color(white: 0.08).opacity(0.96))
+    }
+
+    private func cropToolCapsule(systemName: String, title: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: systemName)
+                    .font(.system(size: 16, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: ChromeMetrics.capsuleHeight)
+            .liquidGlassCapsule(ink: .white, fallbackStroke: .white)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
     }
 
     private func formatPillButton(for format: FilmFormat) -> some View {
@@ -4025,13 +4015,15 @@ private struct StagingPhotoQuadCropEditorView: View {
                 Text(format.displayName)
                     .font(.caption.weight(.bold))
             }
-            .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.78))
+            .foregroundStyle(isSelected ? Color.black : Color.white)
             .padding(.horizontal, 13)
-            .padding(.vertical, 7)
-            .background(
-                isSelected ? Color.white : Color.white.opacity(0.16),
-                in: Capsule()
-            )
+            .frame(height: ChromeMetrics.capsuleHeight)
+            .background {
+                if isSelected {
+                    Capsule().fill(Color.white)
+                }
+            }
+            .modifier(OptionalLiquidGlassCapsuleModifier(isEnabled: !isSelected))
         }
         .buttonStyle(.plain)
     }
