@@ -340,6 +340,7 @@ struct ChekiInfoView: View {
                 if item.ocrDate != nil {
                     item.ocrDate = merged
                 }
+                item.isJudgedDateManuallySet = true
                 try? modelContext.save()
             }
         )
@@ -365,6 +366,7 @@ struct ChekiInfoView: View {
                     if item.ocrDate != nil {
                         item.ocrDate = updated
                     }
+                    item.isJudgedDateManuallySet = true
                     try? modelContext.save()
                 }
             }
@@ -442,7 +444,7 @@ struct ChekiInfoView: View {
     /// 若該拍立得尚未有手寫日期紀錄，自動從拍立得封面辨識手寫日期並填入拍攝日期
     @MainActor
     private func autoRecognizeCoverDateIfNeeded() async {
-        guard item.ocrDate == nil else { return }
+        guard item.ocrDate == nil, !item.isJudgedDateManuallySet else { return }
         guard let data = item.frontImageData ?? item.originalFrontImageData,
               let uiImage = UIImage(data: data)?.normalizedImage,
               let cgImage = uiImage.cgImage else { return }
@@ -452,18 +454,14 @@ struct ChekiInfoView: View {
 
         let visionManager = VisionManager()
         if let ocrResult = await visionManager.recognizeDate(from: cgImage) {
-            let mergedDate = ChekiItem.mergeRecognizedDate(ocrResult.date, into: item.capturedAt)
-            item.ocrDate = mergedDate
-            item.capturedAt = mergedDate
+            item.applyAutomaticJudgedDate(ocrResult.date, preservingTimeFrom: item.appOriginalCaptureDate)
             try? modelContext.save()
         } else if let origData = item.originalFrontImageData,
                   origData != data,
                   let origUI = UIImage(data: origData)?.normalizedImage,
                   let origCG = origUI.cgImage,
                   let fallbackResult = await visionManager.recognizeDate(from: origCG) {
-            let mergedDate = ChekiItem.mergeRecognizedDate(fallbackResult.date, into: item.capturedAt)
-            item.ocrDate = mergedDate
-            item.capturedAt = mergedDate
+            item.applyAutomaticJudgedDate(fallbackResult.date, preservingTimeFrom: item.appOriginalCaptureDate)
             try? modelContext.save()
         }
     }

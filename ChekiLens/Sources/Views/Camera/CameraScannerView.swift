@@ -731,6 +731,17 @@ private struct CameraPreviewView: UIViewRepresentable {
     }
 }
 
+enum CaptureReviewPresentation {
+    /// 全螢幕相機收起後再呈現設定頁，避免 sheet 被 cover 的關閉動畫吃掉。
+    @MainActor
+    static func presentAfterCameraDismiss(hasItems: Bool, present: @escaping () -> Void) {
+        guard hasItems else { return }
+        Task { @MainActor in
+            present()
+        }
+    }
+}
+
 // MARK: - CameraScannerView (Task 4.3: Apple 原生相機風格即時掃描視圖)
 
 /// Task 4.3: 嚴格遵循 Apple iOS 原生相機 (Camera.app) 介面規範之拍立得掃描器
@@ -744,6 +755,8 @@ struct CameraScannerView: View {
     @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var chekiItems: [ChekiItem]
 
     var defaultMember: IdolMember? = nil
+    /// 關閉相機時回傳本次每一張快門，交給與讀入相同的配對工作台
+    var onSessionCaptured: (([CameraSessionPhoto]) -> Void)? = nil
 
     @StateObject private var camera = CameraSessionController()
 
@@ -772,6 +785,8 @@ struct CameraScannerView: View {
     @State private var pendingModeBFirstRawJPEG: Data? = nil
     @State private var pendingModeBPreparedTask: Task<VisionManager.ModeBPreparedFirstAngle?, Never>? = nil
     @State private var statusBannerMessage: String? = nil
+    @State private var sessionPhotos: [CameraSessionPhoto] = []
+    @State private var pendingSessionTasks: [Task<Void, Never>] = []
 
     // 點擊對焦黃框狀態
     @State private var focusIndicatorPoint: CGPoint? = nil
@@ -852,7 +867,7 @@ struct CameraScannerView: View {
             } label: {
                 Image(systemName: camera.flashSetting.symbolName)
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(camera.flashSetting == .off ? .white : .yellow)
+                    .foregroundStyle(camera.flashSetting == .off ? .white.opacity(0.55) : .white)
                     .frame(width: 34, height: 34)
             }
             .accessibilityLabel("閃光燈：\(camera.flashSetting.label)")
@@ -869,7 +884,7 @@ struct CameraScannerView: View {
                     Text(String(format: "%+.1f", camera.exposureBias))
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
                 }
-                .foregroundStyle(abs(camera.exposureBias) > 0.05 ? .yellow : .white)
+                .foregroundStyle(abs(camera.exposureBias) > 0.05 ? .white : .white.opacity(0.7))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .cameraLiquidGlassCapsule()
@@ -889,7 +904,7 @@ struct CameraScannerView: View {
                 Image(systemName: showSecondaryControlsDrawer ? "chevron.down.circle.fill" : "chevron.up.circle.fill")
                     .font(.system(size: 24))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(showSecondaryControlsDrawer ? .yellow : .white)
+                    .foregroundStyle(showSecondaryControlsDrawer ? .white : .white.opacity(0.55))
             }
             .accessibilityLabel("相機進階控制")
 
@@ -904,15 +919,14 @@ struct CameraScannerView: View {
             } label: {
                 Image(systemName: "squareshape.split.3x3")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(showGridOverlay ? .yellow : .white.opacity(0.65))
+                    .foregroundStyle(showGridOverlay ? .white : .white.opacity(0.45))
                     .frame(width: 34, height: 34)
             }
             .accessibilityLabel("九宮格輔助線")
 
             // 右側：關閉相機返回
             Button {
-                camera.setTorch(enabled: false)
-                dismiss()
+                Task { await closeCamera() }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .bold))
@@ -933,7 +947,7 @@ struct CameraScannerView: View {
             HStack(spacing: 12) {
                 Image(systemName: "sun.min.fill")
                     .font(.caption)
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(.white)
 
                 Slider(
                     value: Binding(
@@ -943,17 +957,17 @@ struct CameraScannerView: View {
                     in: -2.0...2.0,
                     step: 0.1
                 )
-                .tint(.yellow)
+                .tint(.white)
 
                 Image(systemName: "sun.max.fill")
                     .font(.caption)
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(.white)
 
                 Button(L10n.tr("重設", "リセット")) {
                     camera.applyExposureBias(-0.3)
                 }
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.yellow)
+                .foregroundStyle(.white)
             }
         }
         .padding(.horizontal, 20)
@@ -1153,19 +1167,19 @@ struct CameraScannerView: View {
             Text(statusBannerMessage)
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
-                .foregroundStyle(.black)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background((captureMode == .dualGlare ? Color.cyan : Color.yellow), in: Capsule())
+                .cameraLiquidGlassCapsule()
                 .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
         } else if captureMode == .frontAndBack {
             Text(pendingFrontImageData == nil ? L10n.tr("1/2 · 拍攝正面", "1/2 · 表面を撮影") : L10n.tr("2/2 · 翻面拍背面", "2/2 · 裏面を撮影"))
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
-                .foregroundStyle(.black)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(Color.yellow, in: Capsule())
+                .cameraLiquidGlassCapsule()
         } else if captureMode == .dualGlare {
             Text(
                 isPhotoScanSessionActive
@@ -1174,16 +1188,16 @@ struct CameraScannerView: View {
             )
             .font(.caption.weight(.semibold))
             .lineLimit(1)
-            .foregroundStyle(.black)
+            .foregroundStyle(.white)
             .padding(.horizontal, 14)
             .padding(.vertical, 6)
-            .background(Color.cyan, in: Capsule())
+            .cameraLiquidGlassCapsule()
             .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
         } else {
             Text(L10n.tr("已鎖定邊框", "枠をロック中"))
                 .font(.caption2.weight(.semibold))
                 .lineLimit(1)
-                .foregroundStyle(.yellow)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(.black.opacity(0.5), in: Capsule())
@@ -1202,9 +1216,9 @@ struct CameraScannerView: View {
                 } label: {
                     Text(preset == 0.5 ? ".5" : (isSelected ? "\(Int(preset))×" : "\(Int(preset))"))
                         .font(.system(size: isSelected ? 13 : 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(isSelected ? .yellow : .white)
+                        .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.72))
                         .frame(width: isSelected ? 36 : 30, height: isSelected ? 36 : 30)
-                        .background(.black.opacity(0.55), in: Circle())
+                        .background(isSelected ? Color.white : Color.black.opacity(0.55), in: Circle())
                         .overlay(
                             Circle()
                                 .strokeBorder(.white.opacity(isSelected ? 0.25 : 0.1), lineWidth: 0.5)
@@ -1244,7 +1258,10 @@ struct CameraScannerView: View {
                         Text(mode.displayName)
                             .font(.system(size: 13, weight: isSelected ? .bold : .medium))
                             .tracking(0.8)
-                            .foregroundStyle(isSelected ? .yellow : .white.opacity(0.65))
+                            .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.72))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(isSelected ? Color.white : Color.clear, in: Capsule())
                     }
                     .buttonStyle(.plain)
                 }
@@ -1255,12 +1272,12 @@ struct CameraScannerView: View {
             HStack {
                 // 左下：最新拍立得縮圖預覽井
                 Button {
-                    if !chekiItems.isEmpty {
+                    if sessionPhotos.isEmpty, !chekiItems.isEmpty {
                         showingLatestDetail = true
                     }
                 } label: {
                     ZStack {
-                        if let latestData = chekiItems.first?.frontImageData,
+                        if let latestData = sessionPhotos.last?.imageData ?? chekiItems.first?.frontImageData,
                            let uiImage = UIImage(data: latestData) {
                             Image(uiImage: uiImage)
                                 .resizable()
@@ -1301,7 +1318,7 @@ struct CameraScannerView: View {
                             .fill(
                                 isPhotoScanSessionActive
                                     ? Color.cyan
-                                    : (pendingFrontImageData != nil ? Color.yellow : Color.white)
+                                    : Color.white
                             )
                             .frame(width: 62, height: 62)
                             .scaleEffect(isShutterPressed ? 0.88 : 1.0)
@@ -1363,7 +1380,7 @@ struct CameraScannerView: View {
                 } label: {
                     Image(systemName: isWaitingSecondStep ? "arrow.counterclockwise" : "rectangle.portrait.rotate")
                         .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle((captureMode == .frontAndBack || isWaitingSecondStep) ? .yellow : .white)
+                        .foregroundStyle(.white)
                         .cameraLiquidGlassCircle(size: 48)
                 }
                 .buttonStyle(.plain)
@@ -1507,7 +1524,6 @@ struct CameraScannerView: View {
         }
 
         isProcessingCapture = true
-        let lockedPreviewQuad = camera.trackedQuadPoints
         let isCapturingBackside = (captureMode == .frontAndBack && pendingFrontImageData != nil)
         guard let packet = await camera.capturePhotoPacket(isBacksideSimulated: isCapturingBackside) else {
             isProcessingCapture = false
@@ -1517,25 +1533,12 @@ struct CameraScannerView: View {
         // 先取得原始圖片後立刻結束 loading，讓使用者操作完全不卡頓；裁切與 OCR 改於背景執行
         isProcessingCapture = false
         let now = Date()
-        let context = modelContext
-        let member = defaultMember
+        appendSessionPhoto(packet.rawData, shutterDate: now)
 
         if captureMode == .frontAndBack {
             if pendingFrontImageData == nil {
-                // 第一步：立即記錄正面原圖並解鎖快門，同時在背景預先裁切正面
                 pendingFrontImageData = packet.rawData
                 pendingOriginalFrontImageData = packet.rawData
-                pendingFrontCropTask?.cancel()
-                let rawFrontImage = packet.image
-                let frontQuad = lockedPreviewQuad
-                pendingFrontCropTask = Task {
-                    await self.processCapturedImage(
-                        rawFrontImage,
-                        applyModeASuppression: false,
-                        isKnownFrontPhoto: true,
-                        priorNormalizedCorners: frontQuad
-                    )
-                }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 withAnimation {
                     statusBannerMessage = L10n.tr(
@@ -1544,152 +1547,25 @@ struct CameraScannerView: View {
                     )
                 }
             } else {
-                // 第二步：立即以正反面原圖存入 SwiftData 並解鎖快門，背景完成正反面裁切後自動更新並同步相簿
-                let frontRawData = pendingFrontImageData ?? packet.rawData
-                let frontOrigData = pendingOriginalFrontImageData ?? frontRawData
-                let frontTask = pendingFrontCropTask
-                let rawBackImage = packet.image
-                let backRawData = packet.rawData
-                let backQuad = lockedPreviewQuad
-
                 pendingFrontImageData = nil
                 pendingOriginalFrontImageData = nil
+                pendingFrontCropTask?.cancel()
                 pendingFrontCropTask = nil
-
-                let newItem = ChekiItem(
-                    frontImageData: frontRawData,
-                    backImageData: backRawData,
-                    originalFrontImageData: frontOrigData,
-                    originalBackImageData: backRawData,
-                    capturedAt: now,
-                    ocrDate: nil,
-                    filmFormat: .mini,
-                    detectedAspectRatio: FilmFormat.mini.aspectRatio,
-                    perspectivePointsJSON: nil,
-                    backPerspectivePointsJSON: nil,
-                    processingState: .detecting,
-                    idolMember: member
-                )
-                context.insert(newItem)
-                try? context.save()
-
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 withAnimation {
                     statusBannerMessage = L10n.tr(
-                        "雙面已儲存 · 裁切中…",
-                        "両面を保存 · 補正中…"
+                        "背面已拍攝 · 關閉後配對",
+                        "裏面を撮影 · 閉じるとペア"
                     )
-                }
-
-                Task { @MainActor in
-                    let frontResult = await frontTask?.value
-                    let (backProcessed, backOriginalRaw, backPointsJSON, backOCRDate, _) = await self.processCapturedImage(
-                        rawBackImage,
-                        applyModeASuppression: false,
-                        isKnownFrontPhoto: false,
-                        priorNormalizedCorners: backQuad
-                    )
-                    guard !newItem.isDeleted, newItem.modelContext != nil else { return }
-
-                    if let frontProcessed = frontResult?.0 {
-                        newItem.frontImageData = frontProcessed
-                    }
-                    if let frontOrig = frontResult?.1 {
-                        newItem.originalFrontImageData = frontOrig
-                    }
-                    newItem.perspectivePointsJSON = frontResult?.2
-
-                    if let backProcessed {
-                        newItem.backImageData = backProcessed
-                    }
-                    if let backOriginalRaw {
-                        newItem.originalBackImageData = backOriginalRaw
-                    }
-                    newItem.backPerspectivePointsJSON = backPointsJSON
-
-                    let format = (frontResult?.4 ?? .mini).concreteFormat
-                    newItem.filmFormat = format
-                    newItem.detectedAspectRatio = format.aspectRatio
-
-                    if let finalOCR = frontResult?.3 ?? backOCRDate {
-                        let captureDate = ChekiItem.mergeRecognizedDate(finalOCR, into: now)
-                        newItem.capturedAt = captureDate
-                        newItem.ocrDate = captureDate
-                    }
-                    newItem.processingState = .completed
-                    try? context.save()
-
-                    await self.syncCapturedItemToPhotoLibrary(newItem)
-                    guard !newItem.isDeleted, newItem.modelContext != nil else { return }
-                    withAnimation {
-                        self.statusBannerMessage = L10n.tr(
-                            "雙面正位並同步完成",
-                            "両面の補正・同期完了"
-                        )
-                    }
                 }
             }
         } else {
-            // 單張正面拍攝：先立即存入原始圖片並結束 loading，再於背景執行裁切、OCR 與系統相簿同步
-            let rawData = packet.rawData
-            let rawImage = packet.image
-            let newItem = ChekiItem(
-                frontImageData: rawData,
-                backImageData: nil,
-                originalFrontImageData: rawData,
-                capturedAt: now,
-                ocrDate: nil,
-                filmFormat: .mini,
-                detectedAspectRatio: FilmFormat.mini.aspectRatio,
-                perspectivePointsJSON: nil,
-                processingState: .detecting,
-                idolMember: member
-            )
-            context.insert(newItem)
-            try? context.save()
-
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation {
                 statusBannerMessage = L10n.tr(
-                    "已儲存 · 裁切中…",
-                    "保存完了 · 補正中…"
+                    "已拍攝 · 關閉後設定",
+                    "撮影済 · 閉じると設定"
                 )
-            }
-
-            Task { @MainActor in
-                let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await self.processCapturedImage(
-                    rawImage,
-                    applyModeASuppression: false,
-                    isKnownFrontPhoto: true,
-                    priorNormalizedCorners: lockedPreviewQuad
-                )
-                guard !newItem.isDeleted, newItem.modelContext != nil else { return }
-                if let processedData {
-                    newItem.frontImageData = processedData
-                }
-                if let originalRawData {
-                    newItem.originalFrontImageData = originalRawData
-                }
-                newItem.perspectivePointsJSON = pointsJSON
-                let format = resolvedFormat.concreteFormat
-                newItem.filmFormat = format
-                newItem.detectedAspectRatio = format.aspectRatio
-                if let recognizedDate {
-                    let captureDate = ChekiItem.mergeRecognizedDate(recognizedDate, into: now)
-                    newItem.capturedAt = captureDate
-                    newItem.ocrDate = captureDate
-                }
-                newItem.processingState = .completed
-                try? context.save()
-
-                await self.syncCapturedItemToPhotoLibrary(newItem)
-                guard !newItem.isDeleted, newItem.modelContext != nil else { return }
-                withAnimation {
-                    self.statusBannerMessage = L10n.tr(
-                        "正位並同步完成",
-                        "補正・同期完了"
-                    )
-                }
             }
         }
     }
@@ -1814,8 +1690,6 @@ struct CameraScannerView: View {
         let capturedQuads = photoScanCapturedQuads
         let preparedTask = pendingModeBPreparedTask
         let cachedRawJPEGA = pendingModeBFirstRawJPEG
-        let context = modelContext
-        let member = defaultMember
 
         guard let firstImage = capturedImages.first else {
             resetPhotoScanState()
@@ -1835,33 +1709,23 @@ struct CameraScannerView: View {
 
         let now = Date()
         let initialRawData = cachedRawJPEGA ?? firstImage.jpegData(compressionQuality: 0.90)
-        let newItem = ChekiItem(
-            frontImageData: initialRawData,
-            backImageData: nil,
-            originalFrontImageData: initialRawData,
-            capturedAt: now,
-            ocrDate: nil,
-            filmFormat: .mini,
-            detectedAspectRatio: FilmFormat.mini.aspectRatio,
-            perspectivePointsJSON: nil,
-            processingState: .detecting,
-            idolMember: member
-        )
-        context.insert(newItem)
-        try? context.save()
+        let photoID = UUID()
+        if let initialRawData {
+            appendSessionPhoto(initialRawData, shutterDate: now, id: photoID)
+        }
 
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         withAnimation {
             statusBannerMessage = L10n.tr(
-                "已儲存 · 防反光合成中…",
-                "保存完了 · 反射除去合成中…"
+                "防反光合成中…",
+                "反射除去合成中…"
             )
         }
 
         let defaultInsetRatio = UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage") / 100.0
 
-        // 背景非阻塞執行四角合成與裁切，完成後自動更新 ChekiItem 並同步至系統相簿
-        Task { @MainActor in
+        // 背景合成完成後，用成品圖取代先放進工作台的原圖。關閉相機時會等這一步結束。
+        let fusionTask = Task { @MainActor in
             let preparedFirstAngle = await preparedTask?.value
 
             let synthesisOutcome: (
@@ -1902,69 +1766,33 @@ struct CameraScannerView: View {
                 }
             }.value
 
-            guard !newItem.isDeleted, newItem.modelContext != nil else { return }
-
             if let outcome = synthesisOutcome, let fusedJPEG = outcome.fusedJPEG {
-                newItem.frontImageData = fusedJPEG
-                if let rawJPEGA = outcome.rawJPEGA {
-                    newItem.originalFrontImageData = rawJPEGA
-                }
-                newItem.perspectivePointsJSON = outcome.pointsJSON
-                let format = outcome.format
-                newItem.filmFormat = format
-                newItem.detectedAspectRatio = format.aspectRatio
-                if let ocrDate = outcome.ocrDate {
-                    let captureDate = ChekiItem.mergeRecognizedDate(ocrDate, into: now)
-                    newItem.capturedAt = captureDate
-                    newItem.ocrDate = captureDate
-                }
-                newItem.processingState = .completed
-                try? context.save()
-
-                await self.syncCapturedItemToPhotoLibrary(newItem)
-                guard !newItem.isDeleted, newItem.modelContext != nil else { return }
+                self.replaceSessionPhoto(id: photoID, imageData: fusedJPEG, shutterDate: now)
                 withAnimation {
                     self.statusBannerMessage = L10n.tr(
-                        "防反光合成並同步完成",
-                        "反射除去合成・同期完了"
+                        "防反光合成完成 · 關閉後設定",
+                        "反射除去完了 · 閉じると設定"
                     )
                 }
             } else {
-                let (processedData, originalRawData, pointsJSON, recognizedDate, resolvedFormat) = await self.processCapturedImage(
+                let (processedData, _, _, _, _) = await self.processCapturedImage(
                     firstImage,
                     applyModeASuppression: true,
                     isKnownFrontPhoto: true,
                     priorNormalizedCorners: capturedQuads.first ?? nil
                 )
-                guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                 if let processedData {
-                    newItem.frontImageData = processedData
+                    self.replaceSessionPhoto(id: photoID, imageData: processedData, shutterDate: now)
                 }
-                if let originalRawData {
-                    newItem.originalFrontImageData = originalRawData
-                }
-                newItem.perspectivePointsJSON = pointsJSON
-                let format = resolvedFormat.concreteFormat
-                newItem.filmFormat = format
-                newItem.detectedAspectRatio = format.aspectRatio
-                if let recognizedDate {
-                    let captureDate = ChekiItem.mergeRecognizedDate(recognizedDate, into: now)
-                    newItem.capturedAt = captureDate
-                    newItem.ocrDate = captureDate
-                }
-                newItem.processingState = .completed
-                try? context.save()
-
-                await self.syncCapturedItemToPhotoLibrary(newItem)
-                guard !newItem.isDeleted, newItem.modelContext != nil else { return }
                 withAnimation {
                     self.statusBannerMessage = L10n.tr(
-                        "反光抑制並同步完成",
-                        "反射抑制・同期完了"
+                        "反光抑制完成 · 關閉後設定",
+                        "反射抑制完了 · 閉じると設定"
                     )
                 }
             }
         }
+        pendingSessionTasks.append(fusionTask)
     }
 
     private func processCapturedImage(
@@ -2017,6 +1845,27 @@ struct CameraScannerView: View {
                 return (rawJPEG, rawJPEG, nil, ocrDate, .mini)
             }
         }.value
+    }
+
+    private func appendSessionPhoto(_ data: Data, shutterDate: Date, id: UUID = UUID()) {
+        sessionPhotos.append(CameraSessionPhoto(id: id, shutterDate: shutterDate, imageData: data))
+    }
+
+    private func replaceSessionPhoto(id: UUID, imageData: Data, shutterDate: Date) {
+        if let index = sessionPhotos.firstIndex(where: { $0.id == id }) {
+            sessionPhotos[index].imageData = imageData
+        } else {
+            sessionPhotos.append(CameraSessionPhoto(id: id, shutterDate: shutterDate, imageData: imageData))
+        }
+    }
+
+    private func closeCamera() async {
+        camera.setTorch(enabled: false)
+        let photos = sessionPhotos
+        if !photos.isEmpty {
+            onSessionCaptured?(photos)
+        }
+        dismiss()
     }
 
     /// 將相機新拍攝的拍立得自動同步寫入 iOS 原生系統相簿 (`Photos.app`)
@@ -2241,7 +2090,7 @@ private struct ChekiQuadTrackingOverlay: View {
                 // 四個角落高亮錨點
                 ForEach(0..<min(pts.count, 4), id: \.self) { idx in
                     Circle()
-                        .fill(Color.yellow)
+                        .fill(Color.white)
                         .frame(width: 8, height: 8)
                         .position(pts[idx])
                 }
@@ -2257,12 +2106,12 @@ private struct AppleFocusBoxIndicator: View {
     var body: some View {
         HStack(spacing: 6) {
             Rectangle()
-                .strokeBorder(Color.yellow, lineWidth: 1.5)
+                .strokeBorder(Color.white, lineWidth: 1.5)
                 .frame(width: 72, height: 72)
 
             Image(systemName: "sun.max.fill")
                 .font(.caption)
-                .foregroundStyle(.yellow)
+                .foregroundStyle(.white)
         }
         .allowsHitTesting(false)
     }

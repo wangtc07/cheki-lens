@@ -459,16 +459,18 @@ struct ChekiDetailView: View {
 
             // 右側：圓形液態玻璃更多選單 (`⋯`)
             Menu {
-                Button {
-                    trigger3DFlip()
-                } label: {
-                    Label(
-                        L10n.tr(isShowingBack ? "正面" : "背面", isShowingBack ? "表面" : "裏面"),
-                        systemImage: "rectangle.portrait.rotate"
-                    )
-                }
+                if currentItem.hasBothSides {
+                    Button {
+                        trigger3DFlip()
+                    } label: {
+                        Label(
+                            L10n.tr(isShowingBack ? "正面" : "背面", isShowingBack ? "表面" : "裏面"),
+                            systemImage: "rectangle.portrait.rotate"
+                        )
+                    }
 
-                Divider()
+                    Divider()
+                }
 
                 Menu {
                     Button {
@@ -548,6 +550,12 @@ struct ChekiDetailView: View {
                     showingAdjustmentSheet = true
                 } label: {
                     Label(L10n.tr("裁切與比例", "トリミングと比率"), systemImage: "slider.horizontal.3")
+                }
+
+                Button {
+                    rotateCurrentFaceQuarterTurn()
+                } label: {
+                    Label(L10n.tr("旋轉", "回転"), systemImage: "rotate.left")
                 }
 
                 Button {
@@ -829,7 +837,8 @@ struct ChekiDetailView: View {
         isBackFace: Bool,
         isLandscape: Bool
     ) -> some View {
-        let shouldShow = isCurrent
+        let shouldShow = pageItem.hasBothSides
+            && isCurrent
             && !isImageZoomed
             && !isDraggingDownToDismiss
             && !isCardDockedToGridCell
@@ -1209,7 +1218,7 @@ struct ChekiDetailView: View {
         HStack(spacing: 8) {
             Image(systemName: "hand.draw.fill")
                 .font(.caption)
-                .foregroundStyle(.yellow)
+                .foregroundStyle(.white)
 
             Text(L10n.tr("雙擊翻面 · 上滑備忘", "ダブルタップで裏返す · 上スワイプでメモ"))
                 .font(.caption)
@@ -2082,6 +2091,27 @@ struct ChekiDetailView: View {
         }
     }
 
+    /// 把目前這一面逆時針轉 90° 並存檔。直式被存成橫式時可從選單直接轉正。
+    private func rotateCurrentFaceQuarterTurn() {
+        let editingBack = isShowingBack && currentItem.hasBothSides
+        let sourceData = editingBack ? currentItem.backImageData : currentItem.frontImageData
+        guard let sourceData, let image = UIImage(data: sourceData) else { return }
+        let rotated = image.rotatedQuarterTurnCounterClockwise()
+        guard let jpeg = rotated.jpegData(compressionQuality: 0.92) else { return }
+
+        if editingBack {
+            currentItem.backImageData = jpeg
+        } else {
+            currentItem.frontImageData = jpeg
+            if currentItem.detectedAspectRatio > 0 {
+                currentItem.detectedAspectRatio = 1.0 / currentItem.detectedAspectRatio
+            }
+        }
+        try? modelContext.save()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Task { await syncCurrentItemToSystemPhotos() }
+    }
+
     @MainActor
     private func syncCurrentItemToSystemPhotos() async {
         guard let frontData = currentItem.frontImageData,
@@ -2266,7 +2296,7 @@ struct ChekiDetailView: View {
         }
 
         // 3. 若尚未辨識出封面手寫日期，自動於背景辨識並填入拍攝日期
-        guard !target.isDeleted, target.modelContext != nil, target.ocrDate == nil else { return }
+        guard !target.isDeleted, target.modelContext != nil, target.ocrDate == nil, !target.isJudgedDateManuallySet else { return }
         guard let data = target.frontImageData ?? target.originalFrontImageData,
               let uiImage = UIImage(data: data)?.normalizedImage,
               let cgImage = uiImage.cgImage else { return }
@@ -2274,9 +2304,7 @@ struct ChekiDetailView: View {
         let visionManager = VisionManager()
         if let ocrResult = await visionManager.recognizeDate(from: cgImage) {
             guard !target.isDeleted, target.modelContext != nil else { return }
-            let mergedDate = ChekiItem.mergeRecognizedDate(ocrResult.date, into: target.capturedAt)
-            target.ocrDate = mergedDate
-            target.capturedAt = mergedDate
+            target.applyAutomaticJudgedDate(ocrResult.date, preservingTimeFrom: target.appOriginalCaptureDate)
             try? modelContext.save()
         } else if let origData = target.originalFrontImageData,
                   origData != data,
@@ -2284,9 +2312,7 @@ struct ChekiDetailView: View {
                   let origCG = origUI.cgImage,
                   let fallbackResult = await visionManager.recognizeDate(from: origCG) {
             guard !target.isDeleted, target.modelContext != nil else { return }
-            let mergedDate = ChekiItem.mergeRecognizedDate(fallbackResult.date, into: target.capturedAt)
-            target.ocrDate = mergedDate
-            target.capturedAt = mergedDate
+            target.applyAutomaticJudgedDate(fallbackResult.date, preservingTimeFrom: target.appOriginalCaptureDate)
             try? modelContext.save()
         }
     }
@@ -2443,22 +2469,24 @@ private struct ChekiQuadCropEditorView: View {
                     Button {
                         editingBackside = false
                     } label: {
-                        Text("正面")
+                        Text(L10n.tr("正面", "表面"))
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(!editingBackside ? .black : .white.opacity(0.8))
+                            .foregroundStyle(!editingBackside ? Color.black : Color.white)
+                            .lineLimit(1)
                             .padding(.horizontal, 11)
                             .padding(.vertical, 5)
-                            .background(!editingBackside ? Color.yellow : Color.clear, in: Capsule())
+                            .background(!editingBackside ? Color.white : Color.clear, in: Capsule())
                     }
                     Button {
                         editingBackside = true
                     } label: {
-                        Text("背面")
+                        Text(L10n.tr("背面", "裏面"))
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(editingBackside ? .black : .white.opacity(0.8))
+                            .foregroundStyle(editingBackside ? Color.black : Color.white)
+                            .lineLimit(1)
                             .padding(.horizontal, 11)
                             .padding(.vertical, 5)
-                            .background(editingBackside ? Color.yellow : Color.clear, in: Capsule())
+                            .background(editingBackside ? Color.white : Color.clear, in: Capsule())
                     }
                 }
                 .padding(3)
@@ -2476,7 +2504,7 @@ private struct ChekiQuadCropEditorView: View {
                 } label: {
                     Text(String(format: "%.1fx", effectiveZoom))
                         .font(.caption.monospacedDigit().weight(.bold))
-                        .foregroundStyle(.yellow)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
                         .detailLiquidGlassCapsule()
@@ -2490,12 +2518,12 @@ private struct ChekiQuadCropEditorView: View {
                     await applyManualQuadCropAndSave()
                 }
             } label: {
-                Text("完成")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.black)
+                Text(L10n.tr("完成", "完了"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(Color.yellow, in: Capsule())
+                    .detailLiquidGlassCapsule()
             }
             .disabled(isProcessingCrop)
             .accessibilityLabel("完成裁切")
@@ -2617,7 +2645,7 @@ private struct ChekiQuadCropEditorView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "hand.point.up.left.and.text")
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.yellow)
+                                    .foregroundStyle(.white)
                                 Text(L10n.tr("拖曳四角微調 · 雙指縮放", "四隅をドラッグ · ピンチで拡大"))
                                     .font(.caption2.weight(.medium))
                                     .foregroundStyle(.white.opacity(0.85))
@@ -2695,18 +2723,18 @@ private struct ChekiQuadCropEditorView: View {
         return ZStack {
             // 外圈觸控光暈
             Circle()
-                .fill(isDragging ? Color.yellow.opacity(0.28) : Color.black.opacity(0.28))
+                .fill(isDragging ? Color.white.opacity(0.28) : Color.black.opacity(0.28))
                 .frame(width: isDragging ? 42 : 30, height: isDragging ? 42 : 30)
 
             // 白色/黃色粗框圓環 + 中心準星
             Circle()
-                .strokeBorder(isDragging ? Color.yellow : Color.white, lineWidth: 3.0)
+                .strokeBorder(Color.white, lineWidth: 3.0)
                 .background(Circle().fill(Color.white.opacity(0.18)))
                 .frame(width: 22, height: 22)
                 .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
 
             Circle()
-                .fill(isDragging ? Color.yellow : Color.white)
+                .fill(Color.white)
                 .frame(width: 6, height: 6)
         }
         .frame(width: 52, height: 52)
@@ -2805,7 +2833,7 @@ private struct ChekiQuadCropEditorView: View {
                                 path.move(to: CGPoint(x: center, y: center - armLength))
                                 path.addLine(to: CGPoint(x: center, y: center + armLength))
                             }
-                            .stroke(Color.yellow, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                            .stroke(Color.white, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
 
                             // 中心精準定位小圓環
                             Circle()
@@ -2813,7 +2841,7 @@ private struct ChekiQuadCropEditorView: View {
                                 .frame(width: 7, height: 7)
 
                             Circle()
-                                .strokeBorder(Color.yellow, lineWidth: 1.2)
+                                .strokeBorder(Color.white, lineWidth: 1.2)
                                 .frame(width: 7, height: 7)
                         }
                         .frame(width: loupeDiameter, height: loupeDiameter)
@@ -2821,15 +2849,15 @@ private struct ChekiQuadCropEditorView: View {
                     }
                     .overlay(
                         Circle()
-                            .strokeBorder(Color.yellow, lineWidth: 2.5)
+                            .strokeBorder(Color.white, lineWidth: 2.5)
                     )
                     .overlay(alignment: .bottom) {
                         Text(cornerNames[cornerIndex])
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.black)
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)
-                            .background(Color.yellow, in: Capsule())
+                            .background(.ultraThinMaterial, in: Capsule())
                             .offset(y: 8)
                     }
                     .shadow(color: .black.opacity(0.65), radius: 10, y: 4)
@@ -2866,11 +2894,11 @@ private struct ChekiQuadCropEditorView: View {
                                 Text(format.displayName)
                                     .font(.caption.weight(.bold))
                             }
-                            .foregroundStyle(isSelected ? .black : .white.opacity(0.85))
+                            .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.78))
                             .padding(.horizontal, 13)
                             .padding(.vertical, 7)
                             .background(
-                                isSelected ? Color.yellow : Color.white.opacity(0.12),
+                                isSelected ? Color.white : Color.white.opacity(0.16),
                                 in: Capsule()
                             )
                         }
@@ -2903,7 +2931,7 @@ private struct ChekiQuadCropEditorView: View {
                     VStack(spacing: 4) {
                         Image(systemName: "rotate.left")
                             .font(.system(size: 18, weight: .semibold))
-                        Text("90°")
+                        Text(L10n.tr("旋轉", "回転"))
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -3238,10 +3266,9 @@ private struct ChekiQuadCropEditorView: View {
                     item.frontImageData = croppedJPEG
                     item.perspectivePointsJSON = encodedJSON
                     if item.ocrDate == nil,
+                       !item.isJudgedDateManuallySet,
                        let ocrRes = await visionManager.recognizeDate(from: cropResult.cgImage) {
-                        let mergedDate = ChekiItem.mergeRecognizedDate(ocrRes.date, into: item.capturedAt)
-                        item.ocrDate = mergedDate
-                        item.capturedAt = mergedDate
+                        item.applyAutomaticJudgedDate(ocrRes.date, preservingTimeFrom: item.appOriginalCaptureDate)
                     }
                 }
                 item.borderInsetRatio = defaultBorderInsetPercentage / 100.0

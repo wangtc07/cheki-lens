@@ -79,6 +79,7 @@ struct LibraryView: View {
     @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var chekiItems: [ChekiItem]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
     @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = true
+    @AppStorage("chekiDateSortBasis") private var sortBasisRaw: String = ChekiDateSortBasis.judgedDate.rawValue
 
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var processingItems: [PhotosPickerItem] = []
@@ -93,6 +94,8 @@ struct LibraryView: View {
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
+    @State private var pendingCaptureReview: CaptureReviewRequest?
+    @State private var captureReviewRequest: CaptureReviewRequest?
     @State private var showingBatchPairingSheet: Bool = false
     @State private var inAppBacksideTargetItem: ChekiItem? = nil
     @State private var photosBacksideTargetItem: ChekiItem? = nil
@@ -113,11 +116,13 @@ struct LibraryView: View {
         chekiItems.filter { !$0.isDeleted && $0.modelContext != nil }
     }
 
+    private var sortBasis: ChekiDateSortBasis {
+        ChekiDateSortBasis(rawValue: sortBasisRaw) ?? .judgedDate
+    }
+
     private var displayedItems: [ChekiItem] {
         let filtered = filterDualSideOnly ? validChekiItems.filter(\.hasBothSides) : validChekiItems
-        return filtered.sorted {
-            sortAscending ? ($0.displayDate < $1.displayDate) : ($0.displayDate > $1.displayDate)
-        }
+        return ChekiLibrarySort.sorted(filtered, basis: sortBasis, ascending: sortAscending)
     }
 
     private var gridSpacing: CGFloat {
@@ -293,8 +298,23 @@ struct LibraryView: View {
                     )
                 }
             }
-            .fullScreenCover(isPresented: $showingCameraScanner) {
-                CameraScannerView()
+            .fullScreenCover(isPresented: $showingCameraScanner, onDismiss: {
+                let pending = pendingCaptureReview
+                pendingCaptureReview = nil
+                CaptureReviewPresentation.presentAfterCameraDismiss(hasItems: pending != nil) {
+                    captureReviewRequest = pending
+                }
+            }) {
+                CameraScannerView { photos in
+                    guard !photos.isEmpty else { return }
+                    pendingCaptureReview = CaptureReviewRequest(photos: photos, member: nil)
+                }
+            }
+            .sheet(item: $captureReviewRequest) { request in
+                BatchPairingView(
+                    initialSessionPhotos: request.photos,
+                    defaultMember: request.member
+                )
             }
             .overlay {
                 if isProcessing {
@@ -428,6 +448,22 @@ struct LibraryView: View {
                     }
 
                     Section("排序與篩選") {
+                        Button {
+                            sortBasisRaw = ChekiDateSortBasis.judgedDate.rawValue
+                        } label: {
+                            Label(
+                                ChekiDateSortBasis.judgedDate.menuTitle,
+                                systemImage: sortBasis == .judgedDate ? "checkmark" : "calendar"
+                            )
+                        }
+                        Button {
+                            sortBasisRaw = ChekiDateSortBasis.originalCaptureDate.rawValue
+                        } label: {
+                            Label(
+                                ChekiDateSortBasis.originalCaptureDate.menuTitle,
+                                systemImage: sortBasis == .originalCaptureDate ? "checkmark" : "camera"
+                            )
+                        }
                         Button {
                             sortAscending = false
                         } label: {
@@ -813,6 +849,8 @@ struct AlbumsRootView: View {
     @State private var showingSettingsSheet: Bool = false
     @State private var showingBatchPairingSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
+    @State private var pendingCaptureReview: CaptureReviewRequest?
+    @State private var captureReviewRequest: CaptureReviewRequest?
     @State private var showingAlbumPhotosPicker: Bool = false
     @State private var selectedAlbumPhotos: [PhotosPickerItem] = []
     @State private var pendingBatchPhotos: [PhotosPickerItem] = []
@@ -954,9 +992,23 @@ struct AlbumsRootView: View {
                 BatchPairingView(initialPickerItems: pendingBatchPhotos, defaultMember: actionTargetMember)
             }
             .fullScreenCover(isPresented: $showingCameraScanner, onDismiss: {
+                let pending = pendingCaptureReview
+                pendingCaptureReview = nil
+                CaptureReviewPresentation.presentAfterCameraDismiss(hasItems: pending != nil) {
+                    captureReviewRequest = pending
+                }
                 actionTargetMember = nil
             }) {
-                CameraScannerView(defaultMember: actionTargetMember)
+                CameraScannerView(defaultMember: actionTargetMember) { photos in
+                    guard !photos.isEmpty else { return }
+                    pendingCaptureReview = CaptureReviewRequest(photos: photos, member: actionTargetMember)
+                }
+            }
+            .sheet(item: $captureReviewRequest) { request in
+                BatchPairingView(
+                    initialSessionPhotos: request.photos,
+                    defaultMember: request.member
+                )
             }
             .alert(
                 L10n.tr("團體名", "グループ名"),
@@ -1589,6 +1641,8 @@ private struct GroupMembersAlbumView: View {
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
+    @State private var pendingCaptureReview: CaptureReviewRequest?
+    @State private var captureReviewRequest: CaptureReviewRequest?
     @State private var showingAlbumPhotosPicker: Bool = false
     @State private var selectedAlbumPhotos: [PhotosPickerItem] = []
     @State private var pendingBatchPhotos: [PhotosPickerItem] = []
@@ -1733,9 +1787,23 @@ private struct GroupMembersAlbumView: View {
             BatchPairingView(initialPickerItems: pendingBatchPhotos, defaultMember: actionTargetMember)
         }
         .fullScreenCover(isPresented: $showingCameraScanner, onDismiss: {
+            let pending = pendingCaptureReview
+            pendingCaptureReview = nil
+            CaptureReviewPresentation.presentAfterCameraDismiss(hasItems: pending != nil) {
+                captureReviewRequest = pending
+            }
             actionTargetMember = nil
         }) {
-            CameraScannerView(defaultMember: actionTargetMember)
+            CameraScannerView(defaultMember: actionTargetMember) { photos in
+                guard !photos.isEmpty else { return }
+                pendingCaptureReview = CaptureReviewRequest(photos: photos, member: actionTargetMember)
+            }
+        }
+        .sheet(item: $captureReviewRequest) { request in
+            BatchPairingView(
+                initialSessionPhotos: request.photos,
+                defaultMember: request.member
+            )
         }
         .alert(
             L10n.tr("團體名", "グループ名"),
@@ -1849,6 +1917,7 @@ struct AlbumHeroDetailView: View {
     @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var allChekiItems: [ChekiItem]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
     @AppStorage("autoSyncToPhotosLibrary") private var autoSyncToPhotos: Bool = true
+    @AppStorage("chekiDateSortBasis") private var sortBasisRaw: String = ChekiDateSortBasis.judgedDate.rawValue
 
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var processingItems: [PhotosPickerItem] = []
@@ -1861,6 +1930,8 @@ struct AlbumHeroDetailView: View {
     @State private var showDeleteConfirm: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
+    @State private var pendingCaptureReview: CaptureReviewRequest?
+    @State private var captureReviewRequest: CaptureReviewRequest?
     @State private var showingBatchPairingSheet: Bool = false
     @State private var showingRenameMemberAlert: Bool = false
     @State private var renameMemberText: String = ""
@@ -1905,12 +1976,14 @@ struct AlbumHeroDetailView: View {
         return secondaryTitle
     }
 
+    private var sortBasis: ChekiDateSortBasis {
+        ChekiDateSortBasis(rawValue: sortBasisRaw) ?? .judgedDate
+    }
+
     private var displayedItems: [ChekiItem] {
         let source = liveItems
         let filtered = filterDualSideOnly ? source.filter(\.hasBothSides) : source
-        return filtered.sorted {
-            sortAscending ? ($0.displayDate < $1.displayDate) : ($0.displayDate > $1.displayDate)
-        }
+        return ChekiLibrarySort.sorted(filtered, basis: sortBasis, ascending: sortAscending)
     }
 
     private var gridSpacing: CGFloat {
@@ -2098,6 +2171,23 @@ struct AlbumHeroDetailView: View {
 
                         Menu {
                             Button {
+                                sortBasisRaw = ChekiDateSortBasis.judgedDate.rawValue
+                            } label: {
+                                Label(
+                                    ChekiDateSortBasis.judgedDate.menuTitle,
+                                    systemImage: sortBasis == .judgedDate ? "checkmark" : "calendar"
+                                )
+                            }
+                            Button {
+                                sortBasisRaw = ChekiDateSortBasis.originalCaptureDate.rawValue
+                            } label: {
+                                Label(
+                                    ChekiDateSortBasis.originalCaptureDate.menuTitle,
+                                    systemImage: sortBasis == .originalCaptureDate ? "checkmark" : "camera"
+                                )
+                            }
+                            Divider()
+                            Button {
                                 sortAscending = false
                             } label: {
                                 Label("由新到舊", systemImage: !sortAscending ? "checkmark" : "arrow.down")
@@ -2218,13 +2308,27 @@ struct AlbumHeroDetailView: View {
             BatchPairingView(initialPickerItems: processingItems, defaultMember: defaultMember)
         }
         .fullScreenCover(isPresented: $showingCameraScanner, onDismiss: {
+            let pending = pendingCaptureReview
+            pendingCaptureReview = nil
+            CaptureReviewPresentation.presentAfterCameraDismiss(hasItems: pending != nil) {
+                captureReviewRequest = pending
+            }
             if autoSyncToPhotos {
                 Task {
                     await syncCurrentAlbumToPhotosLibrary(forceFullSync: false)
                 }
             }
         }) {
-            CameraScannerView(defaultMember: defaultMember)
+            CameraScannerView(defaultMember: defaultMember) { photos in
+                guard !photos.isEmpty else { return }
+                pendingCaptureReview = CaptureReviewRequest(photos: photos, member: defaultMember)
+            }
+        }
+        .sheet(item: $captureReviewRequest) { request in
+            BatchPairingView(
+                initialSessionPhotos: request.photos,
+                defaultMember: request.member
+            )
         }
         .sheet(isPresented: $showingInAppPhotoPickerSheet) {
             if let defaultMember {
@@ -3113,6 +3217,7 @@ struct LibrarySearchView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ChekiItem.capturedAt, order: .reverse) private var chekiItems: [ChekiItem]
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
+    @AppStorage("chekiDateSortBasis") private var sortBasisRaw: String = ChekiDateSortBasis.judgedDate.rawValue
 
     @State private var searchText: String = ""
     @State private var showingSettingsSheet: Bool = false
@@ -3138,7 +3243,9 @@ struct LibrarySearchView: View {
     }
 
     private var filteredItems: [ChekiItem] {
-        validChekiItems.filter { LibraryView.matchesSearch(item: $0, query: searchText, allMembers: idolMembers) }
+        let matched = validChekiItems.filter { LibraryView.matchesSearch(item: $0, query: searchText, allMembers: idolMembers) }
+        let basis = ChekiDateSortBasis(rawValue: sortBasisRaw) ?? .judgedDate
+        return ChekiLibrarySort.sorted(matched, basis: basis, ascending: false)
     }
 
     private var availableHashtags: [String] {
@@ -3479,9 +3586,7 @@ private enum VisionPhotoProcessor {
                 item.filmFormat = resolvedFormat
                 item.detectedAspectRatio = resolvedFormat.aspectRatio
                 if let recognizedDate {
-                    let merged = ChekiItem.mergeRecognizedDate(recognizedDate, into: item.capturedAt)
-                    item.ocrDate = merged
-                    item.capturedAt = merged
+                    item.applyAutomaticJudgedDate(recognizedDate, preservingTimeFrom: item.appOriginalCaptureDate)
                 }
                 item.processingState = .completed
             }
@@ -3490,9 +3595,7 @@ private enum VisionPhotoProcessor {
             let recognizedDate = await manager.recognizeDate(from: cgImage)?.date
             await MainActor.run {
                 if let recognizedDate {
-                    let merged = ChekiItem.mergeRecognizedDate(recognizedDate, into: item.capturedAt)
-                    item.ocrDate = merged
-                    item.capturedAt = merged
+                    item.applyAutomaticJudgedDate(recognizedDate, preservingTimeFrom: item.appOriginalCaptureDate)
                 }
                 item.processingState = .completed
             }

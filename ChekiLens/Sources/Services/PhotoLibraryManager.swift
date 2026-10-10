@@ -585,6 +585,8 @@ final class PhotoLibraryManager {
                 originalFrontImageData: item.originalBackImageData ?? backData,
                 capturedAt: item.capturedAt,
                 ocrDate: item.ocrDate,
+                originalCapturedAt: item.originalCapturedAt ?? item.capturedAt,
+                isJudgedDateManuallySet: item.isJudgedDateManuallySet,
                 isDateWrittenToAlbum: item.isDateWrittenToAlbum,
                 filmFormat: item.filmFormat,
                 detectedAspectRatio: item.detectedAspectRatio,

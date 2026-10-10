@@ -30,4 +30,23 @@ extension UIImage {
             draw(in: CGRect(origin: .zero, size: targetSize))
         }
     }
+
+    /// 逆時針轉 90°。直式被存成橫式時，用這次旋轉把畫面轉正。
+    func rotatedQuarterTurnCounterClockwise() -> UIImage {
+        let upright = normalizedImage
+        let newSize = CGSize(width: upright.size.height, height: upright.size.width)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = upright.scale
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: newSize, format: format).image { ctx in
+            ctx.cgContext.translateBy(x: newSize.width / 2, y: newSize.height / 2)
+            ctx.cgContext.rotate(by: -.pi / 2)
+            upright.draw(in: CGRect(
+                x: -upright.size.width / 2,
+                y: -upright.size.height / 2,
+                width: upright.size.width,
+                height: upright.size.height
+            ))
+        }
+    }
 }

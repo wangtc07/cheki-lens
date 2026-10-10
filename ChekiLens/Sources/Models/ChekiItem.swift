@@ -38,11 +38,18 @@ final class ChekiItem {
 
     // MARK: Timestamp
 
-    /// 數位翻拍的實際時間（匯入時由系統取得）
+    /// 對外展示、以及寫入系統相簿的判斷日期（OCR 或手動修正後會覆寫這裡）
     var capturedAt: Date
 
     /// OCR 從底部白邊手寫日期解析出的真實拍攝日期（nil 表示尚未辨識或辨識失敗）
     var ocrDate: Date?
+
+    /// 手機實際按下快門或匯入當下的時間。只存在 App 內，不寫入系統相簿。
+    /// 舊資料沒有此欄時，排序會退回 `capturedAt`。
+    var originalCapturedAt: Date?
+
+    /// 使用者已手動指定判斷日期。背景 OCR 不得再覆寫 `capturedAt`／`ocrDate`。
+    var isJudgedDateManuallySet: Bool = false
 
     /// 是否已以 ocrDate 回寫系統相簿的 creationDate
     var isDateWrittenToAlbum: Bool
@@ -115,6 +122,8 @@ final class ChekiItem {
         originalBackImageData: Data? = nil,
         capturedAt: Date = Date(),
         ocrDate: Date? = nil,
+        originalCapturedAt: Date? = nil,
+        isJudgedDateManuallySet: Bool = false,
         isDateWrittenToAlbum: Bool = false,
         filmFormat: FilmFormat = .mini,
         detectedAspectRatio: Double = FilmFormat.mini.aspectRatio,
@@ -137,6 +146,8 @@ final class ChekiItem {
         self.originalBackImageData = originalBackImageData ?? backImageData
         self.capturedAt = capturedAt
         self.ocrDate = ocrDate
+        self.originalCapturedAt = originalCapturedAt ?? capturedAt
+        self.isJudgedDateManuallySet = isJudgedDateManuallySet
         self.isDateWrittenToAlbum = isDateWrittenToAlbum
         self.filmFormat = filmFormat
         self.detectedAspectRatio = detectedAspectRatio
@@ -164,13 +175,74 @@ final class ChekiItem {
 
 }
 
+// MARK: - Date Sort Basis
+
+/// 圖庫排序所依據的日期。判斷日期會同步到系統相簿；原始拍攝日期只存在 App。
+enum ChekiDateSortBasis: String, CaseIterable, Identifiable {
+    case judgedDate
+    case originalCaptureDate
+
+    var id: String { rawValue }
+
+    var menuTitle: String {
+        switch self {
+        case .judgedDate:
+            return L10n.tr("判斷日期", "判定日")
+        case .originalCaptureDate:
+            return L10n.tr("原始拍攝日期", "元の撮影日")
+        }
+    }
+}
+
+enum ChekiLibrarySort {
+    static func sorted(_ items: [ChekiItem], basis: ChekiDateSortBasis, ascending: Bool) -> [ChekiItem] {
+        items.sorted { lhs, rhs in
+            let left = lhs.gridSortDate(basis: basis)
+            let right = rhs.gridSortDate(basis: basis)
+            if left != right {
+                return ascending ? left < right : left > right
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+}
+
 // MARK: - Computed Helpers
 
 extension ChekiItem {
 
-    /// 對外展示用日期：優先使用 OCR 手寫日期，否則用翻拍時間
+    /// 對外展示用日期：優先使用 OCR 手寫日期，否則用判斷後的拍攝時間。系統相簿同步也使用這個日期。
     var displayDate: Date {
         ocrDate ?? capturedAt
+    }
+
+    /// App 內「原始拍攝日期」排序用。只代表按下快門或匯入的當下，不寫入系統相簿。
+    var appOriginalCaptureDate: Date {
+        originalCapturedAt ?? capturedAt
+    }
+
+    func gridSortDate(basis: ChekiDateSortBasis) -> Date {
+        switch basis {
+        case .judgedDate:
+            return displayDate
+        case .originalCaptureDate:
+            return appOriginalCaptureDate
+        }
+    }
+
+    /// 背景 OCR 寫入判斷日期。使用者已手動鎖定時保持原值，也不改 `originalCapturedAt`。
+    func applyAutomaticJudgedDate(_ recognizedDate: Date, preservingTimeFrom baseTimestamp: Date) {
+        guard !isJudgedDateManuallySet else { return }
+        let merged = Self.mergeRecognizedDate(recognizedDate, into: baseTimestamp)
+        ocrDate = merged
+        capturedAt = merged
+    }
+
+    /// 使用者手動指定判斷日期，並鎖定以免背景 OCR 事後覆寫。不改原始拍攝時間。
+    func lockJudgedDate(_ date: Date) {
+        capturedAt = date
+        ocrDate = date
+        isJudgedDateManuallySet = true
     }
 
     /// 是否具有背面資料
