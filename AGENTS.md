@@ -50,3 +50,24 @@
   * 手寫日期 OCR 覆寫 EXIF 時間軸。
 * **商業化**：StoreKit 2（`Product.purchase()` Non-Consumable 買斷制，NT$120 / ¥600）
 * **並行性與安全**：Swift 6 Concurrency (`async/await`, `@MainActor`, `Sendable`)，絕不阻塞主執行緒。
+
+---
+
+## Cloud Agent（Linux）環境
+
+Cloud Agent 使用 Ubuntu 24.04。這台機器沒有 Xcode，無法執行 `xcodebuild`、iOS 模擬器或 XCTest。SwiftUI、SwiftData、Vision、Core Image、UIKit 只能在 macOS 上連結。iOS 建置與測試仍使用：
+
+```bash
+xcodebuild -scheme ChekiLens test
+```
+
+Linux 上已準備的工具：
+
+* Swift 6.3.3：`swift` 與 `swiftc` 在 `/usr/local/bin`（工具鏈本體在 `/opt/swift`）。
+* Python 在 `/opt/chekilens/venv`。`python3` 與 `pip` 指向這個 venv，內含 `scripts/requirements.txt`（torch、torchvision、coremltools、ultralytics 等），以及裁切腳本需要但 requirements 未列出的 `opencv-python-headless` 與 `pillow`。
+
+可在 Linux 上做的檢查：
+
+* 語法：逐檔執行 `swiftc -parse <file.swift>`。不要把多個 `main.swift` 一起丟給同一次 `swiftc`。
+* 透視裁切：在 `TestData/images` 與 `TestData/cheki_annotations.jsonl` 備妥圖片與四角標註後，執行 `python3 BenchmarkTool/crop_annotated.py`。直向 Mini 會輸出 810×1290。
+* 訓練集擴充：同一份標註可執行 `python3 scripts/data_augmentation.py`，產物在 `TestData/ml_dataset/`（gitignored）。
