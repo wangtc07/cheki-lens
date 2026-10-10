@@ -3493,7 +3493,7 @@ struct QuickCreateIdolSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    CloseToolbarButton { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("儲存") {

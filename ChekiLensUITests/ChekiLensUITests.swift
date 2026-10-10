@@ -69,4 +69,53 @@ final class ChekiLensUITests: XCTestCase {
         assertCircleFramesMatch(camera, filter, expectedSide: 36)
         saveAuditScreenshot(app, name: "task_6_6_1_library")
     }
+
+    /// Task 6.6.2：日文下「完了」為圖示；inline 標題的「キャンセル」改為 xmark 後，標題留在導覽列中央。
+    @MainActor
+    func testJapaneseToolbarIconsKeepInlineTitleCentered() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-hasCompletedOnboarding", "YES",
+            "-appLanguageMode", "ja",
+            "-appAppearanceMode", "light",
+            "-AppleLanguages", "(ja)"
+        ]
+        app.launch()
+
+        let filter = app.buttons["chrome.library.filter"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 12))
+        filter.tap()
+
+        let settingsButton = app.buttons["設定"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 4), "選單裡找不到設定。\(app.debugDescription)")
+        settingsButton.tap()
+
+        let confirm = app.buttons["chrome.confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 4))
+        XCTAssertLessThanOrEqual(confirm.frame.width, 52, "完成應為圖示鈕，實際寬度 \(confirm.frame.width)")
+        XCTAssertEqual(confirm.label, "完了")
+        saveAuditScreenshot(app, name: "task_6_6_2_settings_ja")
+        confirm.tap()
+
+        filter.tap()
+        let createButton = app.buttons["グループ / メンバー"]
+        XCTAssertTrue(createButton.waitForExistence(timeout: 4), "選單裡找不到新增成員。\(app.debugDescription)")
+        createButton.tap()
+
+        let close = app.buttons["chrome.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 4))
+        XCTAssertLessThanOrEqual(close.frame.width, 52, "取消應為圖示鈕，實際寬度 \(close.frame.width)")
+        XCTAssertEqual(close.label, "キャンセル")
+
+        let nav = app.navigationBars["グループ / メンバー"]
+        let title = nav.staticTexts["グループ / メンバー"]
+        XCTAssertTrue(title.waitForExistence(timeout: 2))
+        XCTAssertEqual(
+            title.frame.midX,
+            nav.frame.midX,
+            accuracy: 12,
+            "標題應置中。title \(title.frame) nav \(nav.frame)"
+        )
+        saveAuditScreenshot(app, name: "task_6_6_2_create_ja")
+    }
 }

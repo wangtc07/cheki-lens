@@ -516,10 +516,9 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") {
+                    ConfirmToolbarButton {
                         dismiss()
                     }
-                    .fontWeight(.semibold)
                 }
             }
             .sheet(isPresented: $showingProPurchaseSheet) {

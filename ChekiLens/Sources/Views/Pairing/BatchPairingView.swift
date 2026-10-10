@@ -434,7 +434,7 @@ struct BatchPairingView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
+                    CloseToolbarButton {
                         dismiss()
                     }
                     .disabled(isProcessingBatch)
@@ -3444,10 +3444,9 @@ private struct SlotFormatAndDateEditorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") {
+                    ConfirmToolbarButton {
                         dismiss()
                     }
-                    .fontWeight(.semibold)
                 }
             }
         }
@@ -3623,14 +3622,16 @@ private struct StagingPhotoQuadCropEditorView: View {
                     await applyManualQuadCrop()
                 }
             } label: {
-                Text(L10n.tr("完成", "完了"))
-                    .font(.subheadline.weight(.semibold))
+                Image(systemName: "checkmark")
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                     .pairingLiquidGlassCapsule()
             }
             .disabled(isProcessingCrop)
+            .accessibilityLabel(L10n.tr("完成", "完了"))
+            .accessibilityIdentifier("chrome.crop.confirm")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)

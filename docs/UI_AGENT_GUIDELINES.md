@@ -185,7 +185,7 @@
 | # | 偏差 | 位置 | 對應任務 |
 | --- | --- | --- | --- |
 | A1 | 玻璃按鈕有 4 套重複實作、前景色與尺寸不一 | `Chrome.swift` 為唯一 `glassEffect` 來源；舊名稱改為轉接。尺寸統一留待後續任務 | ✅ Task 6.6.1 |
-| A2 | 工具列「取消／完成」使用文字，日文過長導致標題不置中 | `BatchPairingView.swift` ~437、~3447、~3626；`LibraryView.swift` ~3493；`ChekiDetailView.swift` ~3673、~3678；`SettingsView.swift` ~519 | 6.6.2 |
+| A2 | 工具列「取消／完成」使用文字，日文過長導致標題不置中 | 已改為 `xmark`／`checkmark`。日文「グループ / メンバー」標題置中（誤差 ≤ 12 pt），圖示鈕寬 ≤ 52 pt。alert 與「選擇套用」內容按鈕保留文字 | ✅ Task 6.6.2 |
 | A3 | 批次工作台 `+ ⋯`（系統 toolbar）與單張預覽 `xmark`（34 pt 黑圓）、裁切頁 `xmark`（36 pt 玻璃）尺寸、位置、風格皆不同 | `BatchPairingView.swift` ~437–485、~1620–1632、~3590–3600 | 6.6.3 |
 | A4 | 單張預覽底部：44 pt 半透白圓與約 42 pt 膠囊圓角不同；非玻璃手刻 | `BatchPairingView.swift` ~1690–1735 | 6.6.3 |
 | A5 | 裁切編輯頁底部功能列為深色不透明底（`Color(white: 0.08)`）＋ 文字圖示，與其他頁 chrome 風格不同 | `BatchPairingView.swift` ~3940–4010 | 6.6.3 |

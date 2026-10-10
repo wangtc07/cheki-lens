@@ -1198,12 +1198,13 @@ struct ChekiDetailView: View {
                     isWhiteBalancePickerActive = false
                 }
             } label: {
-                Text("完成")
+                Image(systemName: "checkmark")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.black)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4.5)
                     .background(Color.white, in: Capsule())
+                    .accessibilityLabel(L10n.tr("完成", "完了"))
             }
             .buttonStyle(.plain)
         }
@@ -2518,15 +2519,16 @@ private struct ChekiQuadCropEditorView: View {
                     await applyManualQuadCropAndSave()
                 }
             } label: {
-                Text(L10n.tr("完成", "完了"))
-                    .font(.subheadline.weight(.semibold))
+                Image(systemName: "checkmark")
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                     .detailLiquidGlassCapsule()
             }
             .disabled(isProcessingCrop)
-            .accessibilityLabel("完成裁切")
+            .accessibilityLabel(L10n.tr("完成", "完了"))
+            .accessibilityIdentifier("chrome.crop.confirm")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -3670,18 +3672,17 @@ struct InAppBacksidePickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
+                    CloseToolbarButton {
                         dismiss()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.tr("完成", "完了")) {
+                    ConfirmToolbarButton {
                         if let chosen = selectedCandidate {
                             onSelectItem(chosen, mergeAndRemoveSource)
                             dismiss()
                         }
                     }
-                    .fontWeight(.semibold)
                     .disabled(selectedCandidate == nil)
                 }
             }
