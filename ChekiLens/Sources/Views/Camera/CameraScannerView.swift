@@ -787,6 +787,8 @@ struct CameraScannerView: View {
     @State private var statusBannerMessage: String? = nil
     @State private var sessionPhotos: [CameraSessionPhoto] = []
     @State private var pendingSessionTasks: [Task<Void, Never>] = []
+    /// 有照片時留在同一個全螢幕蓋板，立刻換成導入頁。
+    @State private var reviewRequest: CaptureReviewRequest?
 
     // 點擊對焦黃框狀態
     @State private var focusIndicatorPoint: CGPoint? = nil
@@ -799,6 +801,17 @@ struct CameraScannerView: View {
     }
 
     var body: some View {
+        if let reviewRequest {
+            BatchPairingView(
+                initialSessionPhotos: reviewRequest.photos,
+                defaultMember: reviewRequest.member
+            )
+        } else {
+            cameraInterface
+        }
+    }
+
+    private var cameraInterface: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
@@ -1871,10 +1884,12 @@ struct CameraScannerView: View {
     private func closeCamera() async {
         camera.setTorch(enabled: false)
         let photos = sessionPhotos
-        if !photos.isEmpty {
-            onSessionCaptured?(photos)
+        guard !photos.isEmpty else {
+            dismiss()
+            return
         }
-        dismiss()
+        camera.stop()
+        reviewRequest = CaptureReviewRequest(photos: photos, member: defaultMember)
     }
 
     /// 將相機新拍攝的拍立得自動同步寫入 iOS 原生系統相簿 (`Photos.app`)

@@ -90,6 +90,8 @@ struct StagingChekiPhoto: Identifiable, Equatable {
     var hasManuallyModifiedFormat: Bool = false
     /// 是否正在背景執行邊界偵測
     var isDetectingBoundary: Bool = false
+    /// 圖片尚未從 JPEG 轉成可顯示的圖。為 false 時卡片先占位，圖片區顯示讀取中。
+    var isImageReady: Bool = true
     /// 是否已完成背景邊界偵測
     var hasCompletedBoundaryDetection: Bool = false
     /// 使用者是否選擇復原為原始未裁切圖片
@@ -134,6 +136,7 @@ struct StagingChekiPhoto: Identifiable, Equatable {
         lhs.detectedSide == rhs.detectedSide &&
         lhs.detectionNote == rhs.detectionNote &&
         lhs.isDetectingBoundary == rhs.isDetectingBoundary &&
+        lhs.isImageReady == rhs.isImageReady &&
         lhs.hasCompletedBoundaryDetection == rhs.hasCompletedBoundaryDetection &&
         lhs.isRevertedToOriginal == rhs.isRevertedToOriginal &&
         lhs.normalizedCornersJSON == rhs.normalizedCornersJSON &&
@@ -327,8 +330,15 @@ struct BatchPairingView: View {
         self.initialPickerItems = initialPickerItems
         self.initialSessionPhotos = initialSessionPhotos
         self.defaultMember = defaultMember
+        let members = defaultMember.map { [$0] } ?? []
         _defaultFallbackMember = State(initialValue: defaultMember)
-        _selectedTargetMembers = State(initialValue: defaultMember.map { [$0] } ?? [])
+        _selectedTargetMembers = State(initialValue: members)
+        if !initialSessionPhotos.isEmpty {
+            let seeded = Self.sessionPlaceholderPhotos(initialSessionPhotos, members: members)
+            _allPhotos = State(initialValue: seeded.photos)
+            _photoMemberAssignment = State(initialValue: seeded.assignments)
+            _slots = State(initialValue: Self.autoPairedSlots(from: seeded.photos, members: members))
+        }
     }
 
     private var pairedCount: Int {
@@ -359,6 +369,21 @@ struct BatchPairingView: View {
     /// 是否所有匯入照片皆已在背景完成拍立得邊界偵測與透視預裁切
     private var allBoundariesDetected: Bool {
         !allPhotos.isEmpty && boundaryDetectedPhotoCount == allPhotos.count
+    }
+
+    /// 快門 JPEG 都已轉成可顯示的圖。未完成前不能歸檔，避免寫入空白占位圖。
+    private var sessionImagesReady: Bool {
+        allPhotos.allSatisfy(\.isImageReady)
+    }
+
+    private var archiveButtonTitle: String {
+        if !sessionImagesReady {
+            return L10n.tr("讀取中", "読み込み中")
+        }
+        if allBoundariesDetected {
+            return L10n.tr("歸檔 · \(slots.count) 張", "保存 · \(slots.count) 枚")
+        }
+        return L10n.tr("偵測中 \(boundaryDetectedPhotoCount)/\(allPhotos.count) · 歸檔", "検出中 \(boundaryDetectedPhotoCount)/\(allPhotos.count) · 保存")
     }
 
     /// 上方多層多選成員選擇器目前選中的成員摘要字串
@@ -938,9 +963,7 @@ struct BatchPairingView: View {
         ZStack {
             // 1. 右後扇形展開：背面卡片 (Back Card — 向右旋轉展開如撲克牌，點選本體放大預覽背面)
             ZStack(alignment: .topTrailing) {
-                Image(uiImage: backPhoto.displayUIImage)
-                    .resizable()
-                    .scaledToFill()
+                stagingPhotoContent(backPhoto)
                     .frame(width: 90, height: 136)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(
@@ -976,9 +999,7 @@ struct BatchPairingView: View {
 
             // 2. 左前扇形展開：正面卡片 (Front Card — 向左微傾疊於前側，點選本體放大預覽正面)
             ZStack(alignment: .topLeading) {
-                Image(uiImage: frontPhoto.displayUIImage)
-                    .resizable()
-                    .scaledToFill()
+                stagingPhotoContent(frontPhoto)
                     .frame(width: 92, height: 138)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(
@@ -1132,9 +1153,7 @@ struct BatchPairingView: View {
         isSelectedFirst: Bool
     ) -> some View {
         ZStack {
-            Image(uiImage: photo.displayUIImage)
-                .resizable()
-                .scaledToFill()
+            stagingPhotoContent(photo)
                 .frame(width: 96, height: 144)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
@@ -1643,10 +1662,7 @@ struct BatchPairingView: View {
                                 dismissMagnifiedPreview()
                             }
 
-                        Image(uiImage: activePhoto.displayUIImage)
-                            .resizable()
-                            .interpolation(.high)
-                            .scaledToFit()
+                        magnifiedPhotoContent(activePhoto)
                             .overlay {
                                 ChekiWatermarkOverlayView(compact: false)
                             }
@@ -1894,6 +1910,47 @@ struct BatchPairingView: View {
 
     // MARK: - 5. 空白與載入狀態視圖
 
+    @ViewBuilder
+    private func stagingPhotoContent(_ photo: StagingChekiPhoto) -> some View {
+        if photo.isImageReady {
+            Image(uiImage: photo.displayUIImage)
+                .resizable()
+                .scaledToFill()
+        } else {
+            photoLoadingFace
+        }
+    }
+
+    @ViewBuilder
+    private func magnifiedPhotoContent(_ photo: StagingChekiPhoto) -> some View {
+        if photo.isImageReady {
+            Image(uiImage: photo.displayUIImage)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+        } else {
+            photoLoadingFace
+                .frame(maxWidth: .infinity)
+                .frame(height: 360)
+        }
+    }
+
+    private var photoLoadingFace: some View {
+        ZStack {
+            Color(.secondarySystemFill)
+            VStack(spacing: 6) {
+                ProgressView()
+                Text(L10n.tr("讀取中", "読み込み中"))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .padding(4)
+        }
+        .accessibilityLabel(L10n.tr("讀取中", "読み込み中"))
+    }
+
     private var loadingPlaceholderView: some View {
         VStack(spacing: 14) {
             Spacer()
@@ -1993,28 +2050,24 @@ struct BatchPairingView: View {
                     Task { await executeBatchProcessing() }
                 } label: {
                     HStack(spacing: 6) {
-                        if !allBoundariesDetected {
+                        if !sessionImagesReady || !allBoundariesDetected {
                             ProgressView()
                                 .controlSize(.mini)
                                 .tint(.white)
                         }
-                        Text(
-                            allBoundariesDetected
-                                ? L10n.tr("歸檔 · \(slots.count) 張", "保存 · \(slots.count) 枚")
-                                : L10n.tr("偵測中 \(boundaryDetectedPhotoCount)/\(allPhotos.count) · 歸檔", "検出中 \(boundaryDetectedPhotoCount)/\(allPhotos.count) · 保存")
-                        )
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        Text(archiveButtonTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8.5)
                     .background(
-                        (slots.isEmpty || isProcessingBatch) ? Color.blue.opacity(0.4) : Color.blue,
+                        (slots.isEmpty || isProcessingBatch || !sessionImagesReady) ? Color.blue.opacity(0.4) : Color.blue,
                         in: Capsule()
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(slots.isEmpty || isProcessingBatch)
+                .disabled(slots.isEmpty || isProcessingBatch || !sessionImagesReady)
             }
         }
         .padding(.horizontal, 16)
@@ -2560,46 +2613,146 @@ struct BatchPairingView: View {
     }
 
     /// 把本次拍攝的快門照片送進與相簿讀入相同的配對工作台（正反面分類、裁切、日期、成員）。
+    /// 占位卡片在頁面出現時就在，JPEG 轉圖放在背景，圖片區先顯示讀取中。
     @MainActor
     private func appendSessionPhotos(_ photos: [CameraSessionPhoto]) async {
         let existingIDs = Set(allPhotos.map(\.id))
         let incoming = photos.filter { !existingIDs.contains($0.id) }
-        guard !incoming.isEmpty else { return }
 
-        isLoadingPhotos = true
-        defer { isLoadingPhotos = false }
+        if !incoming.isEmpty {
+            var newlyLoaded: [StagingChekiPhoto] = []
+            var nextSequence = (allPhotos.map(\.sequenceNumber).max() ?? 0) + 1
+            let seeded = Self.sessionPlaceholderPhotos(incoming, members: [], startingSequence: nextSequence)
+            for staging in seeded.photos {
+                let initialAssigned = !selectedTargetMembers.isEmpty
+                    ? selectedTargetMembers
+                    : (defaultFallbackMember.map { [$0] } ?? [])
+                if !initialAssigned.isEmpty {
+                    photoMemberAssignment[staging.id] = initialAssigned
+                }
+                newlyLoaded.append(staging)
+            }
+            allPhotos.append(contentsOf: newlyLoaded)
+            applyPairingMode(pairingMode)
+        }
 
-        var newlyLoaded: [StagingChekiPhoto] = []
-        var nextSequence = (allPhotos.map(\.sequenceNumber).max() ?? 0) + 1
+        await Task.yield()
+        await decodePendingSessionImages(photos)
+    }
 
-        for photo in incoming {
-            guard let rawImage = UIImage(data: photo.imageData)?.normalizedImage else { continue }
+    private static func sessionPlaceholderPhotos(
+        _ photos: [CameraSessionPhoto],
+        members: [IdolMember],
+        startingSequence: Int = 1
+    ) -> (photos: [StagingChekiPhoto], assignments: [UUID: [IdolMember]]) {
+        var staged: [StagingChekiPhoto] = []
+        var assignments: [UUID: [IdolMember]] = [:]
+        for (offset, photo) in photos.enumerated() {
+            let sequence = startingSequence + offset
             let staging = StagingChekiPhoto(
                 id: photo.id,
-                sequenceNumber: nextSequence,
-                title: "拍攝相片 \(nextSequence)",
+                sequenceNumber: sequence,
+                title: "拍攝相片 \(sequence)",
                 assetIdentifier: nil,
                 imageData: photo.imageData,
-                uiImage: rawImage,
+                uiImage: UIImage(),
                 detectedSide: .analyzing,
                 detectionNote: "Vision 背景偵測邊界中…",
-                isDetectingBoundary: true,
+                isDetectingBoundary: false,
+                isImageReady: false,
                 hasCompletedBoundaryDetection: false,
                 shutterDate: photo.shutterDate
             )
-            let initialAssigned = !selectedTargetMembers.isEmpty
-                ? selectedTargetMembers
-                : (defaultFallbackMember.map { [$0] } ?? [])
-            photoMemberAssignment[staging.id] = initialAssigned
-            newlyLoaded.append(staging)
-            nextSequence += 1
+            staged.append(staging)
+            if !members.isEmpty {
+                assignments[staging.id] = members
+            }
         }
+        return (staged, assignments)
+    }
 
-        guard !newlyLoaded.isEmpty else { return }
-        allPhotos.append(contentsOf: newlyLoaded)
-        applyPairingMode(pairingMode)
-        isLoadingPhotos = false
-        await analyzePhotoSides(for: newlyLoaded.map(\.id))
+    /// 頁面第一幀就用自動配對排出占位卡片，不必等 `.task`。
+    private static func autoPairedSlots(
+        from photos: [StagingChekiPhoto],
+        members: [IdolMember]
+    ) -> [ChekiPairingSlot] {
+        var newSlots: [ChekiPairingSlot] = []
+        var index = 0
+        while index < photos.count {
+            let first = photos[index]
+            let back = index + 1 < photos.count ? photos[index + 1] : nil
+            newSlots.append(
+                ChekiPairingSlot(
+                    id: UUID(),
+                    frontPhoto: first,
+                    backPhoto: back,
+                    assignedMembers: members
+                )
+            )
+            index += back == nil ? 1 : 2
+        }
+        return newSlots
+    }
+
+    @MainActor
+    private func decodePendingSessionImages(_ photos: [CameraSessionPhoto]) async {
+        let pending = photos.filter { photo in
+            guard let existing = allPhotos.first(where: { $0.id == photo.id }) else { return false }
+            return !existing.isImageReady
+        }
+        guard !pending.isEmpty else { return }
+
+        let payloads = pending.map { (id: $0.id, data: $0.imageData) }
+        let decoded = await Task.detached(priority: .userInitiated) { () -> [UUID: UIImage] in
+            var images: [UUID: UIImage] = [:]
+            for payload in payloads {
+                if let image = UIImage(data: payload.data)?.normalizedImage {
+                    images[payload.id] = image
+                }
+            }
+            return images
+        }.value
+
+        var readyIDs: [UUID] = []
+        var failedIDs = Set<UUID>()
+        for payload in payloads {
+            if let image = decoded[payload.id] {
+                installDecodedSessionImage(id: payload.id, image: image)
+                readyIDs.append(payload.id)
+            } else {
+                failedIDs.insert(payload.id)
+            }
+        }
+        if !failedIDs.isEmpty {
+            allPhotos.removeAll { failedIDs.contains($0.id) }
+            for id in failedIDs {
+                photoMemberAssignment[id] = nil
+            }
+            applyPairingMode(pairingMode)
+        }
+        guard !readyIDs.isEmpty else { return }
+        await analyzePhotoSides(for: readyIDs)
+    }
+
+    private func installDecodedSessionImage(id: UUID, image: UIImage) {
+        if let idx = allPhotos.firstIndex(where: { $0.id == id }), !allPhotos[idx].isImageReady {
+            allPhotos[idx].uiImage = image
+            allPhotos[idx].isImageReady = true
+            allPhotos[idx].contentRevision += 1
+        }
+        for i in slots.indices {
+            if slots[i].frontPhoto.id == id, !slots[i].frontPhoto.isImageReady {
+                slots[i].frontPhoto.uiImage = image
+                slots[i].frontPhoto.isImageReady = true
+                slots[i].frontPhoto.contentRevision += 1
+            }
+            if var back = slots[i].backPhoto, back.id == id, !back.isImageReady {
+                back.uiImage = image
+                back.isImageReady = true
+                back.contentRevision += 1
+                slots[i].backPhoto = back
+            }
+        }
     }
 
     /// 在進入工作台頁面時即於背景依序完成：
@@ -2618,7 +2771,10 @@ struct BatchPairingView: View {
 
         for photoID in targetIDs {
             guard let photo = findPhoto(by: photoID),
-                  let cgImage = photo.uiImage.cgImage else { continue }
+                  photo.isImageReady,
+                  let cgImage = photo.uiImage.cgImage,
+                  cgImage.width > 1,
+                  cgImage.height > 1 else { continue }
 
             setPhotoDetectingBoundary(id: photoID, isDetecting: true)
 
@@ -2988,7 +3144,7 @@ struct BatchPairingView: View {
 
     @MainActor
     private func executeBatchProcessing() async {
-        guard !slots.isEmpty else { return }
+        guard !slots.isEmpty, sessionImagesReady else { return }
         isProcessingBatch = true
         processedCount = 0
         totalToProcess = slots.count
