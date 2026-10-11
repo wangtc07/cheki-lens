@@ -10,8 +10,8 @@
 - **最後更新時間**：2026-10-11
 - **當前所屬階段**：Phase 6.6 — UI／UX 一致性重整 (iOS 26 UI Consistency Pass)
 - **當前分支**：`main`
-- **當前進行中任務**：已完成 **Task 6.6.9**。相冊與成員頁長按後拖動可排序；選單仍可刪除與多選。雙指可回到 2 欄，頂部切換會在上滑時漸變、拉回頂端再出現，左右滑動會保留各自位置。
-- **最新穩定 Git Commit**：fix(albums): 長按相簿可拖動排序
+- **當前進行中任務**：已完成相冊滑動多選。團體頁、成員頁、團體內成員頁在「選擇」時，與全部頁相同：點一下切換，橫向或斜向滑動做範圍選取。準則補在 `docs/UI_AGENT_GUIDELINES.md` §6.1（A12）。先前沒做，是因為 §1 只寫「相同手勢」並指向 §6，而 §6 只有動畫、§7 只規定縮放，§9 沒有這項。
+- **最新穩定 Git Commit**：fix(albums): 相簿選擇可滑動多選
 - **下一動執行指示**：執行 **Task 6.3**（App 圖示、啟動畫面與 App Store 截圖）。開工前先讀 `docs/PROGRESS.md`。
 
 ---
@@ -338,7 +338,7 @@
 
 ### 階段 6.6：UI／UX 一致性重整 (Phase 6.6: iOS 26 UI Consistency Pass)
 
-*規範來源：`docs/UI_AGENT_GUIDELINES.md`（所有 UI 任務動手前必讀；偏差清單見該文件 §9，編號 A1～A11）*
+*規範來源：`docs/UI_AGENT_GUIDELINES.md`（所有 UI 任務動手前必讀；偏差清單見該文件 §9，編號 A1～A12）*
 *原則：遵循 Apple HIG／iOS 26 Liquid Glass，但不強制全透明——需要辨識狀態處使用語意色；跨畫面按鈕尺寸／位置一致；縮放手勢統一為「跟手縮放，放開才定位」。*
 
 - [x] **Task 6.6.0**: 全面 UI 稽核並建立 UI 修正代理人規範文件（`docs/UI_AGENT_GUIDELINES.md`；並於 `AGENTS.md`、`.cursorrules`、`CLAUDE.md` 加入指標）
@@ -351,6 +351,7 @@
 - [x] **Task 6.6.7**: 抽出 `GridPinchZoom`（以成員頁 `AlbumHeroDetailView.pinchZoomGesture` 為基準），「全部」頁改為跟手縮放、放開才定位，成員頁改由共用元件驅動（對應 A9。門檻單元測試 3 項通過。iPhone 12 mini：預設 3 欄，放大放開後為 1 欄）
 - [x] **Task 6.6.8**: 「相冊」頁（團體／成員封面磚）新增雙指縮放並沿用 `GridPinchZoom`，欄數偏好以 `@AppStorage` 保存並與漢堡選單同步（對應 A10。欄數 1／2／3，預設 2，鍵 `albumCoverColumnCount`。iPhone 12 mini：選單設 2 欄後，放大放開為 1 欄，且沒有誤開相冊）
 - [x] **Task 6.6.9 (驗收)**: 依規範文件 §11 逐項驗收（繁中／日文、淺色／深色、iPhone 12 mini／大螢幕、跨畫面按鈕無跳動），並更新 §9 全部標示完成（iPhone 12 mini 與 iPhone 17 Pro Max：日文淺色、繁中深色下右上圓鈕 36×36 且同一水平線。橫向未另拍截圖）
+- [x] **後續修正**: 相冊「選擇」改為與全部頁相同的滑動多選（`ApplePhotosDragSelectOverlay`，格狀與清單皆用畫面座標命中）。並在 UI 準則 §6.1 寫明：多選必須沿用這個覆蓋層，不能只做點選（A12）
 
 ---
 

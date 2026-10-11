@@ -862,6 +862,27 @@ private struct AlbumSelectionBadge: View {
     }
 }
 
+/// 相冊封面的滑動多選。格狀與清單都用已量到的畫面座標命中，手勢規則與全部頁相同。
+private struct AlbumDragSelectOverlay: View {
+    let itemIDs: [UUID]
+    let frames: [UUID: CGRect]
+    @Binding var selectedItemIDs: Set<UUID>
+
+    var body: some View {
+        if !itemIDs.isEmpty {
+            ApplePhotosDragSelectOverlay(
+                itemIDs: itemIDs,
+                columnCount: 1,
+                spacing: 0,
+                cellAspectRatio: 1,
+                globalFrames: frames,
+                usesFrames: true,
+                selectedItemIDs: $selectedItemIDs
+            )
+        }
+    }
+}
+
 // MARK: - 2. AlbumsRootView (底部左側 Tab 2：「相冊」— 仿照 Apple 原生相簿設計)
 
 /// Apple 原生相簿風格的「相冊」視圖
@@ -1354,6 +1375,15 @@ struct AlbumsRootView: View {
                 }
             }
             .padding(.horizontal, 16)
+            .overlay {
+                if isSelectingAlbums {
+                    AlbumDragSelectOverlay(
+                        itemIDs: sortedGroups.map(\.id),
+                        frames: groupFrames,
+                        selectedItemIDs: $selectedGroupIDs
+                    )
+                }
+            }
         } else {
             LazyVStack(spacing: 10) {
                 ForEach(sortedGroups) { group in
@@ -1365,6 +1395,15 @@ struct AlbumsRootView: View {
                 }
             }
             .padding(.horizontal, 16)
+            .overlay {
+                if isSelectingAlbums {
+                    AlbumDragSelectOverlay(
+                        itemIDs: sortedGroups.map(\.id),
+                        frames: groupFrames,
+                        selectedItemIDs: $selectedGroupIDs
+                    )
+                }
+            }
         }
     }
 
@@ -1379,9 +1418,7 @@ struct AlbumsRootView: View {
         )
         Group {
             if isSelectingAlbums {
-                selectableAlbumCard(card, isSelected: selectedGroupIDs.contains(group.id), isList: isList) {
-                    toggleAlbumSelection(&selectedGroupIDs, id: group.id)
-                }
+                selectableAlbumCard(card, isSelected: selectedGroupIDs.contains(group.id), isList: isList)
             } else {
                 NavigationLink(value: group) { card }
                     .buttonStyle(.plain)
@@ -1455,6 +1492,15 @@ struct AlbumsRootView: View {
                 }
             }
             .padding(.horizontal, 16)
+            .overlay {
+                if isSelectingAlbums {
+                    AlbumDragSelectOverlay(
+                        itemIDs: allExpandedMembers.map(\.id),
+                        frames: memberFrames,
+                        selectedItemIDs: $selectedMemberIDs
+                    )
+                }
+            }
         } else {
             LazyVStack(spacing: 10) {
                 ForEach(allExpandedMembers) { member in
@@ -1466,6 +1512,15 @@ struct AlbumsRootView: View {
                 }
             }
             .padding(.horizontal, 16)
+            .overlay {
+                if isSelectingAlbums {
+                    AlbumDragSelectOverlay(
+                        itemIDs: allExpandedMembers.map(\.id),
+                        frames: memberFrames,
+                        selectedItemIDs: $selectedMemberIDs
+                    )
+                }
+            }
         }
     }
 
@@ -1480,9 +1535,7 @@ struct AlbumsRootView: View {
         )
         Group {
             if isSelectingAlbums {
-                selectableAlbumCard(card, isSelected: selectedMemberIDs.contains(member.id), isList: isList) {
-                    toggleAlbumSelection(&selectedMemberIDs, id: member.id)
-                }
+                selectableAlbumCard(card, isSelected: selectedMemberIDs.contains(member.id), isList: isList)
             } else {
                 NavigationLink(value: member) { card }
                     .buttonStyle(.plain)
@@ -1584,25 +1637,13 @@ struct AlbumsRootView: View {
     private func selectableAlbumCard<Card: View>(
         _ card: Card,
         isSelected: Bool,
-        isList: Bool,
-        action: @escaping () -> Void
+        isList: Bool
     ) -> some View {
-        Button(action: action) {
-            card.overlay(alignment: isList ? .trailing : .bottomTrailing) {
-                AlbumSelectionBadge(isSelected: isSelected)
-                    .padding(.trailing, isList ? 8 : 0)
-            }
+        card.overlay(alignment: isList ? .trailing : .bottomTrailing) {
+            AlbumSelectionBadge(isSelected: isSelected)
+                .padding(.trailing, isList ? 8 : 0)
         }
-        .buttonStyle(.plain)
-    }
-
-    private func toggleAlbumSelection(_ selection: inout Set<UUID>, id: UUID) {
-        UISelectionFeedbackGenerator().selectionChanged()
-        if selection.contains(id) {
-            selection.remove(id)
-        } else {
-            selection.insert(id)
-        }
+        .allowsHitTesting(false)
     }
 
     private func exitAlbumSelection() {
@@ -2118,6 +2159,15 @@ private struct GroupMembersAlbumView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 28)
+                .overlay {
+                    if isSelectingAlbums {
+                        AlbumDragSelectOverlay(
+                            itemIDs: displayedMembers.map(\.id),
+                            frames: memberFrames,
+                            selectedItemIDs: $selectedMemberIDs
+                        )
+                    }
+                }
             } else {
                 LazyVStack(spacing: 10) {
                     ForEach(displayedMembers) { member in
@@ -2127,6 +2177,15 @@ private struct GroupMembersAlbumView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 28)
+                .overlay {
+                    if isSelectingAlbums {
+                        AlbumDragSelectOverlay(
+                            itemIDs: displayedMembers.map(\.id),
+                            frames: memberFrames,
+                            selectedItemIDs: $selectedMemberIDs
+                        )
+                    }
+                }
             }
         }
         .background {
@@ -2351,20 +2410,11 @@ private struct GroupMembersAlbumView: View {
         }
         Group {
             if isSelectingAlbums {
-                Button {
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    if selectedMemberIDs.contains(member.id) {
-                        selectedMemberIDs.remove(member.id)
-                    } else {
-                        selectedMemberIDs.insert(member.id)
-                    }
-                } label: {
-                    card.overlay(alignment: isList ? .trailing : .bottomTrailing) {
-                        AlbumSelectionBadge(isSelected: selectedMemberIDs.contains(member.id))
-                            .padding(.trailing, isList ? 8 : 0)
-                    }
+                card.overlay(alignment: isList ? .trailing : .bottomTrailing) {
+                    AlbumSelectionBadge(isSelected: selectedMemberIDs.contains(member.id))
+                        .padding(.trailing, isList ? 8 : 0)
                 }
-                .buttonStyle(.plain)
+                .allowsHitTesting(false)
             } else {
                 NavigationLink(value: member) { card }
                     .buttonStyle(.plain)
@@ -4163,19 +4213,21 @@ private struct ApplePhotosSelectionBottomBar: View {
     }
 }
 
-/// 仿照 Apple 原生相簿 (Photos.app) 的拖選多選手勢覆蓋層：
-/// - 單指點擊：切換單張拍立得的選取狀態
-/// - 單指橫向/斜向滑動：自動鎖定當前捲軸並進入連續範圍拖選（可接著跨越多列上下滑動批次勾選或取消勾選）
-/// - 單指垂直滑動：不攔截手勢，交由外層 `ScrollView` 原生順暢捲動
-private struct ApplePhotosDragSelectOverlay: UIViewRepresentable {
-    let itemIDs: [PersistentIdentifier]
+/// 仿照 Apple 原生相簿的拖選多選覆蓋層。照片格用欄數與長寬比命中；相冊封面傳 `globalFrames`。
+/// - 單指點擊：切換該格的選取
+/// - 單指橫向或斜向滑動：從起點格到目前格做範圍選取或取消
+/// - 單指垂直滑動：不攔截，交給外層 `ScrollView`
+private struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
+    let itemIDs: [ID]
     let columnCount: Int
     let spacing: CGFloat
     let cellAspectRatio: CGFloat
-    @Binding var selectedItemIDs: Set<PersistentIdentifier>
+    var globalFrames: [ID: CGRect] = [:]
+    var usesFrames: Bool = false
+    @Binding var selectedItemIDs: Set<ID>
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
+        Coordinator()
     }
 
     func makeUIView(context: Context) -> UIView {
@@ -4203,32 +4255,60 @@ private struct ApplePhotosDragSelectOverlay: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.parent = self
+        let coordinator = context.coordinator
+        coordinator.itemIDs = itemIDs.map(AnyHashable.init)
+        coordinator.frames = Dictionary(uniqueKeysWithValues: globalFrames.map { (AnyHashable($0.key), $0.value) })
+        coordinator.usesFrames = usesFrames
+        coordinator.columnCount = columnCount
+        coordinator.spacing = spacing
+        coordinator.cellAspectRatio = cellAspectRatio
+        coordinator.selected = Set(selectedItemIDs.map(AnyHashable.init))
+        coordinator.onChange = { updated in
+            var next = Set<ID>()
+            next.reserveCapacity(updated.count)
+            for value in updated {
+                if let id = value.base as? ID {
+                    next.insert(id)
+                }
+            }
+            if next != selectedItemIDs {
+                selectedItemIDs = next
+            }
+        }
     }
 
     @MainActor
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var parent: ApplePhotosDragSelectOverlay
+        var itemIDs: [AnyHashable] = []
+        var frames: [AnyHashable: CGRect] = [:]
+        var usesFrames = false
+        var columnCount = 1
+        var spacing: CGFloat = 0
+        var cellAspectRatio: CGFloat = 1
+        var selected: Set<AnyHashable> = []
+        var onChange: (Set<AnyHashable>) -> Void = { _ in }
 
         private var dragStartIndex: Int?
         private var lastDraggedIndex: Int?
         private var dragIsSelecting: Bool = true
-        private var dragBaselineSelection: Set<PersistentIdentifier> = []
+        private var dragBaselineSelection: Set<AnyHashable> = []
         private let feedbackGenerator = UISelectionFeedbackGenerator()
 
-        init(parent: ApplePhotosDragSelectOverlay) {
-            self.parent = parent
+        private func itemIndex(at point: CGPoint, in view: UIView, clampToBounds: Bool) -> Int? {
+            if usesFrames {
+                return frameIndex(at: point, in: view, clampToBounds: clampToBounds)
+            }
+            return geometricIndex(at: point, in: view.bounds.size, clampToBounds: clampToBounds)
         }
 
-        private func itemIndex(at point: CGPoint, in boundsSize: CGSize, clampToBounds: Bool) -> Int? {
-            let count = parent.itemIDs.count
+        private func geometricIndex(at point: CGPoint, in boundsSize: CGSize, clampToBounds: Bool) -> Int? {
+            let count = itemIDs.count
             guard count > 0, boundsSize.width > 1 else { return nil }
 
-            let cols = max(1, parent.columnCount)
-            let spacing = parent.spacing
+            let cols = max(1, columnCount)
             let totalHSpacing = CGFloat(cols - 1) * spacing
             let cellWidth = max(1, (boundsSize.width - totalHSpacing) / CGFloat(cols))
-            let cellHeight = max(1, cellWidth / max(0.1, parent.cellAspectRatio))
+            let cellHeight = max(1, cellWidth / max(0.1, cellAspectRatio))
 
             let strideX = cellWidth + spacing
             let strideY = cellHeight + spacing
@@ -4249,24 +4329,62 @@ private struct ApplePhotosDragSelectOverlay: UIViewRepresentable {
             }
         }
 
+        private func frameIndex(at point: CGPoint, in view: UIView, clampToBounds: Bool) -> Int? {
+            guard !itemIDs.isEmpty else { return nil }
+            let global = globalPoint(point, in: view)
+            for (index, id) in itemIDs.enumerated() {
+                if let frame = frames[id], frame.contains(global) {
+                    return index
+                }
+            }
+            guard clampToBounds else { return nil }
+            var best: (index: Int, distance: CGFloat)?
+            for (index, id) in itemIDs.enumerated() {
+                guard let frame = frames[id] else { continue }
+                let dx = max(frame.minX - global.x, 0, global.x - frame.maxX)
+                let dy = max(frame.minY - global.y, 0, global.y - frame.maxY)
+                let distance = dx * dx + dy * dy
+                if best == nil || distance < best!.distance {
+                    best = (index, distance)
+                }
+            }
+            return best?.index
+        }
+
+        private func globalPoint(_ point: CGPoint, in view: UIView) -> CGPoint {
+            guard let window = view.window else {
+                return view.convert(point, to: nil)
+            }
+            return window.convert(view.convert(point, to: window), to: nil)
+        }
+
+        private func publish(_ updated: Set<AnyHashable>) {
+            guard updated != selected else { return }
+            selected = updated
+            onChange(updated)
+            feedbackGenerator.selectionChanged()
+            feedbackGenerator.prepare()
+        }
+
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended,
                   let view = gesture.view,
-                  let index = itemIndex(at: gesture.location(in: view), in: view.bounds.size, clampToBounds: false) else {
+                  let index = itemIndex(at: gesture.location(in: view), in: view, clampToBounds: false),
+                  itemIDs.indices.contains(index) else {
                 return
             }
-            let id = parent.itemIDs[index]
-            feedbackGenerator.selectionChanged()
-            if parent.selectedItemIDs.contains(id) {
-                parent.selectedItemIDs.remove(id)
+            let id = itemIDs[index]
+            var updated = selected
+            if updated.contains(id) {
+                updated.remove(id)
             } else {
-                parent.selectedItemIDs.insert(id)
+                updated.insert(id)
             }
+            publish(updated)
         }
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard let view = gesture.view else { return }
-            let boundsSize = view.bounds.size
 
             switch gesture.state {
             case .began:
@@ -4276,19 +4394,19 @@ private struct ApplePhotosDragSelectOverlay: UIViewRepresentable {
                     x: currentPoint.x - translation.x,
                     y: currentPoint.y - translation.y
                 )
-                guard let startIdx = itemIndex(at: touchDownPoint, in: boundsSize, clampToBounds: true) else {
+                guard let startIdx = itemIndex(at: touchDownPoint, in: view, clampToBounds: true),
+                      itemIDs.indices.contains(startIdx) else {
                     return
                 }
                 dragStartIndex = startIdx
                 lastDraggedIndex = nil
-                let startID = parent.itemIDs[startIdx]
-                dragIsSelecting = !parent.selectedItemIDs.contains(startID)
-                dragBaselineSelection = parent.selectedItemIDs
+                dragIsSelecting = !selected.contains(itemIDs[startIdx])
+                dragBaselineSelection = selected
                 feedbackGenerator.prepare()
-                applyDragSelection(at: currentPoint, in: boundsSize)
+                applyDragSelection(at: currentPoint, in: view)
 
             case .changed:
-                applyDragSelection(at: gesture.location(in: view), in: boundsSize)
+                applyDragSelection(at: gesture.location(in: view), in: view)
 
             case .ended, .cancelled, .failed:
                 dragStartIndex = nil
@@ -4300,9 +4418,9 @@ private struct ApplePhotosDragSelectOverlay: UIViewRepresentable {
             }
         }
 
-        private func applyDragSelection(at point: CGPoint, in boundsSize: CGSize) {
+        private func applyDragSelection(at point: CGPoint, in view: UIView) {
             guard let startIdx = dragStartIndex,
-                  let currentIdx = itemIndex(at: point, in: boundsSize, clampToBounds: true) else {
+                  let currentIdx = itemIndex(at: point, in: view, clampToBounds: true) else {
                 return
             }
             guard currentIdx != lastDraggedIndex else { return }
@@ -4312,8 +4430,8 @@ private struct ApplePhotosDragSelectOverlay: UIViewRepresentable {
             let upper = max(startIdx, currentIdx)
             var updated = dragBaselineSelection
 
-            for i in lower...upper where parent.itemIDs.indices.contains(i) {
-                let id = parent.itemIDs[i]
+            for index in lower...upper where itemIDs.indices.contains(index) {
+                let id = itemIDs[index]
                 if dragIsSelecting {
                     updated.insert(id)
                 } else {
@@ -4321,11 +4439,7 @@ private struct ApplePhotosDragSelectOverlay: UIViewRepresentable {
                 }
             }
 
-            if updated != parent.selectedItemIDs {
-                parent.selectedItemIDs = updated
-                feedbackGenerator.selectionChanged()
-                feedbackGenerator.prepare()
-            }
+            publish(updated)
         }
 
         // MARK: UIGestureRecognizerDelegate
