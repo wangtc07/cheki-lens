@@ -10,9 +10,9 @@
 - **最後更新時間**：2026-10-11
 - **當前所屬階段**：Phase 6.6 — UI／UX 一致性重整 (iOS 26 UI Consistency Pass)
 - **當前分支**：`main`
-- **當前進行中任務**：已完成 **Task 6.6.3**。批次預覽與裁切頁的關閉、底部操作改為 44 pt 玻璃。iPhone 12 mini：預覽關閉／裁切／旋轉皆 44×44，日期膠囊同高且同一水平線；裁切頁關閉鈕 44×44、底部旋轉鈕高 44。
-- **最新穩定 Git Commit**：feat(UI): 完成 Task 6.6.3 預覽與裁切 chrome 對齊 44pt
-- **下一動執行指示**：執行 **Task 6.6.4**（相機閃光燈開啟改黃色，頂部圖示改 44 pt 玻璃）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md`。
+- **當前進行中任務**：已完成 **Task 6.6.4**。相機閃光燈關閉為白色、自動／開啟為黃色；九宮格與已調整曝光也用黃色。頂部圖示改為 44 pt 玻璃。iPhone 12 mini：閃光燈、九宮格、關閉皆 44×44 且同一水平線。
+- **最新穩定 Git Commit**：feat(UI): 完成 Task 6.6.4 相機狀態色與 44pt 頂部玻璃
+- **下一動執行指示**：執行 **Task 6.6.5**（單張檢視返回鈕與選取列統一 44 pt）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md`。
 
 ---
 
@@ -345,7 +345,7 @@
 - [x] **Task 6.6.1**: 建立 `ChromeMetrics`（圓鈕／膠囊高度 44 pt、邊距、圖示字級）與共用 `ChromeCircleButton`、`ChromeCapsuleButton`、`CloseToolbarButton`（xmark）、`ConfirmToolbarButton`（checkmark）；將 4 套重複玻璃修飾器合併為 `Chrome.swift` 單一來源（對應 A1。呼叫端尺寸維持原值，iPhone 12 mini 上 `chrome.library.camera` 與 `chrome.library.filter` 皆為 36×36 pt、同一水平線）
 - [x] **Task 6.6.2**: 全 App 工具列／chrome 的「取消／完成」文字改為 `xmark`／`checkmark` 圖示，消除日文過長導致標題不置中（對應 A2；alert／confirmationDialog 與「選擇套用」內容按鈕保留文字。iPhone 12 mini 日文：設定打勾鈕寬 ≤ 52 pt，新增成員 sheet 標題與導覽列中線誤差 ≤ 12 pt）
 - [x] **Task 6.6.3**: 批次工作台 ↔ 單張預覽 ↔ 裁切編輯頁的頂部與底部 chrome 對齊：關閉鈕與底部圓鈕／膠囊改為 44 pt 液態玻璃，裁切頁底部改為同高玻璃膠囊（對應 A3、A4、A5。iPhone 12 mini frame：預覽關閉、裁切、旋轉 44×44，日期膠囊同高且 midY 誤差 ≤ 1 pt；裁切關閉 44×44、底部旋轉高 44）
-- [ ] **Task 6.6.4**: 相機畫面狀態色與頂部 chrome：閃光燈／補光燈開啟為黃色、九宮格與進階控制啟用狀態不再只靠透明度、頂部圖示統一 44 pt 玻璃（對應 A6）
+- [x] **Task 6.6.4**: 相機畫面狀態色與頂部 chrome：閃光燈／補光燈開啟為黃色、九宮格與進階控制啟用狀態不再只靠透明度、頂部圖示統一 44 pt 玻璃（對應 A6。iPhone 12 mini：閃光燈、九宮格、關閉皆 44×44、同一水平線；關閉為白、自動為黃）
 - [ ] **Task 6.6.5**: 單張檢視返回鈕與底部工具列、選取模式底部列統一為 44 pt（移除橫向 30 pt 與 48 pt 例外）（對應 A7、A8）
 - [ ] **Task 6.6.6**: 建立 `ChekiMotion` 動畫 token 並取代各畫面散寫的 spring／snappy 參數、支援「減少動態效果」（對應 A11）
 - [ ] **Task 6.6.7**: 抽出 `GridPinchZoom`（以成員頁 `AlbumHeroDetailView.pinchZoomGesture` 為基準），「全部」頁改為跟手縮放、放開才定位，成員頁改由共用元件驅動（對應 A9）

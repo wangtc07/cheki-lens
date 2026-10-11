@@ -853,8 +853,10 @@ struct CameraScannerView: View {
     // MARK: - 1. Top Camera Control Bar (Apple 原生相機頂部圖示列)
 
     private var topCameraControlBar: some View {
-        HStack(spacing: 18) {
-            // 左側：閃光燈 / 常亮補光燈切換
+        let exposureActive = abs(camera.exposureBias) > 0.05
+        let flashActive = camera.flashSetting != .off
+
+        return HStack(spacing: ChromeMetrics.groupSpacing) {
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 let nextFlash = camera.flashSetting.next()
@@ -866,13 +868,14 @@ struct CameraScannerView: View {
                 }
             } label: {
                 Image(systemName: camera.flashSetting.symbolName)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(camera.flashSetting == .off ? .white.opacity(0.55) : .white)
-                    .frame(width: 34, height: 34)
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
+                    .foregroundStyle(flashActive ? Color.yellow : Color.white)
+                    .liquidGlassCircle(size: ChromeMetrics.circle, fallbackStroke: .white)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("閃光燈：\(camera.flashSetting.label)")
+            .accessibilityIdentifier("chrome.camera.flash")
 
-            // 左側：曝光補償指示膠囊（如 露出 -0.3）
             Button {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
                     showSecondaryControlsDrawer.toggle()
@@ -883,34 +886,38 @@ struct CameraScannerView: View {
                         .font(.system(size: 14, weight: .semibold))
                     Text(String(format: "%+.1f", camera.exposureBias))
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .lineLimit(1)
                 }
-                .foregroundStyle(abs(camera.exposureBias) > 0.05 ? .white : .white.opacity(0.7))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .cameraLiquidGlassCapsule()
+                .foregroundStyle(exposureActive ? Color.yellow : Color.white)
+                .liquidGlassCapsule(
+                    height: ChromeMetrics.capsuleHeight,
+                    horizontalPadding: 10,
+                    fallbackStroke: .white
+                )
             }
             .buttonStyle(.plain)
             .accessibilityLabel("曝光補償")
+            .accessibilityIdentifier("chrome.camera.exposure")
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            // 中央：展開/收合次級控制列按鈕 (`chevron.up` / `chevron.down`)
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
                     showSecondaryControlsDrawer.toggle()
                 }
             } label: {
-                Image(systemName: showSecondaryControlsDrawer ? "chevron.down.circle.fill" : "chevron.up.circle.fill")
-                    .font(.system(size: 24))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(showSecondaryControlsDrawer ? .white : .white.opacity(0.55))
+                Image(systemName: showSecondaryControlsDrawer ? "chevron.down" : "chevron.up")
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
+                    .foregroundStyle(showSecondaryControlsDrawer ? Color.yellow : Color.white)
+                    .liquidGlassCircle(size: ChromeMetrics.circle, fallbackStroke: .white)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("相機進階控制")
+            .accessibilityIdentifier("chrome.camera.advanced")
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            // 右側：九宮格快速切換
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -918,26 +925,28 @@ struct CameraScannerView: View {
                 }
             } label: {
                 Image(systemName: "squareshape.split.3x3")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(showGridOverlay ? .white : .white.opacity(0.45))
-                    .frame(width: 34, height: 34)
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
+                    .foregroundStyle(showGridOverlay ? Color.yellow : Color.white)
+                    .liquidGlassCircle(size: ChromeMetrics.circle, fallbackStroke: .white)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("九宮格輔助線")
+            .accessibilityIdentifier("chrome.camera.grid")
 
-            // 右側：關閉相機返回
             Button {
                 Task { await closeCamera() }
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .cameraLiquidGlassCircle(size: 32)
+                    .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("關閉相機")
+            .accessibilityIdentifier("chrome.camera.close")
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 10)
+        .padding(.horizontal, ChromeMetrics.edgeHorizontal)
+        .padding(.top, 8)
         .padding(.bottom, 8)
         .environment(\.colorScheme, .dark)
     }

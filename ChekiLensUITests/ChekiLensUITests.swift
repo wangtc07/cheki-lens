@@ -177,4 +177,34 @@ final class ChekiLensUITests: XCTestCase {
         XCTAssertEqual(cropRotate.frame.height, 44, accuracy: 1, "裁切底部鈕 \(cropRotate.frame)")
         saveAuditScreenshot(app, name: "task_6_6_3_crop")
     }
+
+    /// Task 6.6.4：相機頂部閃光燈、九宮格、關閉鈕皆為 44 pt，且同一水平線。
+    @MainActor
+    func testCameraTopChromeIsUniform44() throws {
+        let app = launchLibraryApp()
+        let openCamera = app.buttons["chrome.library.camera"]
+        XCTAssertTrue(openCamera.waitForExistence(timeout: 12))
+        openCamera.tap()
+
+        let flash = app.buttons["chrome.camera.flash"]
+        let grid = app.buttons["chrome.camera.grid"]
+        let close = app.buttons["chrome.camera.close"]
+        XCTAssertTrue(flash.waitForExistence(timeout: 8), "沒有進入相機。\(app.debugDescription)")
+        XCTAssertTrue(grid.waitForExistence(timeout: 2))
+        XCTAssertTrue(close.waitForExistence(timeout: 2))
+
+        assertCircleFramesMatch(flash, close, expectedSide: 44)
+        XCTAssertEqual(grid.frame.width, 44, accuracy: 1, "九宮格 \(grid.frame)")
+        XCTAssertEqual(grid.frame.height, 44, accuracy: 1, "九宮格 \(grid.frame)")
+        XCTAssertEqual(flash.frame.minY, grid.frame.minY, accuracy: 1, "頂部按鈕應同一水平線")
+        XCTAssertTrue(flash.label.contains("關閉") || flash.label.contains("オフ"), "閃光燈預設應為關閉，實際 \(flash.label)")
+        saveAuditScreenshot(app, name: "task_6_6_4_flash_off")
+
+        flash.tap()
+        let flashed = app.buttons["chrome.camera.flash"]
+        let active = NSPredicate(format: "label CONTAINS '自動' OR label CONTAINS '開啟' OR label CONTAINS 'オン'")
+        let becameActive = XCTNSPredicateExpectation(predicate: active, object: flashed)
+        XCTAssertEqual(XCTWaiter().wait(for: [becameActive], timeout: 3), .completed, "點擊後閃光燈應離開關閉，實際 \(flashed.label)")
+        saveAuditScreenshot(app, name: "task_6_6_4_flash_on")
+    }
 }
