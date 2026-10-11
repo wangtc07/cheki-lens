@@ -904,6 +904,7 @@ struct AlbumsRootView: View {
     @State private var pinchBaselineColumnCount: Int?
     @State private var livePinchScale: CGFloat = 1
 
+    @State private var albumPath = NavigationPath()
     @State private var hierarchyMode: AlbumHierarchyMode = .groups
     @State private var isSelectingAlbums: Bool = false
     @State private var selectedGroupIDs: Set<UUID> = []
@@ -1027,7 +1028,7 @@ struct AlbumsRootView: View {
     init() {}
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $albumPath) {
             ZStack(alignment: .top) {
                 Color(.systemBackground)
                     .ignoresSafeArea()
@@ -1171,7 +1172,7 @@ struct AlbumsRootView: View {
                 Text(L10n.tr("相冊會刪除，裡面的拍立得會移到未分類。", "アルバムは削除され、中のチェキは未分類に移動します。"))
             }
             .navigationDestination(for: IdolGroup.self) { group in
-                GroupMembersAlbumView(group: group, allItems: validChekiItems)
+                GroupMembersAlbumView(group: group, allItems: validChekiItems, albumPath: $albumPath)
             }
             .navigationDestination(for: IdolMember.self) { member in
                 AlbumHeroDetailView(
@@ -1427,36 +1428,25 @@ struct AlbumsRootView: View {
             if isSelectingAlbums {
                 selectableAlbumCard(card, isSelected: selectedGroupIDs.contains(group.id), isList: isList)
             } else {
-                NavigationLink(value: group) { card }
-                    .buttonStyle(.plain)
-                    .allowsHitTesting(!blockAlbumOpen)
-                    .albumCardContextMenu {
-                        AlbumAddMenuItems(
-                            onCamera: {
-                                actionTargetMember = group.sortedMembers.first
-                                showingCameraScanner = true
-                            },
-                            onImport: {
-                                actionTargetMember = group.sortedMembers.first
-                                showingAlbumPhotosPicker = true
-                            }
-                        )
-
-                        Divider()
-
-                        Button {
-                            renameText = group.name
-                            renamingGroup = group
-                        } label: {
-                            Label(L10n.tr("團體名", "グループ名"), systemImage: "pencil")
-                        }
-
-                        Button(role: .destructive) {
-                            pendingDeletion = .groups([group.id])
-                        } label: {
-                            Label(L10n.tr("刪除", "削除"), systemImage: "trash")
-                        }
-                    }
+                card.albumCardContextMenu(
+                    isEnabled: !blockAlbumOpen,
+                    accessibilityLabel: group.name,
+                    onOpen: { albumPath.append(group) },
+                    onCamera: {
+                        actionTargetMember = group.sortedMembers.first
+                        showingCameraScanner = true
+                    },
+                    onImport: {
+                        actionTargetMember = group.sortedMembers.first
+                        showingAlbumPhotosPicker = true
+                    },
+                    renameTitle: L10n.tr("團體名", "グループ名"),
+                    onRename: {
+                        renameText = group.name
+                        renamingGroup = group
+                    },
+                    onDelete: { pendingDeletion = .groups([group.id]) }
+                )
             }
         }
         .scaleEffect(liftedGroupID == group.id ? 1.05 : 1)
@@ -1540,36 +1530,25 @@ struct AlbumsRootView: View {
             if isSelectingAlbums {
                 selectableAlbumCard(card, isSelected: selectedMemberIDs.contains(member.id), isList: isList)
             } else {
-                NavigationLink(value: member) { card }
-                    .buttonStyle(.plain)
-                    .allowsHitTesting(!blockAlbumOpen)
-                    .albumCardContextMenu {
-                        AlbumAddMenuItems(
-                            onCamera: {
-                                actionTargetMember = member
-                                showingCameraScanner = true
-                            },
-                            onImport: {
-                                actionTargetMember = member
-                                showingAlbumPhotosPicker = true
-                            }
-                        )
-
-                        Divider()
-
-                        Button {
-                            renameText = member.stageName
-                            renamingMember = member
-                        } label: {
-                            Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
-                        }
-
-                        Button(role: .destructive) {
-                            pendingDeletion = .members([member.id])
-                        } label: {
-                            Label(L10n.tr("刪除", "削除"), systemImage: "trash")
-                        }
-                    }
+                card.albumCardContextMenu(
+                    isEnabled: !blockAlbumOpen,
+                    accessibilityLabel: member.albumTitle,
+                    onOpen: { albumPath.append(member) },
+                    onCamera: {
+                        actionTargetMember = member
+                        showingCameraScanner = true
+                    },
+                    onImport: {
+                        actionTargetMember = member
+                        showingAlbumPhotosPicker = true
+                    },
+                    renameTitle: L10n.tr("成員名", "メンバー名"),
+                    onRename: {
+                        renameText = member.stageName
+                        renamingMember = member
+                    },
+                    onDelete: { pendingDeletion = .members([member.id]) }
+                )
             }
         }
         .scaleEffect(liftedMemberID == member.id ? 1.05 : 1)
@@ -1582,7 +1561,7 @@ struct AlbumsRootView: View {
     @ViewBuilder
     private func uncategorizedAlbumEntryView(isList: Bool) -> some View {
         let covers = uncategorizedItems.compactMap(\.frontImageData)
-        NavigationLink(value: UncategorizedAlbumRoute()) {
+        let card = Group {
             if isList {
                 ApplePhotoAlbumListRow(
                     primaryTitle: "未分類",
@@ -1598,11 +1577,11 @@ struct AlbumsRootView: View {
                 )
             }
         }
-        .buttonStyle(.plain)
-        .allowsHitTesting(!isSelectingAlbums && !blockAlbumOpen)
-        .opacity(isSelectingAlbums ? 0.4 : 1)
-        .albumCardContextMenu {
-            AlbumAddMenuItems(
+        card
+            .albumCardContextMenu(
+                isEnabled: !isSelectingAlbums && !blockAlbumOpen,
+                accessibilityLabel: "未分類",
+                onOpen: { albumPath.append(UncategorizedAlbumRoute()) },
                 onCamera: {
                     actionTargetMember = nil
                     showingCameraScanner = true
@@ -1612,7 +1591,7 @@ struct AlbumsRootView: View {
                     showingAlbumPhotosPicker = true
                 }
             )
-        }
+            .opacity(isSelectingAlbums ? 0.4 : 1)
     }
 
     @ViewBuilder
@@ -2251,10 +2230,237 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
 }
 
 private extension View {
-    /// 長按選單保留，但不把卡片放大成預覽。
-    func albumCardContextMenu<Menu: View>(@ViewBuilder _ menu: () -> Menu) -> some View {
-        contextMenu(menuItems: menu) {
-            Color.clear.frame(width: 1, height: 1)
+    /// 長按選單掛在蓋住卡片的透明層。卡片不是選單來源，所以不會被藏起來，也不會被放大。
+    func albumCardContextMenu(
+        isEnabled: Bool,
+        accessibilityLabel: String,
+        onOpen: @escaping () -> Void,
+        onCamera: @escaping () -> Void,
+        onImport: @escaping () -> Void,
+        renameTitle: String? = nil,
+        onRename: (() -> Void)? = nil,
+        onDelete: (() -> Void)? = nil
+    ) -> some View {
+        overlay {
+            AlbumCardMenuPlate(
+                isEnabled: isEnabled,
+                onOpen: onOpen,
+                onCamera: onCamera,
+                onImport: onImport,
+                renameTitle: renameTitle,
+                onRename: onRename,
+                onDelete: onDelete
+            )
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, onOpen)
+        }
+    }
+}
+
+/// 只負責點擊與長按選單的透明 UIView。預覽用 1×1 透明層，不拿相簿卡片當預覽。
+private struct AlbumCardMenuPlate: UIViewRepresentable {
+    var isEnabled: Bool
+    var onOpen: () -> Void
+    var onCamera: () -> Void
+    var onImport: () -> Void
+    var renameTitle: String?
+    var onRename: (() -> Void)?
+    var onDelete: (() -> Void)?
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: PlateView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+    }
+
+    func makeUIView(context: Context) -> PlateView {
+        let view = PlateView()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
+        view.isAccessibilityElement = false
+        let interaction = UIContextMenuInteraction(delegate: context.coordinator)
+        view.addInteraction(interaction)
+        context.coordinator.interaction = interaction
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap))
+        tap.cancelsTouchesInView = false
+        tap.delegate = context.coordinator
+        view.addGestureRecognizer(tap)
+        return view
+    }
+
+    func updateUIView(_ uiView: PlateView, context: Context) {
+        uiView.isUserInteractionEnabled = isEnabled
+        let coordinator = context.coordinator
+        coordinator.isEnabled = isEnabled
+        coordinator.onOpen = onOpen
+        coordinator.onCamera = onCamera
+        coordinator.onImport = onImport
+        coordinator.renameTitle = renameTitle
+        coordinator.onRename = onRename
+        coordinator.onDelete = onDelete
+    }
+
+    final class PlateView: UIView {
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            if let superview, superview.bounds.width > 1 {
+                frame = superview.bounds
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
+        var isEnabled = true
+        var onOpen: () -> Void = {}
+        var onCamera: () -> Void = {}
+        var onImport: () -> Void = {}
+        var renameTitle: String?
+        var onRename: (() -> Void)?
+        var onDelete: (() -> Void)?
+        weak var interaction: UIContextMenuInteraction?
+        private var ignoreOpenUntil: TimeInterval = 0
+        private let decoy: UIView = {
+            let view = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+            view.backgroundColor = .clear
+            view.isUserInteractionEnabled = false
+            return view
+        }()
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+
+        @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended, isEnabled, CACurrentMediaTime() > ignoreOpenUntil else { return }
+            onOpen()
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            configurationForMenuAtLocation location: CGPoint
+        ) -> UIContextMenuConfiguration? {
+            guard isEnabled else { return nil }
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: {
+                let controller = UIViewController()
+                let preview = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+                preview.backgroundColor = .clear
+                controller.view = preview
+                controller.preferredContentSize = CGSize(width: 1, height: 1)
+                return controller
+            }, actionProvider: { [weak self] _ in
+                self?.makeMenu()
+            })
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            configuration: UIContextMenuConfiguration,
+            highlightPreviewForItemWithIdentifier identifier: any NSCopying
+        ) -> UITargetedPreview? {
+            tinyPreview(for: interaction)
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            configuration: UIContextMenuConfiguration,
+            dismissalPreviewForItemWithIdentifier identifier: any NSCopying
+        ) -> UITargetedPreview? {
+            tinyPreview(for: interaction)
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            willDisplayMenuFor configuration: UIContextMenuConfiguration,
+            animator: (any UIContextMenuInteractionAnimating)?
+        ) {
+            ignoreOpenUntil = CACurrentMediaTime() + 60
+            keepCardVisible(from: interaction.view)
+            animator?.addAnimations { [weak self] in
+                self?.keepCardVisible(from: interaction.view)
+            }
+            animator?.addCompletion { [weak self] in
+                self?.keepCardVisible(from: interaction.view)
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.keepCardVisible(from: interaction.view)
+            }
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            willEndFor configuration: UIContextMenuConfiguration,
+            animator: (any UIContextMenuInteractionAnimating)?
+        ) {
+            animator?.addCompletion { [weak self] in
+                self?.ignoreOpenUntil = CACurrentMediaTime() + 0.35
+                self?.keepCardVisible(from: interaction.view)
+            }
+        }
+
+        private func tinyPreview(for interaction: UIContextMenuInteraction) -> UITargetedPreview? {
+            guard let host = interaction.view else { return nil }
+            let container = host.superview ?? host
+            let center = host.convert(CGPoint(x: host.bounds.midX, y: host.bounds.midY), to: container)
+            let parameters = UIPreviewParameters()
+            parameters.backgroundColor = .clear
+            parameters.shadowPath = UIBezierPath()
+            parameters.visiblePath = UIBezierPath(rect: CGRect(x: 0, y: 0, width: 1, height: 1))
+            let target = UIPreviewTarget(container: container, center: center)
+            return UITargetedPreview(view: decoy, parameters: parameters, target: target)
+        }
+
+        private func keepCardVisible(from view: UIView?) {
+            var current = view
+            var steps = 0
+            while let node = current, steps < 6 {
+                node.alpha = 1
+                node.isHidden = false
+                if node is UIScrollView { break }
+                current = node.superview
+                steps += 1
+            }
+        }
+
+        private func makeMenu() -> UIMenu {
+            let camera = UIAction(
+                title: L10n.tr("拍照", "カメラ"),
+                image: UIImage(systemName: "camera")
+            ) { [weak self] _ in
+                self?.onCamera()
+            }
+            let importAction = UIAction(
+                title: L10n.tr("相簿", "アルバム"),
+                image: UIImage(systemName: "photo.badge.plus")
+            ) { [weak self] _ in
+                self?.onImport()
+            }
+            var children: [UIMenuElement] = [
+                UIMenu(options: .displayInline, children: [camera, importAction])
+            ]
+            var edits: [UIMenuElement] = []
+            if let onRename, let renameTitle {
+                edits.append(UIAction(title: renameTitle, image: UIImage(systemName: "pencil")) { _ in
+                    onRename()
+                })
+            }
+            if let onDelete {
+                edits.append(UIAction(
+                    title: L10n.tr("刪除", "削除"),
+                    image: UIImage(systemName: "trash"),
+                    attributes: .destructive
+                ) { _ in
+                    onDelete()
+                })
+            }
+            if !edits.isEmpty {
+                children.append(UIMenu(options: .displayInline, children: edits))
+            }
+            return UIMenu(children: children)
         }
     }
 }
@@ -2264,6 +2470,7 @@ private extension View {
 private struct GroupMembersAlbumView: View {
     let group: IdolGroup
     let allItems: [ChekiItem]
+    @Binding var albumPath: NavigationPath
 
     @Environment(\.modelContext) private var modelContext
     @AppStorage("albumSortMethod") private var sortMethodRaw: String = AlbumSortMethod.custom.rawValue
@@ -2618,36 +2825,25 @@ private struct GroupMembersAlbumView: View {
                 }
                 .allowsHitTesting(false)
             } else {
-                NavigationLink(value: member) { card }
-                    .buttonStyle(.plain)
-                    .allowsHitTesting(!blockAlbumOpen)
-                    .albumCardContextMenu {
-                        AlbumAddMenuItems(
-                            onCamera: {
-                                actionTargetMember = member
-                                showingCameraScanner = true
-                            },
-                            onImport: {
-                                actionTargetMember = member
-                                showingAlbumPhotosPicker = true
-                            }
-                        )
-
-                        Divider()
-
-                        Button {
-                            renameText = member.stageName
-                            renamingMember = member
-                        } label: {
-                            Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
-                        }
-
-                        Button(role: .destructive) {
-                            pendingMemberDeletionIDs = [member.id]
-                        } label: {
-                            Label(L10n.tr("刪除", "削除"), systemImage: "trash")
-                        }
-                    }
+                card.albumCardContextMenu(
+                    isEnabled: !blockAlbumOpen,
+                    accessibilityLabel: member.albumTitle,
+                    onOpen: { albumPath.append(member) },
+                    onCamera: {
+                        actionTargetMember = member
+                        showingCameraScanner = true
+                    },
+                    onImport: {
+                        actionTargetMember = member
+                        showingAlbumPhotosPicker = true
+                    },
+                    renameTitle: L10n.tr("成員名", "メンバー名"),
+                    onRename: {
+                        renameText = member.stageName
+                        renamingMember = member
+                    },
+                    onDelete: { pendingMemberDeletionIDs = [member.id] }
+                )
             }
         }
         .scaleEffect(liftedMemberID == member.id ? 1.05 : 1)
