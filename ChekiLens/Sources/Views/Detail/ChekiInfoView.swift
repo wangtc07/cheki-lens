@@ -16,6 +16,7 @@ struct ChekiInfoView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
 
+    @State private var showingQuickCreateMember: Bool = false
     @State private var isEditingDate: Bool = false
     @State private var isEditingTime: Bool = false
     @State private var memoText: String = ""
@@ -23,182 +24,298 @@ struct ChekiInfoView: View {
     @FocusState private var isMemoFocused: Bool
 
     var body: some View {
-        List {
-            // MARK: 1. 拍攝資訊（點擊各列可直接修正）
-            Section("拍攝資訊") {
-                // 日期（點擊展開/收合內嵌月曆直接修正，格式：yyyy年M月d日 {星期}）
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.snappy(duration: 0.22)) {
-                        isEditingDate.toggle()
-                        if isEditingDate {
-                            isEditingTime = false
-                            isMemoFocused = false
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Text("日期")
-                            .foregroundStyle(.primary)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // MARK: 1. 拍攝資訊（點擊各列可直接修正）
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.tr("拍攝資訊", "撮影情報"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
 
-                        Spacer()
-
-                        if isRecognizingCoverDate {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-
-                        Text(ChekiItem.formatFullDateWithWeekday(item.displayDate))
-                            .foregroundStyle(isEditingDate ? Color.accentColor : .secondary)
-                            .fontWeight(isEditingDate ? .semibold : .regular)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if isEditingDate {
-                    DatePicker(
-                        "選擇拍攝日期",
-                        selection: dateSelectionBinding,
-                        displayedComponents: [.date]
-                    )
-                    .datePickerStyle(.graphical)
-                    .environment(\.locale, Locale(identifier: "zh_Hant_TW"))
-                    .padding(.vertical, 4)
-                }
-
-                // 時間（點擊展開/收合時間滾輪直接修正）
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.snappy(duration: 0.22)) {
-                        isEditingTime.toggle()
-                        if isEditingTime {
-                            isEditingDate = false
-                            isMemoFocused = false
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Text("時間")
-                            .foregroundStyle(.primary)
-
-                        Spacer()
-
-                        Text(ChekiDetailView.datePillTimeString(from: item.displayDate))
-                            .foregroundStyle(isEditingTime ? Color.accentColor : .secondary)
-                            .fontWeight(isEditingTime ? .semibold : .regular)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if isEditingTime {
-                    DatePicker(
-                        "選擇拍攝時間",
-                        selection: timeSelectionBinding,
-                        displayedComponents: [.hourAndMinute]
-                    )
-                    .datePickerStyle(.wheel)
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 148)
-                    .clipped()
-                }
-
-                // 規格（自動辨識後填入三種其中一種，點擊可直接切換 Instax Mini / Square / Wide）
-                HStack {
-                    Text("規格")
-                        .foregroundStyle(.primary)
-
-                    Spacer()
-
-                    Menu {
-                        ForEach(FilmFormat.concreteFormats, id: \.self) { format in
+                        VStack(spacing: 0) {
+                            // 日期（點擊展開/收合內嵌月曆直接修正，格式：yyyy年M月d日 {星期}）
                             Button {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                item.filmFormat = format
-                                item.detectedAspectRatio = format.aspectRatio
-                                try? modelContext.save()
-                            } label: {
-                                HStack {
-                                    Text(format.detailDisplayName)
-                                    if item.filmFormat.concreteFormat == format {
-                                        Image(systemName: "checkmark")
+                                withAnimation(.snappy(duration: 0.22)) {
+                                    isEditingDate.toggle()
+                                    if isEditingDate {
+                                        isEditingTime = false
+                                        isMemoFocused = false
                                     }
                                 }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(L10n.tr("日期", "日付"))
+                                        .foregroundStyle(.primary)
+
+                                    Spacer()
+
+                                    if isRecognizingCoverDate {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
+
+                                    Text(ChekiItem.formatFullDateWithWeekday(item.displayDate))
+                                        .foregroundStyle(isEditingDate ? Color.accentColor : .secondary)
+                                        .fontWeight(isEditingDate ? .semibold : .regular)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 13)
+                                .contentShape(Rectangle())
                             }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(item.filmFormat.concreteDisplayName)
-                                .foregroundStyle(.secondary)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                }
+                            .buttonStyle(.plain)
 
-                // 成員（點擊可直接切換歸檔成員）
-                if !idolMembers.isEmpty {
-                    HStack {
-                        Text("成員")
-                            .foregroundStyle(.primary)
+                            if isEditingDate {
+                                Divider().padding(.leading, 16)
+                                DatePicker(
+                                    "選擇拍攝日期",
+                                    selection: dateSelectionBinding,
+                                    displayedComponents: [.date]
+                                )
+                                .datePickerStyle(.graphical)
+                                .environment(\.locale, L10n.formattingLocale)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 4)
+                            }
 
-                        Spacer()
+                            Divider().padding(.leading, 16)
 
-                        Menu {
+                            // 時間（點擊展開/收合時間滾輪直接修正）
                             Button {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                item.idolMember = nil
-                                try? modelContext.save()
+                                withAnimation(.snappy(duration: 0.22)) {
+                                    isEditingTime.toggle()
+                                    if isEditingTime {
+                                        isEditingDate = false
+                                        isMemoFocused = false
+                                    }
+                                }
                             } label: {
-                                Label("未分類", systemImage: item.idolMember == nil ? "checkmark" : "tray")
+                                HStack(spacing: 8) {
+                                    Text(L10n.tr("時間", "時刻"))
+                                        .foregroundStyle(.primary)
+
+                                    Spacer()
+
+                                    Text(ChekiDetailView.datePillTimeString(from: item.displayDate))
+                                        .foregroundStyle(isEditingTime ? Color.accentColor : .secondary)
+                                        .fontWeight(isEditingTime ? .semibold : .regular)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 13)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            if isEditingTime {
+                                Divider().padding(.leading, 16)
+                                DatePicker(
+                                    "選擇拍攝時間",
+                                    selection: timeSelectionBinding,
+                                    displayedComponents: [.hourAndMinute]
+                                )
+                                .datePickerStyle(.wheel)
+                                .labelsHidden()
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 148)
+                                .clipped()
                             }
 
-                            Divider()
+                            Divider().padding(.leading, 16)
 
-                            ForEach(idolMembers) { member in
-                                Button {
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    item.idolMember = member
-                                    try? modelContext.save()
+                            // 規格（自動辨識後填入三種其中一種，點擊可直接切換 Instax Mini / Square / Wide）
+                            HStack {
+                                Text(L10n.tr("規格", "フィルム規格"))
+                                    .foregroundStyle(.primary)
+
+                                Spacer()
+
+                                Menu {
+                                    ForEach(FilmFormat.concreteFormats, id: \.self) { format in
+                                        Button {
+                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                            item.filmFormat = format
+                                            item.detectedAspectRatio = format.aspectRatio
+                                            try? modelContext.save()
+                                        } label: {
+                                            HStack {
+                                                Text(format.detailDisplayName)
+                                                if item.filmFormat.concreteFormat == format {
+                                                    Image(systemName: "checkmark")
+                                                }
+                                            }
+                                        }
+                                    }
                                 } label: {
-                                    let title = member.group != nil
-                                        ? "\(member.stageName)（\(member.group!.name)）"
-                                        : member.stageName
-                                    Label(title, systemImage: item.idolMember?.id == member.id ? "checkmark" : "person")
+                                    HStack(spacing: 4) {
+                                        Text(item.filmFormat.concreteDisplayName)
+                                            .foregroundStyle(.secondary)
+                                        Image(systemName: "chevron.up.chevron.down")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .contentShape(Rectangle())
                                 }
                             }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text(item.idolMember?.stageName ?? "未分類")
-                                    .foregroundStyle(.secondary)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 13)
+
+                            Divider().padding(.leading, 16)
+
+                            // 成員（與導入時一致的單欄階層多選 Menu：團體 ➔ 成員，點選成員不自動關閉）
+                            let assignedMembers = item.assignedMembers(from: idolMembers)
+                            HStack(spacing: 8) {
+                                Text(L10n.tr("成員", "メンバー"))
+                                    .foregroundStyle(.primary)
+
+                                Spacer()
+
+                                Menu {
+                                    MemberAssignmentMenuContent(item: item) {
+                                        showingQuickCreateMember = true
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Text(item.assignedMembersDisplayString(from: idolMembers, includeGroupForSingle: true))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                        Image(systemName: "chevron.up.chevron.down")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .menuActionDismissBehavior(.disabled)
                             }
-                            .contentShape(Rectangle())
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 13)
+
+                            if !assignedMembers.isEmpty {
+                                Divider().padding(.leading, 16)
+
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 6) {
+                                        ForEach(assignedMembers) { member in
+                                            HStack(spacing: 4) {
+                                                Text(member.albumTitle)
+                                                    .font(.caption.weight(.medium))
+                                                    .foregroundStyle(.primary)
+                                                Button {
+                                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                                    item.toggleAssignedMember(member, allMembers: idolMembers)
+                                                    try? modelContext.save()
+                                                } label: {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                        .font(.system(size: 13))
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                            .padding(.horizontal, 9)
+                                            .padding(.vertical, 5)
+                                            .background(Color(.tertiarySystemFill), in: Capsule())
+                                        }
+
+                                        Menu {
+                                            MemberAssignmentMenuContent(item: item) {
+                                                showingQuickCreateMember = true
+                                            }
+                                        } label: {
+                                            HStack(spacing: 3) {
+                                                Image(systemName: "plus")
+                                                    .font(.system(size: 10, weight: .bold))
+                                                Text(L10n.tr("成員", "メンバー"))
+                                                    .font(.caption.weight(.medium))
+                                            }
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 9)
+                                            .padding(.vertical, 5)
+                                            .background(Color(.tertiarySystemFill), in: Capsule())
+                                        }
+                                        .menuActionDismissBehavior(.disabled)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                }
+                            }
                         }
+                        .background(
+                            Color(.secondarySystemGroupedBackground),
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        )
+                    }
+
+                    // MARK: 2. 備忘（預設空白，點擊直接輸入並即時儲存）
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.tr("備忘", "メモ"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+
+                        TextField(L10n.tr("輸入備忘…", "メモを入力…"), text: $memoText, axis: .vertical)
+                            .lineLimit(3...8)
+                            .focused($isMemoFocused)
+                            .onChange(of: memoText) { _, newValue in
+                                saveMemoTextImmediately(newValue)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(
+                                Color(.secondarySystemGroupedBackground),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
                     }
                 }
-
-                // 處理狀態
-                LabeledContent("處理狀態", value: item.processingState.displayName)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
+            .background(Color(.systemGroupedBackground))
+            .scrollDismissesKeyboard(.interactively)
 
-            // MARK: 2. 備忘（預設空白，點擊直接輸入並即時儲存）
-            Section("備忘") {
-                TextField("點擊輸入備忘…", text: $memoText, axis: .vertical)
-                    .lineLimit(3...8)
-                    .focused($isMemoFocused)
-                    .onChange(of: memoText) { _, newValue in
-                        saveMemoTextImmediately(newValue)
+            if isMemoFocused {
+                HStack {
+                    Spacer()
+
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        saveMemoTextImmediately(memoText)
+                        isMemoFocused = false
+                        UIApplication.shared.connectedScenes
+                            .compactMap { $0 as? UIWindowScene }
+                            .flatMap(\.windows)
+                            .forEach { $0.endEditing(true) }
+                    } label: {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(Color.accentColor, in: Circle())
+                            .shadow(color: .black.opacity(0.15), radius: 5, x: 0, y: 2)
                     }
+                    .accessibilityLabel(L10n.tr("確認", "確定"))
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 10)
+                .background(Color(.systemGroupedBackground))
             }
         }
-        .listStyle(.insetGrouped)
+        .sheet(isPresented: $showingQuickCreateMember) {
+            QuickCreateIdolSheet()
+        }
+        .onChange(of: idolMembers.count) { oldCount, newCount in
+            if newCount > oldCount, let newest = idolMembers.last {
+                var current = item.assignedMembers(from: idolMembers)
+                if !current.contains(where: { $0.id == newest.id }) {
+                    current.append(newest)
+                    item.setAssignedMembers(current)
+                    try? modelContext.save()
+                }
+            }
+        }
         .navigationTitle("資訊")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -208,6 +325,7 @@ struct ChekiInfoView: View {
         .task(id: item.id) {
             await autoRecognizeCoverDateIfNeeded()
         }
+        .applyAppAppearanceAndLocale()
     }
 
     // MARK: - Bindings & Persistence Helpers
@@ -222,6 +340,7 @@ struct ChekiInfoView: View {
                 if item.ocrDate != nil {
                     item.ocrDate = merged
                 }
+                item.isJudgedDateManuallySet = true
                 try? modelContext.save()
             }
         )
@@ -247,6 +366,7 @@ struct ChekiInfoView: View {
                     if item.ocrDate != nil {
                         item.ocrDate = updated
                     }
+                    item.isJudgedDateManuallySet = true
                     try? modelContext.save()
                 }
             }
@@ -324,7 +444,7 @@ struct ChekiInfoView: View {
     /// 若該拍立得尚未有手寫日期紀錄，自動從拍立得封面辨識手寫日期並填入拍攝日期
     @MainActor
     private func autoRecognizeCoverDateIfNeeded() async {
-        guard item.ocrDate == nil else { return }
+        guard item.ocrDate == nil, !item.isJudgedDateManuallySet else { return }
         guard let data = item.frontImageData ?? item.originalFrontImageData,
               let uiImage = UIImage(data: data)?.normalizedImage,
               let cgImage = uiImage.cgImage else { return }
@@ -334,18 +454,14 @@ struct ChekiInfoView: View {
 
         let visionManager = VisionManager()
         if let ocrResult = await visionManager.recognizeDate(from: cgImage) {
-            let mergedDate = ChekiItem.mergeRecognizedDate(ocrResult.date, into: item.capturedAt)
-            item.ocrDate = mergedDate
-            item.capturedAt = mergedDate
+            item.applyAutomaticJudgedDate(ocrResult.date, preservingTimeFrom: item.appOriginalCaptureDate)
             try? modelContext.save()
         } else if let origData = item.originalFrontImageData,
                   origData != data,
                   let origUI = UIImage(data: origData)?.normalizedImage,
                   let origCG = origUI.cgImage,
                   let fallbackResult = await visionManager.recognizeDate(from: origCG) {
-            let mergedDate = ChekiItem.mergeRecognizedDate(fallbackResult.date, into: item.capturedAt)
-            item.ocrDate = mergedDate
-            item.capturedAt = mergedDate
+            item.applyAutomaticJudgedDate(fallbackResult.date, preservingTimeFrom: item.appOriginalCaptureDate)
             try? modelContext.save()
         }
     }

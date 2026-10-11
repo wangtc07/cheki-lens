@@ -10,35 +10,62 @@ enum MainLibraryTab: Hashable {
 
 /// App 根視圖 — 根據 onboarding 狀態決定顯示導引或主畫面
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("appAppearanceMode") private var appAppearanceModeRaw: String = AppAppearanceMode.system.rawValue
+    @AppStorage("appLanguageMode") private var appLanguageModeRaw: String = AppLanguageMode.system.rawValue
     @State private var selectedTab: MainLibraryTab = .allPhotos
-
-    private var preferredScheme: ColorScheme? {
-        (AppAppearanceMode(rawValue: appAppearanceModeRaw) ?? .system).resolvedColorScheme
-    }
+    private var chromeState = NavigationChromeState.shared
 
     var body: some View {
         Group {
             if hasCompletedOnboarding {
-                TabView(selection: $selectedTab) {
-                    Tab("全部", systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
-                        LibraryView()
-                    }
+                ZStack {
+                    TabView(selection: $selectedTab) {
+                        Tab(L10n.tr("全部", "すべて"), systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
+                            LibraryView()
+                                .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                        }
 
-                    Tab("相冊", systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
-                        AlbumsRootView()
-                    }
+                        Tab(L10n.tr("相冊", "アルバム"), systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
+                            AlbumsRootView()
+                                .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                        }
 
-                    Tab("搜尋", systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
-                        LibrarySearchView()
+                        Tab(L10n.tr("搜尋", "検索"), systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
+                            LibrarySearchView()
+                                .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                        }
+                    }
+                    .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+
+                    if let route = chromeState.activeDetailRoute {
+                        ChekiDetailView(
+                            itemID: route.itemID,
+                            scopedItemIDs: route.scopedItemIDs,
+                            sourceScopeID: route.sourceScopeID
+                        )
+                        .id(route.itemID)
+                        .zIndex(100)
                     }
                 }
             } else {
                 OnboardingView()
             }
         }
-        .preferredColorScheme(preferredScheme)
+        .id(appLanguageModeRaw)
+        .applyAppAppearanceAndLocale()
+        .task {
+            guard hasCompletedOnboarding else { return }
+            _ = await PhotoLibraryManager.shared.syncAllExternalEditsFromSystemPhotoLibrary(modelContext: modelContext)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active, hasCompletedOnboarding else { return }
+            Task {
+                _ = await PhotoLibraryManager.shared.syncAllExternalEditsFromSystemPhotoLibrary(modelContext: modelContext)
+            }
+        }
     }
 }
 

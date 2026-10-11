@@ -8,7 +8,7 @@ import ImageIO
 /// 統一管理 ModelContainer 生命週期的服務層
 ///
 /// 提供兩種容器：
-/// 1. `live`：磁碟持久化容器（正式 App 使用，DEBUG 模式下若為空會自動注入初始測試資料）
+/// 1. `live`：磁碟持久化容器（正式 App 使用）
 /// 2. `preview`：記憶體容器（SwiftUI Preview / XCTest 使用）
 enum ModelContainerProvider {
 
@@ -32,9 +32,6 @@ enum ModelContainerProvider {
         )
         do {
             let container = try ModelContainer(for: schema, configurations: [config])
-            #if DEBUG
-            PreviewData.seedIfEmpty(into: container.mainContext)
-            #endif
             return container
         } catch {
             fatalError("❌ ModelContainer (live) 初始化失敗：\(error.localizedDescription)")

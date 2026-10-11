@@ -71,3 +71,6 @@ Linux 上已準備的工具：
 * 語法：逐檔執行 `swiftc -parse <file.swift>`。不要把多個 `main.swift` 一起丟給同一次 `swiftc`。
 * 透視裁切：在 `TestData/images` 與 `TestData/cheki_annotations.jsonl` 備妥圖片與四角標註後，執行 `python3 BenchmarkTool/crop_annotated.py`。直向 Mini 會輸出 810×1290。
 * 訓練集擴充：同一份標註可執行 `python3 scripts/data_augmentation.py`，產物在 `TestData/ml_dataset/`（gitignored）。
+## 🎨 UI／UX 修正專章
+
+任何涉及 UI、UX、動畫、手勢的工作（新增、修改、檢查、重構），**動手前必須先讀 `docs/UI_AGENT_GUIDELINES.md`**，並遵守其中的 chrome 尺寸與位置、狀態色彩、取消／確認圖示化、動畫與縮放手勢標準。與該文件衝突時以該文件為準。

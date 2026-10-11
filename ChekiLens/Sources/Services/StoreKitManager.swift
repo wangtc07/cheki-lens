@@ -19,10 +19,10 @@ final class StoreKitManager {
     static let dailyQuotaUsedCountStorageKey = "dailyFreeQuotaUsedCount"
 
     /// 正式 Non-Consumable 終身買斷商品 ID
-    static let proLifetimeProductID = "com.chekilens.pro.lifetime"
+    nonisolated static let proLifetimeProductID = "com.chekilens.pro.lifetime"
 
     /// 相容 Bundle ID 前綴之候選商品 ID 清單
-    static let supportedProductIDs: Set<String> = [
+    nonisolated static let supportedProductIDs: Set<String> = [
         "com.chekilens.pro.lifetime",
         "wangtc07.ChekiLens.pro.lifetime"
     ]
@@ -103,9 +103,9 @@ final class StoreKitManager {
     /// 橫幅按鈕顯示文字
     var bannerUnlockButtonTitle: String {
         if let product = proProduct {
-            return "\(product.displayPrice) 永久解鎖"
+            return L10n.tr("\(product.displayPrice) 永久解鎖", "\(product.displayPrice) で永久ロック解除")
         }
-        return "¥600 / NT$120 永久解鎖"
+        return L10n.tr("¥600 / NT$120 永久解鎖", "¥600 / NT$120 で永久ロック解除")
     }
 
     // MARK: - Store Initialization & Product Loading

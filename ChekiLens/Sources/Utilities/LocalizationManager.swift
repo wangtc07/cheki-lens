@@ -1,0 +1,265 @@
+import SwiftUI
+import UIKit
+import Foundation
+
+// MARK: - NavigationChromeState (控制單張檢視與多選模式時隱藏底部 TabView 導覽列與搜尋鈕)
+
+/// 記錄一覽網格中單一相片格位的全螢幕座標與圓角資訊（供單張檢視下滑跟手縮小與放開縮回原位置動畫使用）
+struct GridCellAnchor: Equatable, Sendable {
+    let itemID: UUID
+    let scopeID: String
+    let globalFrame: CGRect
+    let cornerRadius: CGFloat
+    let isSquareCropped: Bool
+}
+
+@MainActor
+@Observable
+final class NavigationChromeState {
+    static let shared = NavigationChromeState()
+
+    private(set) var activeDetailIDs: Set<UUID> = []
+    private(set) var activeSelectionIDs: Set<UUID> = []
+
+    /// 當前於最上層展開的單張檢視路由（保留底層一覽畫面於背後，供下滑跟手縮小與縮回原格位動畫使用）
+    var activeDetailRoute: ChekiDetailRoute? = nil
+    /// 當前在單張檢視中正在顯示或縮放過渡的相片 ID（底層一覽對應格位暫時隱藏以避免重影）
+    var activeZoomItemID: UUID? = nil
+
+    @ObservationIgnored
+    private var gridCellAnchorsByScopedKey: [String: GridCellAnchor] = [:]
+    @ObservationIgnored
+    private var latestGridCellAnchorByItemID: [UUID: GridCellAnchor] = [:]
+
+    var shouldHideMainTabBar: Bool {
+        !activeDetailIDs.isEmpty || !activeSelectionIDs.isEmpty
+    }
+
+    private static func anchorKey(itemID: UUID, scopeID: String) -> String {
+        "\(scopeID)::\(itemID.uuidString)"
+    }
+
+    func updateGridCellAnchor(
+        itemID: UUID,
+        scopeID: String,
+        globalFrame: CGRect,
+        cornerRadius: CGFloat,
+        isSquareCropped: Bool
+    ) {
+        guard globalFrame.width > 8, globalFrame.height > 8 else { return }
+        let anchor = GridCellAnchor(
+            itemID: itemID,
+            scopeID: scopeID,
+            globalFrame: globalFrame,
+            cornerRadius: cornerRadius,
+            isSquareCropped: isSquareCropped
+        )
+        gridCellAnchorsByScopedKey[Self.anchorKey(itemID: itemID, scopeID: scopeID)] = anchor
+        latestGridCellAnchorByItemID[itemID] = anchor
+    }
+
+    func gridCellAnchor(for itemID: UUID, scopeID: String?) -> GridCellAnchor? {
+        if let scopeID,
+           let scoped = gridCellAnchorsByScopedKey[Self.anchorKey(itemID: itemID, scopeID: scopeID)] {
+            return scoped
+        }
+        return latestGridCellAnchorByItemID[itemID]
+    }
+
+    func isGridCellHidden(itemID: UUID, scopeID: String?) -> Bool {
+        guard let scopeID, let route = activeDetailRoute, activeZoomItemID == itemID else { return false }
+        if let routeScope = route.sourceScopeID {
+            return routeScope == scopeID
+        }
+        return true
+    }
+
+    func presentDetail(_ route: ChekiDetailRoute) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            activeZoomItemID = route.itemID
+            activeDetailRoute = route
+        }
+    }
+
+    func dismissDetail() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            activeDetailRoute = nil
+            activeZoomItemID = nil
+        }
+    }
+
+    func registerDetail(_ id: UUID) {
+        activeDetailIDs.insert(id)
+        syncSystemTabBarVisibility()
+    }
+
+    func unregisterDetail(_ id: UUID) {
+        activeDetailIDs.remove(id)
+        syncSystemTabBarVisibility()
+    }
+
+    func setSelectionMode(_ isSelecting: Bool, id: UUID) {
+        if isSelecting {
+            activeSelectionIDs.insert(id)
+        } else {
+            activeSelectionIDs.remove(id)
+        }
+        syncSystemTabBarVisibility()
+    }
+
+    func syncSystemTabBarVisibility() {
+        let hidden = shouldHideMainTabBar
+        applyTabBarHidden(hidden)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.applyTabBarHidden(self.shouldHideMainTabBar)
+        }
+    }
+
+    private func applyTabBarHidden(_ hidden: Bool) {
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows {
+                if let tabBarController = Self.findTabBarController(in: window.rootViewController) {
+                    if #available(iOS 18.0, *) {
+                        tabBarController.setTabBarHidden(hidden, animated: false)
+                    }
+                    tabBarController.tabBar.isHidden = hidden
+                }
+            }
+        }
+    }
+
+    private static func findTabBarController(in vc: UIViewController?) -> UITabBarController? {
+        guard let vc else { return nil }
+        if let tab = vc as? UITabBarController {
+            return tab
+        }
+        for child in vc.children {
+            if let found = findTabBarController(in: child) {
+                return found
+            }
+        }
+        if let presented = vc.presentedViewController {
+            return findTabBarController(in: presented)
+        }
+        return nil
+    }
+}
+
+// MARK: - AppLanguageMode (Task 6.2: 繁體中文 / 日本語 語系管理與系統自動匹配)
+
+/// App 語系設定模式：
+/// - `system`：依照 iOS 系統首選語言自動匹配（若系統首選為日文則顯示日文，否則顯示繁體中文）
+/// - `traditionalChinese`：固定顯示繁體中文 (`zh-Hant`)
+/// - `japanese`：固定顯示日本語 (`ja`)
+enum AppLanguageMode: String, CaseIterable, Identifiable, Sendable {
+    case system = "system"
+    case traditionalChinese = "zh-Hant"
+    case japanese = "ja"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .system:
+            return L10n.isJapanese ? "システム設定に従う" : "跟隨系統"
+        case .traditionalChinese:
+            return "繁體中文"
+        case .japanese:
+            return "日本語"
+        }
+    }
+
+    /// 根據設定與 iOS 系統首選語言解析目前是否為日文語系
+    var isResolvedJapanese: Bool {
+        switch self {
+        case .japanese:
+            return true
+        case .traditionalChinese:
+            return false
+        case .system:
+            for lang in Locale.preferredLanguages {
+                let lower = lang.lowercased()
+                if lower.hasPrefix("ja") {
+                    return true
+                }
+                if lower.hasPrefix("zh") {
+                    return false
+                }
+            }
+            return Locale.current.language.languageCode?.identifier.lowercased() == "ja"
+        }
+    }
+
+    /// 供 SwiftUI `.environment(\.locale, ...)` 使用之 `Locale`
+    var resolvedLocale: Locale {
+        isResolvedJapanese ? Locale(identifier: "ja") : Locale(identifier: "zh-Hant")
+    }
+
+    /// 供 `DateFormatter` 與月曆元件使用之區域 `Locale`
+    var resolvedFormattingLocale: Locale {
+        isResolvedJapanese ? Locale(identifier: "ja_JP") : Locale(identifier: "zh_Hant_TW")
+    }
+}
+
+// MARK: - L10n 雙語即時查詢工具
+
+enum L10n {
+    static let storageKey = "appLanguageMode"
+
+    static var currentMode: AppLanguageMode {
+        let raw = UserDefaults.standard.string(forKey: storageKey) ?? AppLanguageMode.system.rawValue
+        return AppLanguageMode(rawValue: raw) ?? .system
+    }
+
+    static var isJapanese: Bool {
+        currentMode.isResolvedJapanese
+    }
+
+    static var currentLocale: Locale {
+        currentMode.resolvedLocale
+    }
+
+    static var formattingLocale: Locale {
+        currentMode.resolvedFormattingLocale
+    }
+
+    /// 依目前生效語系回傳繁體中文或日文字串
+    static func tr(_ zhHant: String, _ ja: String) -> String {
+        isJapanese ? ja : zhHant
+    }
+}
+
+// MARK: - 全域外觀模式、語系與動態字級 (Dynamic Type) ViewModifier
+
+struct AppAppearanceAndLocaleModifier: ViewModifier {
+    @AppStorage("appAppearanceMode") private var appAppearanceModeRaw: String = AppAppearanceMode.system.rawValue
+    @AppStorage("appLanguageMode") private var appLanguageModeRaw: String = AppLanguageMode.system.rawValue
+
+    private var preferredScheme: ColorScheme? {
+        (AppAppearanceMode(rawValue: appAppearanceModeRaw) ?? .system).resolvedColorScheme
+    }
+
+    private var resolvedLocale: Locale {
+        (AppLanguageMode(rawValue: appLanguageModeRaw) ?? .system).resolvedLocale
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .preferredColorScheme(preferredScheme)
+            .environment(\.locale, resolvedLocale)
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+}
+
+extension View {
+    /// 套用使用者選定的深淺色外觀模式、繁中/日文語系環境與 Dynamic Type 動態字級上限保護
+    func applyAppAppearanceAndLocale() -> some View {
+        modifier(AppAppearanceAndLocaleModifier())
+    }
+}

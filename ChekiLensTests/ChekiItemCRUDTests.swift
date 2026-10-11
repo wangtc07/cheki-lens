@@ -161,6 +161,26 @@ final class ChekiItemCRUDTests: XCTestCase {
         XCTAssertEqual(item.displayDate, capturedAt, "無 ocrDate 時應回傳 capturedAt")
     }
 
+    func test_originalCaptureDate_staysWhenJudgedDateChanges() throws {
+        let shutter = Date(timeIntervalSince1970: 1_700_000_000)
+        let handwritten = Date(timeIntervalSince1970: 1_600_000_000)
+        let item = ChekiItem(capturedAt: shutter)
+        context.insert(item)
+        try context.save()
+
+        XCTAssertEqual(item.appOriginalCaptureDate, shutter)
+
+        item.applyAutomaticJudgedDate(handwritten, preservingTimeFrom: shutter)
+        XCTAssertEqual(item.displayDate.timeIntervalSince1970, ChekiItem.mergeRecognizedDate(handwritten, into: shutter).timeIntervalSince1970)
+        XCTAssertEqual(item.appOriginalCaptureDate, shutter, "判斷日期不應改寫原始拍攝時間")
+
+        let corrected = Date(timeIntervalSince1970: 1_650_000_000)
+        item.lockJudgedDate(corrected)
+        item.applyAutomaticJudgedDate(handwritten, preservingTimeFrom: shutter)
+        XCTAssertEqual(item.displayDate, corrected, "手動鎖定後背景 OCR 不得覆寫")
+        XCTAssertEqual(item.appOriginalCaptureDate, shutter)
+    }
+
     // MARK: - Delete Tests
 
     func test_deleteChekiItem() throws {

@@ -4,6 +4,22 @@ import PhotosUI
 import Vision
 import UIKit
 
+// MARK: - CameraSessionPhoto
+
+/// 相機關閉後送進與「讀入」相同的配對工作台的一張快門照片。
+struct CameraSessionPhoto: Identifiable, Sendable {
+    let id: UUID
+    let shutterDate: Date
+    var imageData: Data
+}
+
+/// 相機關閉後要打開的編輯頁。照片放在這個值裡，避免第一次打開時讀到空清單。
+struct CaptureReviewRequest: Identifiable {
+    let id = UUID()
+    let photos: [CameraSessionPhoto]
+    let member: IdolMember?
+}
+
 // MARK: - BatchPairingMode (三段配對模式)
 
 enum BatchPairingMode: String, CaseIterable, Identifiable {
@@ -12,6 +28,17 @@ enum BatchPairingMode: String, CaseIterable, Identifiable {
     case manualPair = "手動配對"
 
     var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .singleOnly:
+            return L10n.tr("直接執行", "そのまま実行")
+        case .autoPair:
+            return L10n.tr("自動配對", "自動ペアリング")
+        case .manualPair:
+            return L10n.tr("手動配對", "手動ペアリング")
+        }
+    }
 }
 
 // MARK: - DetectedPhotoSide (Vision 正反面特徵分類)
@@ -20,6 +47,17 @@ enum DetectedPhotoSide: String, Sendable {
     case analyzing   = "分析中"
     case likelyFront = "正面"
     case likelyBack  = "背面"
+
+    var displayName: String {
+        switch self {
+        case .analyzing:
+            return L10n.tr("分析中", "解析中")
+        case .likelyFront:
+            return L10n.tr("正面", "表面")
+        case .likelyBack:
+            return L10n.tr("背面", "裏面")
+        }
+    }
 }
 
 // MARK: - StagingChekiPhoto (工作台單張相片暫存項目 — 支援背景預先偵測拍立得邊界、透視裁切預覽與 OCR)
@@ -56,6 +94,10 @@ struct StagingChekiPhoto: Identifiable, Equatable {
     var hasCompletedBoundaryDetection: Bool = false
     /// 使用者是否選擇復原為原始未裁切圖片
     var isRevertedToOriginal: Bool = false
+    /// 按下快門或開始匯入的時間。歸檔時寫入 App 內的原始拍攝日期，不覆寫判斷日期。
+    var shutterDate: Date = Date()
+    /// 旋轉或替換影像後遞增，讓卡片即使 JPEG 大小相近也會重繪。
+    var contentRevision: Int = 0
 
     /// 工作台卡片優先顯示已裁切預覽圖；若已選擇復原原圖或尚在背景偵測中則顯示原圖
     var displayUIImage: UIImage {
@@ -99,7 +141,8 @@ struct StagingChekiPhoto: Identifiable, Equatable {
         lhs.hasManuallyModifiedDate == rhs.hasManuallyModifiedDate &&
         lhs.resolvedFilmFormat == rhs.resolvedFilmFormat &&
         lhs.hasManuallyModifiedFormat == rhs.hasManuallyModifiedFormat &&
-        lhs.croppedImageData?.count == rhs.croppedImageData?.count
+        lhs.croppedImageData?.count == rhs.croppedImageData?.count &&
+        lhs.contentRevision == rhs.contentRevision
     }
 }
 
@@ -223,6 +266,7 @@ struct BatchPairingView: View {
     @AppStorage("defaultBorderInsetPercentage") private var defaultBorderInsetPercentage: Double = 0.0
 
     let initialPickerItems: [PhotosPickerItem]
+    let initialSessionPhotos: [CameraSessionPhoto]
     let defaultMember: IdolMember?
 
     @State private var pairingMode: BatchPairingMode = .autoPair
@@ -274,16 +318,17 @@ struct BatchPairingView: View {
     @State private var processedCount: Int = 0
     @State private var totalToProcess: Int = 0
     @State private var hasInitialized: Bool = false
-    @State private var isUsingSimulatedSample: Bool = false
-    @State private var systemPhotoSeedAlertMessage: String? = nil
 
     init(
         initialPickerItems: [PhotosPickerItem] = [],
+        initialSessionPhotos: [CameraSessionPhoto] = [],
         defaultMember: IdolMember? = nil
     ) {
         self.initialPickerItems = initialPickerItems
+        self.initialSessionPhotos = initialSessionPhotos
         self.defaultMember = defaultMember
         _defaultFallbackMember = State(initialValue: defaultMember)
+        _selectedTargetMembers = State(initialValue: defaultMember.map { [$0] } ?? [])
     }
 
     private var pairedCount: Int {
@@ -345,15 +390,18 @@ struct BatchPairingView: View {
             }
         }
         if uniqueNames.isEmpty {
-            return "未分類"
+            return L10n.tr("未分類", "未分類")
         } else if uniqueNames.count == 1 && !hasUncategorized {
             return uniqueNames[0]
         } else if uniqueNames.count == 1 && hasUncategorized {
-            return "\(uniqueNames[0]) ＋ 未分類"
+            return L10n.tr("\(uniqueNames[0]) ＋ 未分類", "\(uniqueNames[0]) ＋ 未分類")
         } else if uniqueNames.count == 2 && !hasUncategorized {
             return "\(uniqueNames[0])、\(uniqueNames[1])"
         } else {
-            return "\(uniqueNames[0])、\(uniqueNames[1]) 等 \(uniqueNames.count) 人"
+            return L10n.tr(
+                "\(uniqueNames[0])、\(uniqueNames[1]) 等 \(uniqueNames.count) 人",
+                "\(uniqueNames[0])、\(uniqueNames[1]) ほか \(uniqueNames.count) 名"
+            )
         }
     }
 
@@ -364,7 +412,7 @@ struct BatchPairingView: View {
                 VStack(spacing: 8) {
                     Picker("配對模式", selection: $pairingMode) {
                         ForEach(BatchPairingMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+                            Text(mode.displayName).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -382,7 +430,7 @@ struct BatchPairingView: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("批次匯入與配對")
+            .navigationTitle(L10n.tr("批次匯入", "一括取り込み"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -404,35 +452,16 @@ struct BatchPairingView: View {
                             Image(systemName: "plus")
                         }
                         .disabled(isProcessingBatch)
-                        .accessibilityLabel("從相簿追加照片（不限張數）")
+                        .accessibilityLabel(L10n.tr("相簿", "アルバム"))
 
                         Menu {
-                            Button {
-                                Task {
-                                    do {
-                                        let count = try await PhotoLibraryManager.shared.seedTestChekiPhotosToSystemLibrary(force: true)
-                                        systemPhotoSeedAlertMessage = "已成功將 \(count) 張帶封面手寫日期的拍立得相片寫入 iOS 原生相簿 (Photos.app)。\n\n現在可點選上方「＋」直接從系統相簿選取這 \(count) 張相片進行導入與自動日期判斷測試！"
-                                    } catch {
-                                        systemPhotoSeedAlertMessage = error.localizedDescription
-                                    }
-                                }
-                            } label: {
-                                Label("寫入 10 張帶日期拍立得至系統相簿 (Photos.app)", systemImage: "photo.badge.plus")
-                            }
-
-                            Button {
-                                loadSimulatedBatchSample()
-                            } label: {
-                                Label("載入 8 張內建測試組（多人＋雙正面警示）", systemImage: "sparkles.rectangle.stack")
-                            }
-
                             if totalWarningCount > 0 {
                                 Button {
                                     withAnimation(.snappy(duration: 0.25)) {
                                         resolveAllWarningsAutomatically()
                                     }
                                 } label: {
-                                    Label("一鍵修正所有警示項目", systemImage: "wand.and.stars")
+                                    Label(L10n.tr("修正全部警示", "すべての警告を修正"), systemImage: "wand.and.stars")
                                 }
                             }
 
@@ -446,16 +475,15 @@ struct BatchPairingView: View {
                                         selectedFirstSlotID = nil
                                         isSelectingPhotosToApply = false
                                         selectedSlotIDsForApply.removeAll()
-                                        isUsingSimulatedSample = false
                                     }
                                 } label: {
-                                    Label("清空工作台", systemImage: "trash")
+                                    Label(L10n.tr("清空", "クリア"), systemImage: "trash")
                                 }
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                         }
-                        .disabled(isProcessingBatch)
+                        .disabled(isProcessingBatch || allPhotos.isEmpty)
                     }
                 }
             }
@@ -481,36 +509,21 @@ struct BatchPairingView: View {
                 formatAndDateEditorSheetContent
             }
             .onChange(of: idolMembers.count) { oldCount, newCount in
-                // 當使用者透過「新增成員」建立新成員後，自動將最新建立的成員加入上方多選目標中
+                // 當使用者透過「新增成員」建立新成員後，自動將最新建立的成員選為目標相簿並同步更新卡片歸檔成員
                 if newCount > oldCount, let newestMember = idolMembers.last {
-                    if !selectedTargetMembers.contains(where: { $0.id == newestMember.id }) {
-                        selectedTargetMembers.append(newestMember)
-                    }
+                    selectTargetMember(newestMember, replacingAt: nil)
                 }
             }
-            .alert(
-                "iOS 系統相簿測試相片",
-                isPresented: Binding(
-                    get: { systemPhotoSeedAlertMessage != nil },
-                    set: { if !$0 { systemPhotoSeedAlertMessage = nil } }
-                )
-            ) {
-                Button("好", role: .cancel) {
-                    systemPhotoSeedAlertMessage = nil
+            .task(id: initialSessionPhotos.map(\.id)) {
+                if !hasInitialized {
+                    hasInitialized = true
+                    defaultFallbackMember = defaultMember
+                    selectedTargetMembers = defaultMember.map { [$0] } ?? []
                 }
-            } message: {
-                Text(systemPhotoSeedAlertMessage ?? "")
-            }
-            .task {
-                guard !hasInitialized else { return }
-                hasInitialized = true
-                defaultFallbackMember = nil
-                selectedTargetMembers = []
-                if !initialPickerItems.isEmpty {
-                    isUsingSimulatedSample = false
+                if !initialSessionPhotos.isEmpty {
+                    await appendSessionPhotos(initialSessionPhotos)
+                } else if allPhotos.isEmpty, !initialPickerItems.isEmpty {
                     await appendPickerItems(initialPickerItems)
-                } else {
-                    loadSimulatedBatchSample()
                 }
             }
             .onChange(of: additionalPickerItems) { _, newItems in
@@ -518,12 +531,6 @@ struct BatchPairingView: View {
                 let itemsToLoad = newItems
                 additionalPickerItems = []
                 Task {
-                    if isUsingSimulatedSample {
-                        allPhotos.removeAll()
-                        slots.removeAll()
-                        photoMemberAssignment.removeAll()
-                        isUsingSimulatedSample = false
-                    }
                     await appendPickerItems(itemsToLoad)
                 }
             }
@@ -545,6 +552,7 @@ struct BatchPairingView: View {
             }
         }
         .interactiveDismissDisabled()
+        .applyAppAppearanceAndLocale()
     }
 
     @ViewBuilder
@@ -576,6 +584,7 @@ struct BatchPairingView: View {
             )
             .presentationDetents([.height(500), .large])
             .presentationDragIndicator(.visible)
+            .applyAppAppearanceAndLocale()
         }
     }
 
@@ -634,21 +643,21 @@ struct BatchPairingView: View {
 
                     // 4. 格狀標題列
                     HStack {
-                        Text("已選取 \(allPhotos.count) 張照片 · 將輸出 \(slots.count) 張拍立得")
+                        Text(L10n.tr("\(allPhotos.count) 張相片 · 輸出 \(slots.count) 張", "\(allPhotos.count) 枚 · 出力 \(slots.count) 枚"))
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
 
                         Spacer()
 
                         if isSelectingPhotosToApply {
-                            Text("已勾選 \(selectedSlotIDsForApply.count) / \(slots.count) 張")
+                            Text("\(selectedSlotIDsForApply.count) / \(slots.count)")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(.blue)
                         } else if isAnalyzingSides || !allBoundariesDetected {
                             HStack(spacing: 4) {
                                 ProgressView()
                                     .controlSize(.mini)
-                                Text("背景偵測邊界 (\(boundaryDetectedPhotoCount)/\(allPhotos.count))")
+                                Text(L10n.tr("偵測邊界 \(boundaryDetectedPhotoCount)/\(allPhotos.count)", "境界検出 \(boundaryDetectedPhotoCount)/\(allPhotos.count)"))
                             }
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
@@ -657,7 +666,7 @@ struct BatchPairingView: View {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 10))
                                     .foregroundStyle(.green)
-                                Text("已完成邊界預裁切")
+                                Text(L10n.tr("已預裁切", "トリミング済"))
                                     .font(.caption2.weight(.medium))
                                     .foregroundStyle(.secondary)
                             }
@@ -683,9 +692,9 @@ struct BatchPairingView: View {
 
     private var multiMemberAndFormatHeaderCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // 第一列：左側「歸檔成員」標題 ＋ 右側「全部套用」&「選擇套用」按鈕（保留充足寬度不截斷）
+            // 第一列：左側「成員」標題 ＋ 右側「全部套用」&「選擇套用」按鈕
             HStack(spacing: 8) {
-                Label("歸檔成員", systemImage: "person.2.crop.square.stack")
+                Label(L10n.tr("成員", "メンバー"), systemImage: "person.2.crop.square.stack")
                     .font(.subheadline.weight(.medium))
 
                 Spacer()
@@ -694,44 +703,41 @@ struct BatchPairingView: View {
                 Button {
                     applyTargetMembersToAllSlots()
                 } label: {
-                    Text("全部套用")
+                    Text(L10n.tr("全部套用", "すべて適用"))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.primary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5.5)
-                        .background(Color(.tertiarySystemFill), in: Capsule())
+                        .pairingLiquidGlassCapsule()
                 }
                 .buttonStyle(.plain)
 
-                // 2. 選擇套用按鈕（緊接在「全部套用」後面：開啟照片多選模式，選完照片後確認一次套用）
+                // 2. 選擇套用按鈕
                 Button {
                     togglePhotoSelectionApplyMode()
                 } label: {
-                    Text(isSelectingPhotosToApply ? "取消選擇" : "選擇套用")
+                    Text(isSelectingPhotosToApply ? L10n.tr("取消", "キャンセル") : L10n.tr("選擇套用", "選択適用"))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(isSelectingPhotosToApply ? .white : .blue)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5.5)
-                        .background(
-                            isSelectingPhotosToApply
-                                ? AnyShapeStyle(Color.blue)
-                                : AnyShapeStyle(Color.blue.opacity(0.14)),
-                            in: Capsule()
-                        )
+                        .background {
+                            if isSelectingPhotosToApply {
+                                Capsule().fill(Color.blue)
+                            }
+                        }
+                        .modifier(OptionalLiquidGlassCapsuleModifier(isEnabled: !isSelectingPhotosToApply))
                 }
                 .buttonStyle(.plain)
             }
 
             // 第二列：成員選擇移至下方
-            // - 沒有選擇時：顯示「未分類 · 選擇成員 ⌄」下拉選單膠囊
-            // - 有選擇時：每個已選成員顯示為下拉選單膠囊框（直接點選可用多層下拉選單重選成員，右邊保持 X 按鈕取消），後面接著未選擇的下拉選單（可多選追加）
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(Array(selectedTargetMembers.enumerated()), id: \.element.id) { index, member in
                         selectedMemberDropdownCapsule(member: member, index: index)
                     }
 
-                    // 後方接著未選擇的多層下拉選單膠囊（未選擇時作為主選單，已選擇時可繼續多選追加成員）
                     unselectedMemberDropdownCapsule
                 }
             }
@@ -740,12 +746,11 @@ struct BatchPairingView: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    /// 已選中的成員下拉膠囊框：直接點選膠囊本體可用多層下拉選單重選該成員，右側保持 `X` 按鈕可取消移除
+    /// 已選中的成員下拉膠囊框
     private func selectedMemberDropdownCapsule(member: IdolMember, index: Int) -> some View {
         HStack(spacing: 2) {
-            // 左側主體：點選開啟多層下拉選單（團體 ➔ 成員 ➔ 新增成員）直接重選／替換此位置的成員
             Menu {
-                memberHierarchyMenuContent(replacingAt: index)
+                memberHierarchyMenuContent(replacingAt: nil)
             } label: {
                 HStack(spacing: 5) {
                     Circle()
@@ -773,6 +778,7 @@ struct BatchPairingView: View {
                 .padding(.vertical, 6)
                 .contentShape(Rectangle())
             }
+            .menuActionDismissBehavior(.disabled)
             .buttonStyle(.plain)
 
             // 右側：保持 X 按鈕取消該成員
@@ -794,32 +800,24 @@ struct BatchPairingView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("移除\(member.stageName)")
         }
-        .background(Color(.tertiarySystemFill), in: Capsule())
+        .pairingLiquidGlassCapsule()
     }
 
-    /// 未選擇的成員多層下拉選單膠囊（沒有選擇任何成員時顯示「未分類 · 選擇成員」，已有選擇時緊接在後方供多選追加）
+    /// 未選擇的成員多層下拉選單膠囊
     private var unselectedMemberDropdownCapsule: some View {
-        Menu {
+        let isEmpty = selectedTargetMembers.isEmpty
+        return Menu {
             memberHierarchyMenuContent(replacingAt: nil)
         } label: {
             HStack(spacing: 5) {
-                if selectedTargetMembers.isEmpty {
-                    Image(systemName: "person.crop.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("未分類 · 選擇成員")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: true, vertical: false)
-                } else {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.secondary)
-                    Text("選擇成員")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
+                Image(systemName: isEmpty ? "person.crop.circle" : "plus")
+                    .font(isEmpty ? .caption : .system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+
+                Text(isEmpty ? L10n.tr("未分類", "未分類") : L10n.tr("成員", "メンバー"))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(isEmpty ? .primary : .secondary)
+                    .fixedSize(horizontal: true, vertical: false)
 
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9.5, weight: .bold))
@@ -827,100 +825,33 @@ struct BatchPairingView: View {
             }
             .padding(.horizontal, 11)
             .padding(.vertical, 6)
-            .background(Color(.tertiarySystemFill), in: Capsule())
+            .pairingLiquidGlassCapsule()
         }
+        .menuActionDismissBehavior(.disabled)
         .buttonStyle(.plain)
     }
 
-    /// 多層級成員選單內容（第一層：團體 ➔ 第二層：成員，最後可新增成員）
-    /// - Parameter replacingAt: 若為 `Int` 代表重選並替換該索引的膠囊成員；若為 `nil` 代表在後方追加新成員
+    /// 多層級成員選單內容（共用 MemberHierarchyMenuContent）
     @ViewBuilder
     private func memberHierarchyMenuContent(replacingAt index: Int?) -> some View {
-        let ungroupedMembers = idolMembers.filter { $0.group == nil }
-        let currentMemberAtSlot: IdolMember? = {
-            if let idx = index, selectedTargetMembers.indices.contains(idx) {
-                return selectedTargetMembers[idx]
-            }
-            return nil
-        }()
-
-        Section(index != nil ? "重新選擇成員" : "選擇成員（可多選）") {
-            ForEach(idolGroups) { group in
-                let groupMembers = idolMembers.filter { $0.group?.id == group.id }
-                if !groupMembers.isEmpty {
-                    Menu(group.name) {
-                        ForEach(groupMembers) { member in
-                            let isCurrent = (currentMemberAtSlot?.id == member.id)
-                            let isAlreadyInList = selectedTargetMembers.contains(where: { $0.id == member.id })
-                            Button {
-                                selectTargetMember(member, replacingAt: index)
-                            } label: {
-                                Label(
-                                    member.stageName,
-                                    systemImage: isCurrent
-                                        ? "checkmark.circle.fill"
-                                        : (isAlreadyInList ? "checkmark" : "person")
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !ungroupedMembers.isEmpty {
-                Menu("未分團成員") {
-                    ForEach(ungroupedMembers) { member in
-                        let isCurrent = (currentMemberAtSlot?.id == member.id)
-                        let isAlreadyInList = selectedTargetMembers.contains(where: { $0.id == member.id })
-                        Button {
-                            selectTargetMember(member, replacingAt: index)
-                        } label: {
-                            Label(
-                                member.stageName,
-                                systemImage: isCurrent
-                                    ? "checkmark.circle.fill"
-                                    : (isAlreadyInList ? "checkmark" : "person")
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        if let idx = index {
-            Divider()
-            Button(role: .destructive) {
+        MemberHierarchyMenuContent(
+            selectedMemberIDs: Set(selectedTargetMembers.map(\.id)),
+            showsUncategorizedOption: !selectedTargetMembers.isEmpty,
+            uncategorizedTitle: L10n.tr("未分類", "未分類"),
+            uncategorizedIcon: "tray",
+            isUncategorizedDestructive: true,
+            onToggleMember: { member in
+                selectTargetMember(member, replacingAt: index)
+            },
+            onClearSelection: {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(.snappy(duration: 0.2)) {
-                    if selectedTargetMembers.indices.contains(idx) {
-                        selectedTargetMembers.remove(at: idx)
-                        defaultFallbackMember = selectedTargetMembers.first
-                    }
-                }
-            } label: {
-                Label("移除此成員", systemImage: "xmark.circle")
+                selectedTargetMembers.removeAll()
+                defaultFallbackMember = nil
+            },
+            onCreateMember: {
+                showingQuickCreateMemberSheet = true
             }
-        } else if !selectedTargetMembers.isEmpty {
-            Divider()
-            Button(role: .destructive) {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(.snappy(duration: 0.2)) {
-                    selectedTargetMembers.removeAll()
-                    defaultFallbackMember = nil
-                }
-            } label: {
-                Label("清空所有已選成員（設為未分類）", systemImage: "tray")
-            }
-        }
-
-        Divider()
-
-        // 最後一項：新增成員
-        Button {
-            showingQuickCreateMemberSheet = true
-        } label: {
-            Label("新增成員…", systemImage: "person.badge.plus")
-        }
+        )
     }
 
     // MARK: - 3. 格狀卡片單元：撲克牌兩張展開樣式 (Playing-Card Fan) & 單張直立樣式
@@ -1132,7 +1063,7 @@ struct BatchPairingView: View {
 
                 Spacer()
 
-                // 4. 底部中央：撲克牌交疊處的「⇄ 對調正反」或異常提示膠囊
+                // 4. 底部中央：撲克牌交疊處的「⇄ 對調」或異常提示膠囊
                 if !isSelectingPhotosToApply {
                     HStack {
                         if slot.isDoubleFrontWarning {
@@ -1142,7 +1073,7 @@ struct BatchPairingView: View {
                                     unpairSlot(id: slot.id)
                                 }
                             } label: {
-                                Label("疑似雙正面 · 點此拆開", systemImage: "exclamationmark.triangle.fill")
+                                Label(L10n.tr("雙正面 · 拆開", "両方表面 · 分割"), systemImage: "exclamationmark.triangle.fill")
                                     .font(.system(size: 10, weight: .bold))
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 8)
@@ -1157,7 +1088,7 @@ struct BatchPairingView: View {
                                     swapSlotSides(id: slot.id)
                                 }
                             } label: {
-                                Label("順序顛倒 · 點此對調", systemImage: "arrow.left.arrow.right")
+                                Label(L10n.tr("順序顛倒 · 對調", "表裏逆 · 入替"), systemImage: "arrow.left.arrow.right")
                                     .font(.system(size: 10, weight: .bold))
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 8)
@@ -1175,7 +1106,7 @@ struct BatchPairingView: View {
                                 HStack(spacing: 3) {
                                     Image(systemName: "arrow.left.arrow.right")
                                         .font(.system(size: 9.5, weight: .bold))
-                                    Text("對調正反")
+                                    Text(L10n.tr("對調", "入替"))
                                         .font(.system(size: 10, weight: .semibold))
                                 }
                                 .foregroundStyle(.primary)
@@ -1195,8 +1126,6 @@ struct BatchPairingView: View {
     }
 
     /// 單張直立拍立得樣式 (Single Card Stage — 優先顯示背景已裁切預覽圖)
-    /// - 點選拍立得本體 (`Image`)：開啟放大預覽（背景模糊、確認邊界與手寫日期、可手動調整）
-    /// - 點選框框外側白色部分：配對正反面
     private func singleCardStageView(
         slot: ChekiPairingSlot,
         photo: StagingChekiPhoto,
@@ -1238,26 +1167,15 @@ struct BatchPairingView: View {
 
                     if !isSelectingPhotosToApply {
                         VStack(alignment: .trailing, spacing: 4) {
-                            // 1. 右上角最上方：正面 / 背面
-                            HStack(spacing: 3) {
-                                if photo.isDetectingBoundary {
-                                    ProgressView()
-                                        .controlSize(.mini)
-                                        .tint(.white)
-                                        .scaleEffect(0.7)
-                                }
-                                Text(photo.detectedSide.rawValue)
-                                    .font(.system(size: 9.5, weight: .bold))
-                                    .foregroundStyle(.white)
+                            if photo.isDetectingBoundary {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .tint(.white)
+                                    .scaleEffect(0.7)
+                                    .padding(6)
+                                    .background(Color.black.opacity(0.45), in: Circle())
                             }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2.5)
-                            .background(
-                                photo.detectedSide == .likelyBack ? Color.purple.opacity(0.85) : Color.black.opacity(0.58),
-                                in: Capsule()
-                            )
 
-                            // 2. 正面下方：相紙規格 ＋ 3. 相紙規格下方：判斷日期（無日期則顯示空白）
                             slotFormatAndDateBadgesButton(for: slot)
                         }
                     }
@@ -1275,7 +1193,7 @@ struct BatchPairingView: View {
                         HStack(spacing: 3) {
                             Image(systemName: isSelectedFirst ? "checkmark.circle.fill" : "link.badge.plus")
                                 .font(.system(size: 10, weight: .bold))
-                            Text(isSelectedFirst ? "已選為正面 · 點另一張外框配對" : "點選外框配對正反")
+                            Text(isSelectedFirst ? L10n.tr("點另一張外框配對", "別の白枠でペアリング") : L10n.tr("點外框配對", "白枠でペアリング"))
                                 .font(.system(size: 10, weight: .semibold))
                         }
                         .foregroundStyle(isSelectedFirst ? .white : .primary)
@@ -1296,8 +1214,6 @@ struct BatchPairingView: View {
     }
 
     /// 每個相片格右上角（位於「正面」正下方）的「相紙規格」與「判斷日期」垂直疊加膠囊
-    /// - 判斷有日期時顯示於相紙規格下方；判斷沒有日期時顯示空白
-    /// - 擴大點擊熱區並整合為單一觸控區，點選後彈出大尺寸半頁面板 (`SlotFormatAndDateEditorSheet`) 供輕鬆修改相紙規格與日期
     private func slotFormatAndDateBadgesButton(for slot: ChekiPairingSlot) -> some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -1329,74 +1245,29 @@ struct BatchPairingView: View {
                         .shadow(color: .black.opacity(0.14), radius: 2, x: 0, y: 1)
                 }
             }
-            // 向左與向下擴展透明點擊熱區（避免膠囊較小不好點選，且不會誤觸底層配對）
             .padding(.leading, 14)
             .padding(.bottom, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("修改相紙規格與拍攝日期")
+        .accessibilityLabel(L10n.tr("規格與日期", "サイズと日付"))
     }
 
-    /// 每組拍立得卡片正下方的「多層多選成員膠囊」(支援依團體 ➔ 成員複選，最後可新增成員)
+    /// 每組拍立得卡片正下方的「多層多選成員膠囊」
     private func perSlotMemberSelectorPill(for slot: ChekiPairingSlot) -> some View {
-        let ungroupedMembers = idolMembers.filter { $0.group == nil }
-
-        return Menu {
-            Section("指派此張拍立得的歸檔成員（可複選）") {
-                ForEach(idolGroups) { group in
-                    let groupMembers = idolMembers.filter { $0.group?.id == group.id }
-                    if !groupMembers.isEmpty {
-                        Menu(group.name) {
-                            ForEach(groupMembers) { member in
-                                let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
-                                Button {
-                                    toggleMember(member, forSlotID: slot.id)
-                                } label: {
-                                    Label(
-                                        member.stageName,
-                                        systemImage: isAssigned ? "checkmark.circle.fill" : "circle"
-                                    )
-                                }
-                                .menuActionDismissBehavior(.disabled)
-                            }
-                        }
-                    }
+        Menu {
+            MemberHierarchyMenuContent(
+                selectedMemberIDs: Set(slot.assignedMembers.map(\.id)),
+                onToggleMember: { member in
+                    toggleMember(member, forSlotID: slot.id)
+                },
+                onClearSelection: {
+                    setMembers([], forSlotID: slot.id)
+                },
+                onCreateMember: {
+                    showingQuickCreateMemberSheet = true
                 }
-
-                if !ungroupedMembers.isEmpty {
-                    Menu("未分團成員") {
-                        ForEach(ungroupedMembers) { member in
-                            let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
-                            Button {
-                                toggleMember(member, forSlotID: slot.id)
-                            } label: {
-                                Label(
-                                    member.stageName,
-                                    systemImage: isAssigned ? "checkmark.circle.fill" : "circle"
-                                )
-                            }
-                            .menuActionDismissBehavior(.disabled)
-                        }
-                    }
-                }
-            }
-
-            Divider()
-
-            Button {
-                setMembers([], forSlotID: slot.id)
-            } label: {
-                Label("設為「未分類」", systemImage: slot.assignedMembers.isEmpty ? "checkmark" : "tray")
-            }
-
-            Divider()
-
-            Button {
-                showingQuickCreateMemberSheet = true
-            } label: {
-                Label("新增成員…", systemImage: "person.badge.plus")
-            }
+            )
         } label: {
             HStack(spacing: 6) {
                 if let primary = slot.assignedMembers.first {
@@ -1427,7 +1298,7 @@ struct BatchPairingView: View {
                     Image(systemName: "tray")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("未分類")
+                    Text(L10n.tr("未分類", "未分類"))
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -1443,6 +1314,7 @@ struct BatchPairingView: View {
             .padding(.vertical, 7)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+        .menuActionDismissBehavior(.disabled)
         .buttonStyle(.plain)
     }
 
@@ -1472,59 +1344,46 @@ struct BatchPairingView: View {
         Button {
             openMagnifiedPreview(slotID: slot.id, side: .front)
         } label: {
-            Label("放大預覽（確認邊界與日期）", systemImage: "plus.magnifyingglass")
+            Label(L10n.tr("放大預覽", "拡大プレビュー"), systemImage: "plus.magnifyingglass")
         }
 
         Button {
             manualCropEditingPhotoID = slot.frontPhoto.id
         } label: {
-            Label("手動調整邊界（正面）…", systemImage: "crop")
+            Label(L10n.tr("正面邊界", "表面の境界"), systemImage: "crop")
         }
 
         if let backPhoto = slot.backPhoto {
             Button {
                 manualCropEditingPhotoID = backPhoto.id
             } label: {
-                Label("手動調整邊界（背面）…", systemImage: "crop.rotate")
+                Label(L10n.tr("背面邊界", "裏面の境界"), systemImage: "crop.rotate")
             }
         }
 
         Button {
             editingSlotForFormatAndDateID = slot.id
         } label: {
-            Label("修改相紙規格與日期…", systemImage: "calendar.badge.clock")
+            Label(L10n.tr("規格與日期", "サイズと日付"), systemImage: "calendar.badge.clock")
         }
 
         Menu {
-            ForEach(idolGroups) { group in
-                let groupMembers = idolMembers.filter { $0.group?.id == group.id }
-                if !groupMembers.isEmpty {
-                    Menu(group.name) {
-                        ForEach(groupMembers) { member in
-                            let isAssigned = slot.assignedMembers.contains(where: { $0.id == member.id })
-                            Button {
-                                toggleMember(member, forSlotID: slot.id)
-                            } label: {
-                                Label(member.stageName, systemImage: isAssigned ? "checkmark.circle.fill" : "circle")
-                            }
-                        }
-                    }
+            MemberHierarchyMenuContent(
+                selectedMemberIDs: Set(slot.assignedMembers.map(\.id)),
+                onToggleMember: { member in
+                    toggleMember(member, forSlotID: slot.id)
+                },
+                onClearSelection: {
+                    setMembers([], forSlotID: slot.id)
+                },
+                onCreateMember: {
+                    showingQuickCreateMemberSheet = true
                 }
-            }
-            Divider()
-            Button {
-                setMembers([], forSlotID: slot.id)
-            } label: {
-                Label("未分類", systemImage: slot.assignedMembers.isEmpty ? "checkmark" : "tray")
-            }
-            Button {
-                showingQuickCreateMemberSheet = true
-            } label: {
-                Label("新增成員…", systemImage: "person.badge.plus")
-            }
+            )
         } label: {
-            Label("指派歸檔成員", systemImage: "person.crop.circle")
+            Label(L10n.tr("成員", "メンバー"), systemImage: "person.crop.circle")
         }
+        .menuActionDismissBehavior(.disabled)
 
         if slot.isPaired {
             Button {
@@ -1532,7 +1391,7 @@ struct BatchPairingView: View {
                     swapSlotSides(id: slot.id)
                 }
             } label: {
-                Label("對調正反面順序", systemImage: "arrow.left.arrow.right")
+                Label(L10n.tr("對調正反", "表裏を入替"), systemImage: "arrow.left.arrow.right")
             }
 
             Button {
@@ -1540,14 +1399,14 @@ struct BatchPairingView: View {
                     unpairSlot(id: slot.id)
                 }
             } label: {
-                Label("解除配對（拆為 2 張單面）", systemImage: "rectangle.on.rectangle.slash")
+                Label(L10n.tr("拆開", "分割"), systemImage: "rectangle.on.rectangle.slash")
             }
         } else {
             Button {
                 handleManualTap(on: slot)
             } label: {
                 Label(
-                    selectedFirstSlotID == slot.id ? "取消選為正面" : "選為正面並與另一張配對",
+                    selectedFirstSlotID == slot.id ? L10n.tr("取消選取", "選択解除") : L10n.tr("配對正反", "ペアリング"),
                     systemImage: "link.badge.plus"
                 )
             }
@@ -1560,7 +1419,7 @@ struct BatchPairingView: View {
                 }
             } label: {
                 Label(
-                    slot.frontPhoto.isRevertedToOriginal ? "套用自動邊界裁切" : "復原為原始未裁切圖片",
+                    slot.frontPhoto.isRevertedToOriginal ? L10n.tr("自動裁切", "自動トリミング") : L10n.tr("復原原圖", "元画像に戻す"),
                     systemImage: slot.frontPhoto.isRevertedToOriginal ? "crop" : "arrow.uturn.backward.circle"
                 )
             }
@@ -1573,7 +1432,7 @@ struct BatchPairingView: View {
                 removeSlot(id: slot.id)
             }
         } label: {
-            Label("從本次匯入移除", systemImage: "trash")
+            Label(L10n.tr("移除", "除外"), systemImage: "trash")
         }
     }
 
@@ -1605,7 +1464,7 @@ struct BatchPairingView: View {
         }
     }
 
-    // MARK: - 3.5 點選拍立得本體：模糊背景放大預覽 (確認邊界與手寫日期 + 再點一下取消預覽 + 手動調整按鈕)
+    // MARK: - 3.5 點選拍立得本體：模糊背景放大預覽
 
     private func openMagnifiedPreview(slotID: UUID, side: PreviewPhotoSide) {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -1642,7 +1501,7 @@ struct BatchPairingView: View {
             let dragProgress = min(1.0, max(0.0, previewDragOffset / 220.0))
 
             ZStack {
-                // 1. 模糊背景遮罩（再點一下背景或往下拉即取消預覽回到導入頁面）
+                // 1. 模糊背景遮罩
                 Rectangle()
                     .fill(.ultraThinMaterial)
                     .overlay(Color.black.opacity(0.38 * (1.0 - dragProgress * 0.5)))
@@ -1652,14 +1511,15 @@ struct BatchPairingView: View {
                         dismissMagnifiedPreview()
                     }
 
-                // 2. 預覽主體內容（頂部資訊列 ＋ 中央放大拍立得 ＋ 底部手動調整按鈕列）
+                // 2. 預覽主體內容
                 VStack(spacing: 14) {
-                    // 頂部：左側序號與正反面切換、右側相紙規格與判斷日期按鈕 ＋ 關閉按鈕
-                    HStack(spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
                         HStack(spacing: 6) {
                             Text("#\(activePhoto.sequenceNumber)")
                                 .font(.subheadline.weight(.bold).monospacedDigit())
                                 .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
 
                             if slot.isPaired {
                                 HStack(spacing: 2) {
@@ -1670,13 +1530,15 @@ struct BatchPairingView: View {
                                             previewZoomScale = 1.0
                                         }
                                     } label: {
-                                        Text("正面")
+                                        Text(L10n.tr("正面", "表面"))
                                             .font(.caption.weight(.bold))
-                                            .foregroundStyle(previewingSide == .front ? .black : .white.opacity(0.85))
+                                            .foregroundStyle(previewingSide == .front ? Color.black : Color.white)
+                                            .lineLimit(1)
+                                            .fixedSize(horizontal: true, vertical: false)
                                             .padding(.horizontal, 10)
                                             .padding(.vertical, 4)
                                             .background(
-                                                previewingSide == .front ? Color.yellow : Color.clear,
+                                                previewingSide == .front ? Color.white : Color.clear,
                                                 in: Capsule()
                                             )
                                     }
@@ -1689,13 +1551,15 @@ struct BatchPairingView: View {
                                             previewZoomScale = 1.0
                                         }
                                     } label: {
-                                        Text("背面")
+                                        Text(L10n.tr("背面", "裏面"))
                                             .font(.caption.weight(.bold))
-                                            .foregroundStyle(previewingSide == .back ? .black : .white.opacity(0.85))
+                                            .foregroundStyle(previewingSide == .back ? Color.black : Color.white)
+                                            .lineLimit(1)
+                                            .fixedSize(horizontal: true, vertical: false)
                                             .padding(.horizontal, 10)
                                             .padding(.vertical, 4)
                                             .background(
-                                                previewingSide == .back ? Color.yellow : Color.clear,
+                                                previewingSide == .back ? Color.white : Color.clear,
                                                 in: Capsule()
                                             )
                                     }
@@ -1703,20 +1567,14 @@ struct BatchPairingView: View {
                                 }
                                 .padding(3)
                                 .background(Color.white.opacity(0.16), in: Capsule())
-                            } else {
-                                Text(activePhoto.detectedSide.rawValue)
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3.5)
-                                    .background(Color.white.opacity(0.18), in: Capsule())
                             }
                         }
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 6)
+                        .fixedSize(horizontal: true, vertical: false)
                         .background(Color.black.opacity(0.45), in: Capsule())
 
-                        Spacer()
+                        Spacer(minLength: 8)
 
                         // 點選可直接修改相紙規格與拍攝日期
                         Button {
@@ -1726,19 +1584,25 @@ struct BatchPairingView: View {
                             HStack(spacing: 6) {
                                 Text(slot.shortFormatBadgeText)
                                     .font(.caption.weight(.bold))
-                                    .foregroundStyle(.black)
+                                    .foregroundStyle(.white)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
                                     .padding(.horizontal, 7)
                                     .padding(.vertical, 2.5)
-                                    .background(Color.yellow, in: Capsule())
+                                    .background(Color.white.opacity(0.22), in: Capsule())
 
                                 if let dateStr = slot.formattedDetectedDateString {
                                     Text(dateStr)
                                         .font(.caption.monospacedDigit().weight(.bold))
                                         .foregroundStyle(.white)
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: true, vertical: false)
                                 } else {
-                                    Text("無日期")
+                                    Text(L10n.tr("無日期", "日付なし"))
                                         .font(.caption.weight(.medium))
                                         .foregroundStyle(.white.opacity(0.65))
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: true, vertical: false)
                                 }
 
                                 Image(systemName: "chevron.up.chevron.down")
@@ -1748,11 +1612,13 @@ struct BatchPairingView: View {
                             .padding(.leading, 6)
                             .padding(.trailing, 10)
                             .padding(.vertical, 6)
+                            .fixedSize(horizontal: true, vertical: false)
                             .background(Color.black.opacity(0.50), in: Capsule())
                         }
                         .buttonStyle(.plain)
+                        .fixedSize(horizontal: true, vertical: false)
 
-                        // 右上角關閉預覽按鈕（回到導入頁面）
+                        // 右上角關閉預覽按鈕
                         Button {
                             dismissMagnifiedPreview()
                         } label: {
@@ -1763,12 +1629,12 @@ struct BatchPairingView: View {
                                 .background(Color.black.opacity(0.50), in: Circle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("關閉預覽回到導入頁面")
+                        .accessibilityLabel(L10n.tr("關閉", "閉じる"))
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 10)
                     .padding(.top, 12)
 
-                    // 中央：放大拍立得本體（再點一下拍立得或背景、或往下拉即可回到導入頁面）
+                    // 中央：放大拍立得本體
                     ZStack {
                         Color.clear
                             .contentShape(Rectangle())
@@ -1812,8 +1678,7 @@ struct BatchPairingView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    // 提示文字：再點一下或往下拉即可取消預覽回到導入頁面
-                    Text("再點一下畫面或往下拉即可回到導入頁面 · 雙指可縮放檢視")
+                    Text(L10n.tr("點選或下拉返回 · 雙指縮放", "タップまたはスワイプで戻る · ピンチで拡大"))
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.white.opacity(0.75))
                         .onTapGesture {
@@ -1822,7 +1687,6 @@ struct BatchPairingView: View {
 
                     // 底部操作列：手動調整邊界（僅留 Icon）＋「規格與日期」按鈕
                     HStack(spacing: 12) {
-                        // 1. 手動調整邊界按鈕（只留 Icon）
                         Button {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                             withAnimation(.snappy(duration: 0.22)) {
@@ -1831,15 +1695,28 @@ struct BatchPairingView: View {
                         } label: {
                             Image(systemName: "crop")
                                 .font(.system(size: 17, weight: .bold))
-                                .foregroundStyle(.black)
+                                .foregroundStyle(.white)
                                 .frame(width: 44, height: 44)
-                                .background(Color.yellow, in: Circle())
+                                .background(Color.white.opacity(0.18), in: Circle())
                                 .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("手動調整邊界")
+                        .accessibilityLabel(L10n.tr("調整邊界", "境界を調整"))
 
-                        // 2. 修改規格與日期按鈕
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            rotateStagingPhotoQuarterTurn(photoID: activePhoto.id)
+                        } label: {
+                            Image(systemName: "rotate.left")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                                .background(Color.white.opacity(0.18), in: Circle())
+                                .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(L10n.tr("旋轉", "回転"))
+
                         Button {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             editingSlotForFormatAndDateID = slot.id
@@ -1897,19 +1774,19 @@ struct BatchPairingView: View {
                 .foregroundStyle(.orange)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Vision 偵測到 \(totalWarningCount) 組配對異常")
+                Text(L10n.tr("\(totalWarningCount) 組配對異常", "\(totalWarningCount) 組のペアリング異常"))
                     .font(.subheadline.weight(.semibold))
 
                 if doubleFrontWarningCount > 0 && reversedWarningCount > 0 {
-                    Text("含 \(doubleFrontWarningCount) 組疑似雙正面、\(reversedWarningCount) 組正反顛倒")
+                    Text(L10n.tr("雙正面 \(doubleFrontWarningCount) · 顛倒 \(reversedWarningCount)", "両方表面 \(doubleFrontWarningCount) · 表裏逆 \(reversedWarningCount)"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else if doubleFrontWarningCount > 0 {
-                    Text("有 \(doubleFrontWarningCount) 組連續兩張皆為正面，建議拆開")
+                    Text(L10n.tr("\(doubleFrontWarningCount) 組疑似雙正面", "\(doubleFrontWarningCount) 組が両方表面"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("有 \(reversedWarningCount) 組第一張為背面、第二張為正面")
+                    Text(L10n.tr("\(reversedWarningCount) 組正反顛倒", "\(reversedWarningCount) 組が表裏逆"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1917,7 +1794,7 @@ struct BatchPairingView: View {
 
             Spacer()
 
-            Button("自動修正") {
+            Button(L10n.tr("修正", "修正")) {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 withAnimation(.snappy(duration: 0.25)) {
                     resolveAllWarningsAutomatically()
@@ -1931,14 +1808,14 @@ struct BatchPairingView: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    /// 「選擇套用」模式橫幅：多選下方拍立得卡片後，按「確認套用」一次套用上方所選成員
+    /// 「選擇套用」模式橫幅
     private var photoMultiSelectApplyBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.badge.questionmark.fill")
                 .font(.subheadline)
                 .foregroundStyle(.blue)
 
-            Text("請點選要套用「**\(selectedTargetMembersDisplayString)**」的照片")
+            Text(L10n.tr("點選相片套用 \(selectedTargetMembersDisplayString)", "写真を選択して \(selectedTargetMembersDisplayString) を適用"))
                 .font(.caption)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
@@ -1958,7 +1835,7 @@ struct BatchPairingView: View {
             .buttonStyle(.bordered)
             .controlSize(.mini)
 
-            Button("確認套用(\(selectedSlotIDsForApply.count)張)") {
+            Button(L10n.tr("套用 · \(selectedSlotIDsForApply.count)", "適用 · \(selectedSlotIDsForApply.count)")) {
                 confirmApplyTargetMembersToSelectedSlots()
             }
             .buttonStyle(.borderedProminent)
@@ -1977,7 +1854,7 @@ struct BatchPairingView: View {
 
             if let firstID = selectedFirstSlotID,
                let firstSlot = slots.first(where: { $0.id == firstID }) {
-                Text("已選取 **#\(firstSlot.frontPhoto.sequenceNumber)** 為正面，請點選另一張卡片的「外框白色部分」合成正反組")
+                Text(L10n.tr("已選 #\(firstSlot.frontPhoto.sequenceNumber)，點選另一張外框配對", "#\(firstSlot.frontPhoto.sequenceNumber) を選択中 · 別の白枠をタップしてペアリング"))
                     .font(.caption)
                 Spacer()
                 Button("取消") {
@@ -1988,7 +1865,7 @@ struct BatchPairingView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
             } else {
-                Text("點選「外框白色部分」可配對正反面；點選「拍立得本體」可放大預覽與手動調整邊界")
+                Text(L10n.tr("點外框配對正反 · 點相片放大預覽", "白枠でペアリング · 写真タップで拡大"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
@@ -2003,7 +1880,7 @@ struct BatchPairingView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("關閉操作提示")
+                .accessibilityLabel(L10n.tr("關閉", "閉じる"))
             }
         }
         .padding(10)
@@ -2017,7 +1894,7 @@ struct BatchPairingView: View {
             Spacer()
             ProgressView()
                 .controlSize(.large)
-            Text("正在載入照片並分析正反面特徵…")
+            Text(L10n.tr("分析中…", "解析中…"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -2027,29 +1904,18 @@ struct BatchPairingView: View {
 
     private var emptyWorkbenchView: some View {
         ContentUnavailableView {
-            Label("尚未選取拍立得照片", systemImage: "photo.on.rectangle.angled")
-        } description: {
-            Text("從系統相簿多選匯入拍立得照片（不限張數），支援一次為不同成員的拍立得個別歸檔與正反配對。")
+            Label(L10n.tr("尚無照片", "写真なし"), systemImage: "photo.on.rectangle.angled")
         } actions: {
-            VStack(spacing: 12) {
-                PhotosPicker(
-                    selection: $additionalPickerItems,
-                    maxSelectionCount: nil,
-                    matching: .images,
-                    preferredItemEncoding: .automatic,
-                    photoLibrary: .shared()
-                ) {
-                    Label("從相簿選取照片（無張數上限）", systemImage: "photo.badge.plus")
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button {
-                    loadSimulatedBatchSample()
-                } label: {
-                    Label("載入 8 張測試照片組", systemImage: "sparkles.rectangle.stack")
-                }
-                .buttonStyle(.bordered)
+            PhotosPicker(
+                selection: $additionalPickerItems,
+                maxSelectionCount: nil,
+                matching: .images,
+                preferredItemEncoding: .automatic,
+                photoLibrary: .shared()
+            ) {
+                Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
             }
+            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -2059,7 +1925,7 @@ struct BatchPairingView: View {
         VStack(spacing: 6) {
             HStack {
                 Label(
-                    "雙面 \(pairedCount) 組 · 單面 \(singleCount) 張",
+                    L10n.tr("雙面 \(pairedCount) · 單面 \(singleCount)", "両面 \(pairedCount) · 片面 \(singleCount)"),
                     systemImage: "rectangle.portrait.on.rectangle.portrait"
                 )
                 .font(.caption.weight(.medium))
@@ -2068,12 +1934,12 @@ struct BatchPairingView: View {
                 Spacer()
 
                 if isSelectingPhotosToApply {
-                    Text("目標：\(selectedTargetMembersDisplayString)")
+                    Text(selectedTargetMembersDisplayString)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.blue)
                         .lineLimit(1)
                 } else if totalWarningCount > 0 {
-                    Label("\(totalWarningCount) 項待確認", systemImage: "exclamationmark.triangle.fill")
+                    Label(L10n.tr("\(totalWarningCount) 項待確認", "\(totalWarningCount) 件要確認"), systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
                 } else {
@@ -2104,7 +1970,7 @@ struct BatchPairingView: View {
                     Button {
                         confirmApplyTargetMembersToSelectedSlots()
                     } label: {
-                        Text("確認套用(\(selectedSlotIDsForApply.count)張)")
+                        Text(L10n.tr("套用 · \(selectedSlotIDsForApply.count) 張", "適用 · \(selectedSlotIDsForApply.count) 枚"))
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
@@ -2129,8 +1995,8 @@ struct BatchPairingView: View {
                         }
                         Text(
                             allBoundariesDetected
-                                ? "確認歸檔（共 \(slots.count) 張拍立得）"
-                                : "背景偵測邊界中 (\(boundaryDetectedPhotoCount)/\(allPhotos.count)) · 點此歸檔"
+                                ? L10n.tr("歸檔 · \(slots.count) 張", "保存 · \(slots.count) 枚")
+                                : L10n.tr("偵測中 \(boundaryDetectedPhotoCount)/\(allPhotos.count) · 歸檔", "検出中 \(boundaryDetectedPhotoCount)/\(allPhotos.count) · 保存")
                         )
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
@@ -2165,10 +2031,10 @@ struct BatchPairingView: View {
                 .progressViewStyle(.linear)
                 .frame(width: 210)
 
-                Text("正在執行透視校正與多人歸檔…")
+                Text(L10n.tr("歸檔中…", "保存中…"))
                     .font(.subheadline.weight(.semibold))
 
-                Text("已完成 \(processedCount) / \(totalToProcess) 張拍立得")
+                Text("\(processedCount) / \(totalToProcess)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -2181,20 +2047,33 @@ struct BatchPairingView: View {
 
     private func selectTargetMember(_ member: IdolMember, replacingAt index: Int?) {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(.snappy(duration: 0.2)) {
-            if let idx = index, selectedTargetMembers.indices.contains(idx) {
-                // 直接點選已選成員膠囊重選成員：替換該位置的成員，並移除可能重複的項目
-                selectedTargetMembers[idx] = member
-                for i in selectedTargetMembers.indices.reversed() where i != idx && selectedTargetMembers[i].id == member.id {
-                    selectedTargetMembers.remove(at: i)
-                }
+        let previousTargetIDs = Set(selectedTargetMembers.map(\.id))
+        if let idx = index, selectedTargetMembers.indices.contains(idx) {
+            selectedTargetMembers[idx] = member
+            for i in selectedTargetMembers.indices.reversed() where i != idx && selectedTargetMembers[i].id == member.id {
+                selectedTargetMembers.remove(at: i)
+            }
+        } else {
+            // 多選切換：已存在則移除，尚未選擇則追加（選單不自動關閉）
+            if let existingIdx = selectedTargetMembers.firstIndex(where: { $0.id == member.id }) {
+                selectedTargetMembers.remove(at: existingIdx)
             } else {
-                // 點選後方的「未選擇下拉選單」：追加選擇新成員（可多選用）
-                if !selectedTargetMembers.contains(where: { $0.id == member.id }) {
-                    selectedTargetMembers.append(member)
+                selectedTargetMembers.append(member)
+            }
+        }
+        defaultFallbackMember = selectedTargetMembers.first
+        // 若未處於「選擇套用」模式，上方選擇歸檔成員時預設同步更新目前尚未單獨指定成員、或原本跟隨上方預設成員的卡片
+        if !isSelectingPhotosToApply {
+            for idx in slots.indices {
+                let currentSlotIDs = Set(slots[idx].assignedMembers.map(\.id))
+                if slots[idx].assignedMembers.isEmpty || currentSlotIDs == previousTargetIDs {
+                    slots[idx].assignedMembers = selectedTargetMembers
+                    photoMemberAssignment[slots[idx].frontPhoto.id] = selectedTargetMembers
+                    if let backID = slots[idx].backPhoto?.id {
+                        photoMemberAssignment[backID] = selectedTargetMembers
+                    }
                 }
             }
-            defaultFallbackMember = selectedTargetMembers.first
         }
     }
 
@@ -2267,10 +2146,13 @@ struct BatchPairingView: View {
     }
 
     private func resolvedMembers(for photo: StagingChekiPhoto, slotIndex: Int) -> [IdolMember] {
-        if let existing = photoMemberAssignment[photo.id] {
+        if let existing = photoMemberAssignment[photo.id], !existing.isEmpty {
             return existing
         }
-        return []
+        if !selectedTargetMembers.isEmpty {
+            return selectedTargetMembers
+        }
+        return defaultFallbackMember.map { [$0] } ?? []
     }
 
     private func handleCellTap(on slot: ChekiPairingSlot) {
@@ -2353,6 +2235,24 @@ struct BatchPairingView: View {
                         frontPhoto: photo,
                         backPhoto: nil,
                         assignedMembers: resolvedMembers(for: photo, slotIndex: idx)
+                    )
+                }
+            } else {
+                var existingPhotoIDs = Set<UUID>()
+                for slot in slots {
+                    existingPhotoIDs.insert(slot.frontPhoto.id)
+                    if let back = slot.backPhoto {
+                        existingPhotoIDs.insert(back.id)
+                    }
+                }
+                for (idx, photo) in orderedPhotos.enumerated() where !existingPhotoIDs.contains(photo.id) {
+                    slots.append(
+                        ChekiPairingSlot(
+                            id: UUID(),
+                            frontPhoto: photo,
+                            backPhoto: nil,
+                            assignedMembers: resolvedMembers(for: photo, slotIndex: idx)
+                        )
                     )
                 }
             }
@@ -2486,6 +2386,41 @@ struct BatchPairingView: View {
         }
     }
 
+    /// 把目前這張的原圖與裁切結果一起逆時針轉 90°，直式被存成橫式時可直接轉正。
+    private func rotateStagingPhotoQuarterTurn(photoID: UUID) {
+        func rotate(_ photo: inout StagingChekiPhoto) {
+            let rotatedSource = photo.uiImage.rotatedQuarterTurnCounterClockwise()
+            if let data = rotatedSource.jpegData(compressionQuality: 0.92) {
+                photo.uiImage = rotatedSource
+                photo.imageData = data
+            }
+            if let cropped = photo.croppedUIImage {
+                let rotatedCrop = cropped.rotatedQuarterTurnCounterClockwise()
+                photo.croppedUIImage = rotatedCrop
+                photo.croppedImageData = rotatedCrop.jpegData(compressionQuality: 0.92)
+            }
+            if let corners = ChekiItem.decodeNormalizedCorners(from: photo.normalizedCornersJSON),
+               corners.count == 4 {
+                let rotated = corners.map { CGPoint(x: $0.y, y: 1.0 - $0.x) }
+                photo.normalizedCornersJSON = ChekiItem.encodeNormalizedCorners(VisionManager.orderPoints(rotated))
+            }
+            photo.contentRevision += 1
+        }
+
+        if let idx = allPhotos.firstIndex(where: { $0.id == photoID }) {
+            rotate(&allPhotos[idx])
+        }
+        for i in slots.indices {
+            if slots[i].frontPhoto.id == photoID {
+                rotate(&slots[i].frontPhoto)
+            }
+            if var back = slots[i].backPhoto, back.id == photoID {
+                rotate(&back)
+                slots[i].backPhoto = back
+            }
+        }
+    }
+
     /// 在放大預覽中執行「手動調整邊界」完成後，即時更新 StagingChekiPhoto 的預裁切影像、四頂點座標、相紙規格與 OCR 日期
     @MainActor
     private func applyManualCropToStagingPhoto(
@@ -2559,14 +2494,18 @@ struct BatchPairingView: View {
 
     private func collectAllPhotosInOrder() -> [StagingChekiPhoto] {
         var collected: [StagingChekiPhoto] = []
+        var seenIDs = Set<UUID>()
         for slot in slots {
             collected.append(slot.frontPhoto)
+            seenIDs.insert(slot.frontPhoto.id)
             if let back = slot.backPhoto {
                 collected.append(back)
+                seenIDs.insert(back.id)
             }
         }
-        if collected.isEmpty {
-            return allPhotos.sorted { $0.sequenceNumber < $1.sequenceNumber }
+        for photo in allPhotos where !seenIDs.contains(photo.id) {
+            collected.append(photo)
+            seenIDs.insert(photo.id)
         }
         return collected.sorted { $0.sequenceNumber < $1.sequenceNumber }
     }
@@ -2600,7 +2539,10 @@ struct BatchPairingView: View {
                 isDetectingBoundary: true,
                 hasCompletedBoundaryDetection: false
             )
-            photoMemberAssignment[staging.id] = []
+            let initialAssigned = !selectedTargetMembers.isEmpty
+                ? selectedTargetMembers
+                : (defaultFallbackMember.map { [$0] } ?? [])
+            photoMemberAssignment[staging.id] = initialAssigned
             newlyLoaded.append(staging)
             nextSequence += 1
         }
@@ -2609,6 +2551,49 @@ struct BatchPairingView: View {
         allPhotos.append(contentsOf: newlyLoaded)
         applyPairingMode(pairingMode)
 
+        await analyzePhotoSides(for: newlyLoaded.map(\.id))
+    }
+
+    /// 把本次拍攝的快門照片送進與相簿讀入相同的配對工作台（正反面分類、裁切、日期、成員）。
+    @MainActor
+    private func appendSessionPhotos(_ photos: [CameraSessionPhoto]) async {
+        let existingIDs = Set(allPhotos.map(\.id))
+        let incoming = photos.filter { !existingIDs.contains($0.id) }
+        guard !incoming.isEmpty else { return }
+
+        isLoadingPhotos = true
+        defer { isLoadingPhotos = false }
+
+        var newlyLoaded: [StagingChekiPhoto] = []
+        var nextSequence = (allPhotos.map(\.sequenceNumber).max() ?? 0) + 1
+
+        for photo in incoming {
+            guard let rawImage = UIImage(data: photo.imageData)?.normalizedImage else { continue }
+            let staging = StagingChekiPhoto(
+                id: photo.id,
+                sequenceNumber: nextSequence,
+                title: "拍攝相片 \(nextSequence)",
+                assetIdentifier: nil,
+                imageData: photo.imageData,
+                uiImage: rawImage,
+                detectedSide: .analyzing,
+                detectionNote: "Vision 背景偵測邊界中…",
+                isDetectingBoundary: true,
+                hasCompletedBoundaryDetection: false,
+                shutterDate: photo.shutterDate
+            )
+            let initialAssigned = !selectedTargetMembers.isEmpty
+                ? selectedTargetMembers
+                : (defaultFallbackMember.map { [$0] } ?? [])
+            photoMemberAssignment[staging.id] = initialAssigned
+            newlyLoaded.append(staging)
+            nextSequence += 1
+        }
+
+        guard !newlyLoaded.isEmpty else { return }
+        allPhotos.append(contentsOf: newlyLoaded)
+        applyPairingMode(pairingMode)
+        isLoadingPhotos = false
         await analyzePhotoSides(for: newlyLoaded.map(\.id))
     }
 
@@ -2994,144 +2979,6 @@ struct BatchPairingView: View {
         return (.likelyFront, "Vision 偵測為拍立得正面影像窗")
     }
 
-    // MARK: - 9. 豐富擬真測試資料集（8 張涵蓋多位不同成員、正反撲克牌配對、⚠️ 雙正面防呆警示、⚠️ 正反顛倒、有日期與無日期空白對照）
-
-    private func loadSimulatedBatchSample() {
-        let sampleSpecs: [(seq: Int, title: String, side: DetectedPhotoSide, note: String, colors: [UIColor], isBackLook: Bool, dateText: String, memberIdx: Int)] = [
-            // Pair 1 (成員 0): 正常正反配對 (#1 正面 + #2 背面，有日期)
-            (1, "夏巡舞台服特寫", .likelyFront, "Vision 偵測到正面人物主體", [.systemIndigo, .systemPink], false, "2026.09.24", 0),
-            (2, "夏巡簽名背面",   .likelyBack,  "Vision 偵測到 instax 背面標記", [.darkGray, .black], true, "2026.09.24", 0),
-            // Pair 2 (成員 1 & 2): ⚠️ 雙正面防呆警示案例 (#3 有日期 + #4 無日期空白)
-            (3, "浴衣造型正面",   .likelyFront, "Vision 偵測到正面人物主體", [.systemTeal, .systemBlue], false, "2026.09.28", 1),
-            (4, "生誕祭私服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemOrange, .systemPink], false, "", 2),
-            // Pair 3 (成員 2): ⚠️ 正反順序顛倒警示案例 (#5 背面 + #6 正面)
-            (5, "握手會背面留言", .likelyBack,  "Vision 偵測到 instax 背面標記", [.systemGray, .darkGray], true, "2026.10.02", 2),
-            (6, "握手會比愛心正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPurple, .systemIndigo], false, "2026.10.02", 2),
-            // Pair 4 (成員 3): 正常正反配對 (#7 正面 + #8 背面，無日期空白)
-            (7, "五週年紀念服正面", .likelyFront, "Vision 偵測到正面人物主體", [.systemPink, .systemRed], false, "", 3),
-            (8, "五週年感謝留言背面", .likelyBack, "Vision 偵測到 instax 背面標記", [.darkGray, .systemIndigo], true, "", 3)
-        ]
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dateFormatter.dateFormat = "yyyy.MM.dd"
-
-        var generated: [StagingChekiPhoto] = []
-        var assignments: [UUID: [IdolMember]] = [:]
-
-        for spec in sampleSpecs {
-            let img = Self.renderSampleChekiImage(
-                sequence: spec.seq,
-                title: spec.title,
-                colors: spec.colors,
-                isBackside: spec.isBackLook,
-                dateText: spec.dateText
-            )
-            let data = img.jpegData(compressionQuality: 0.9) ?? Data()
-            let photoID = UUID()
-            let parsedDate = spec.dateText.isEmpty ? nil : dateFormatter.date(from: spec.dateText)
-            assignments[photoID] = []
-            generated.append(
-                StagingChekiPhoto(
-                    id: photoID,
-                    sequenceNumber: spec.seq,
-                    title: spec.title,
-                    imageData: data,
-                    uiImage: img,
-                    detectedSide: spec.side,
-                    detectionNote: spec.note,
-                    croppedImageData: data,
-                    croppedUIImage: img,
-                    detectedOCRDate: parsedDate,
-                    resolvedFilmFormat: .mini,
-                    isDetectingBoundary: false,
-                    hasCompletedBoundaryDetection: true
-                )
-            )
-        }
-
-        withAnimation(.snappy(duration: 0.25)) {
-            isUsingSimulatedSample = true
-            photoMemberAssignment = assignments
-            allPhotos = generated
-            pairingMode = .autoPair
-            applyPairingMode(.autoPair)
-        }
-    }
-
-    private static func renderSampleChekiImage(
-        sequence: Int,
-        title: String,
-        colors: [UIColor],
-        isBackside: Bool,
-        dateText: String
-    ) -> UIImage {
-        let size = CGSize(width: 540, height: 860)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { ctx in
-            let cg = ctx.cgContext
-            cg.setFillColor(UIColor(white: isBackside ? 0.16 : 0.98, alpha: 1.0).cgColor)
-            cg.fill(CGRect(origin: .zero, size: size))
-
-            let innerRect = CGRect(x: 40, y: 52, width: 460, height: 616)
-            cg.saveGState()
-            cg.addRect(innerRect)
-            cg.clip()
-
-            let cgColors = colors.map {
-                isBackside ? $0.withAlphaComponent(0.35).cgColor : $0.cgColor
-            } as CFArray
-
-            if let gradient = CGGradient(
-                colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                colors: cgColors,
-                locations: [0.0, 1.0]
-            ) {
-                cg.drawLinearGradient(
-                    gradient,
-                    start: CGPoint(x: innerRect.minX, y: innerRect.minY),
-                    end: CGPoint(x: innerRect.maxX, y: innerRect.maxY),
-                    options: []
-                )
-            }
-
-            if !isBackside {
-                cg.setFillColor(UIColor.white.withAlphaComponent(0.28).cgColor)
-                cg.fillEllipse(in: CGRect(x: 195, y: 170, width: 150, height: 150))
-                cg.fillEllipse(in: CGRect(x: 120, y: 340, width: 300, height: 280))
-            } else {
-                let backAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 28, weight: .bold),
-                    .foregroundColor: UIColor.white
-                ]
-                NSAttributedString(string: "いつもありがとう！♡\nまた来週のライブでね", attributes: backAttrs)
-                    .draw(in: CGRect(x: 72, y: 220, width: 396, height: 150))
-
-                let instaxAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.monospacedSystemFont(ofSize: 22, weight: .bold),
-                    .foregroundColor: UIColor(white: 0.78, alpha: 1.0)
-                ]
-                NSAttributedString(string: "FUJIFILM instax", attributes: instaxAttrs)
-                    .draw(at: CGPoint(x: 165, y: 590))
-            }
-            cg.restoreGState()
-
-            let dateAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.monospacedSystemFont(ofSize: 28, weight: .bold),
-                .foregroundColor: isBackside ? UIColor(white: 0.85, alpha: 1.0) : UIColor(white: 0.22, alpha: 1.0)
-            ]
-            NSAttributedString(string: dateText, attributes: dateAttrs)
-                .draw(at: CGPoint(x: 56, y: 720))
-
-            let seqAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 20, weight: .medium),
-                .foregroundColor: isBackside ? UIColor(white: 0.70, alpha: 1.0) : UIColor.secondaryLabel
-            ]
-            NSAttributedString(string: "#\(sequence) \(title)", attributes: seqAttrs)
-                .draw(at: CGPoint(x: 56, y: 765))
-        }
-    }
-
     // MARK: - 10. 執行批次歸檔儲存（直接重用背景已完成的邊界預裁切與 OCR 結果，不新增重複照片、直接修改原圖並保留原始圖片可復原）
 
     @MainActor
@@ -3149,7 +2996,16 @@ struct BatchPairingView: View {
         for (index, slot) in slots.enumerated() {
             // 同一組拍立得的正反面賦予完全相同的秒數 (Task 3.3)
             let itemTimestamp = baseTimestamp.addingTimeInterval(TimeInterval(-index))
-            let targetMember = slot.assignedMembers.first
+            let effectiveMembers: [IdolMember] = {
+                if !slot.assignedMembers.isEmpty {
+                    return slot.assignedMembers
+                }
+                if !selectedTargetMembers.isEmpty {
+                    return selectedTargetMembers
+                }
+                return defaultFallbackMember.map { [$0] } ?? []
+            }()
+            let targetMember = effectiveMembers.first
             var concreteFormat: FilmFormat = slot.concreteFilmFormat
             let chekiFormat = Self.toChekiFilmFormat(concreteFormat)
             let userExplicitlyModifiedDate = slot.frontPhoto.hasManuallyModifiedDate || (slot.backPhoto?.hasManuallyModifiedDate ?? false)
@@ -3192,7 +3048,7 @@ struct BatchPairingView: View {
                 targetItem.filmFormat = concreteFormat
                 targetItem.detectedAspectRatio = concreteFormat.aspectRatio
                 targetItem.borderInsetRatio = defaultInsetRatio
-                targetItem.idolMember = targetMember
+                targetItem.setAssignedMembers(effectiveMembers)
             } else {
                 let newItem = ChekiItem(
                     frontImageData: initialFrontData,
@@ -3200,13 +3056,15 @@ struct BatchPairingView: View {
                     originalFrontImageData: slot.frontPhoto.imageData,
                     originalBackImageData: slot.backPhoto?.imageData,
                     capturedAt: itemTimestamp,
+                    originalCapturedAt: slot.frontPhoto.shutterDate,
                     filmFormat: concreteFormat,
                     detectedAspectRatio: concreteFormat.aspectRatio,
                     borderInsetRatio: defaultInsetRatio,
                     processingState: .detecting,
                     frontAssetIdentifier: slot.frontPhoto.assetIdentifier,
                     backAssetIdentifier: slot.backPhoto?.assetIdentifier,
-                    idolMember: targetMember
+                    idolMember: targetMember,
+                    assignedMembers: effectiveMembers
                 )
                 modelContext.insert(newItem)
                 targetItem = newItem
@@ -3320,11 +3178,15 @@ struct BatchPairingView: View {
 
             // 若辨識出拍立得封面（或背面）手寫日期，自動填入拍攝日期（保留當下時分秒）
             if let recognizedDate {
-                let mergedDate = ChekiItem.mergeRecognizedDate(recognizedDate, into: itemTimestamp)
-                targetItem.ocrDate = mergedDate
-                targetItem.capturedAt = mergedDate
+                if userExplicitlyModifiedDate {
+                    let mergedDate = ChekiItem.mergeRecognizedDate(recognizedDate, into: itemTimestamp)
+                    targetItem.lockJudgedDate(mergedDate)
+                } else {
+                    targetItem.applyAutomaticJudgedDate(recognizedDate, preservingTimeFrom: itemTimestamp)
+                }
             } else if userExplicitlyModifiedDate {
                 targetItem.ocrDate = nil
+                targetItem.isJudgedDateManuallySet = true
             }
 
             // 備忘預設保持空白（不自動塞入系統匯入文字）
@@ -3341,9 +3203,9 @@ struct BatchPairingView: View {
                     ? frontSyncDate.addingTimeInterval(1.0)
                     : frontSyncDate
 
-                let membersToSync = slot.assignedMembers.isEmpty ? [nil as IdolMember?] : slot.assignedMembers.map { Optional($0) }
+                let membersToSync = effectiveMembers.isEmpty ? [nil as IdolMember?] : effectiveMembers.map { Optional($0) }
                 for (memberIdx, memberOpt) in membersToSync.enumerated() {
-                    let albumName = useGroupMemberAlbums ? (memberOpt?.stageName ?? "ChekiLens") : "ChekiLens"
+                    let albumName = useGroupMemberAlbums ? (memberOpt?.albumTitle ?? "ChekiLens") : "ChekiLens"
                     let folderName = useGroupMemberAlbums ? memberOpt?.group?.name : nil
                     if let album = try? await PhotoLibraryManager.shared.getOrCreateAlbum(
                         albumName: albumName,
@@ -3445,7 +3307,7 @@ private struct SlotFormatAndDateEditorSheet: View {
     }
 
     private var formattedDatePreview: String {
-        guard hasDate else { return "空白（未標記日期）" }
+        guard hasDate else { return L10n.tr("無日期", "日付なし") }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy.MM.dd"
@@ -3469,7 +3331,7 @@ private struct SlotFormatAndDateEditorSheet: View {
                             )
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("照片 \(slotSequenceTitle) 規格與日期")
+                            Text(slotSequenceTitle)
                                 .font(.subheadline.weight(.bold))
                             HStack(spacing: 6) {
                                 Text(selectedFormat.displayName)
@@ -3479,7 +3341,7 @@ private struct SlotFormatAndDateEditorSheet: View {
                                     .padding(.vertical, 2.5)
                                     .background(Color.accentColor, in: Capsule())
 
-                                Text("日期：\(formattedDatePreview)")
+                                Text(formattedDatePreview)
                                     .font(.caption.monospacedDigit().weight(.semibold))
                                     .foregroundStyle(hasDate ? .primary : .secondary)
                             }
@@ -3492,7 +3354,7 @@ private struct SlotFormatAndDateEditorSheet: View {
                     // 區塊 1：相紙規格
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Label("相紙規格", systemImage: "aspectratio")
+                            Label(L10n.tr("相紙", "用紙"), systemImage: "aspectratio")
                                 .font(.subheadline.weight(.bold))
                             Spacer()
                             if totalSlotCount > 1 {
@@ -3500,7 +3362,7 @@ private struct SlotFormatAndDateEditorSheet: View {
                                     UISelectionFeedbackGenerator().selectionChanged()
                                     onApplyFormatToAll(selectedFormat)
                                 } label: {
-                                    Text("套用至全部 \(totalSlotCount) 組")
+                                    Text(L10n.tr("全部套用", "すべて適用"))
                                         .font(.caption.weight(.semibold))
                                 }
                             }
@@ -3513,10 +3375,10 @@ private struct SlotFormatAndDateEditorSheet: View {
                         }
                     }
 
-                    // 區塊 2：拍攝日期（有日期顯示 yyyy.MM.dd，無日期則在卡片上顯示空白）
+                    // 區塊 2：拍攝日期
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Label("拍立得日期", systemImage: "calendar")
+                            Label(L10n.tr("日期", "日付"), systemImage: "calendar")
                                 .font(.subheadline.weight(.bold))
                             Spacer()
                             if hasDate {
@@ -3525,7 +3387,7 @@ private struct SlotFormatAndDateEditorSheet: View {
                                     hasDate = false
                                     onUpdateDate(nil)
                                 } label: {
-                                    Label("設為空白", systemImage: "xmark.circle.fill")
+                                    Label(L10n.tr("清除", "クリア"), systemImage: "xmark.circle.fill")
                                         .font(.caption.weight(.semibold))
                                 }
                             } else {
@@ -3534,7 +3396,7 @@ private struct SlotFormatAndDateEditorSheet: View {
                                     hasDate = true
                                     onUpdateDate(pickerDate)
                                 } label: {
-                                    Label("填入今天日期", systemImage: "plus.circle.fill")
+                                    Label(L10n.tr("今天", "今日"), systemImage: "plus.circle.fill")
                                         .font(.caption.weight(.semibold))
                                 }
                             }
@@ -3542,7 +3404,7 @@ private struct SlotFormatAndDateEditorSheet: View {
 
                         VStack(spacing: 10) {
                             DatePicker(
-                                "選擇拍立得日期",
+                                L10n.tr("日期", "日付"),
                                 selection: Binding(
                                     get: { pickerDate },
                                     set: { newDate in
@@ -3554,7 +3416,6 @@ private struct SlotFormatAndDateEditorSheet: View {
                                 displayedComponents: [.date]
                             )
                             .datePickerStyle(.graphical)
-                            .environment(\.locale, Locale(identifier: "zh_Hant_TW"))
 
                             if totalSlotCount > 1 {
                                 Divider()
@@ -3564,7 +3425,7 @@ private struct SlotFormatAndDateEditorSheet: View {
                                 } label: {
                                     HStack(spacing: 6) {
                                         Image(systemName: "doc.on.doc")
-                                        Text(hasDate ? "將 \(formattedDatePreview) 套用至全部 \(totalSlotCount) 組照片" : "將「空白日期」套用至全部 \(totalSlotCount) 組照片")
+                                        Text(L10n.tr("套用日期至全部", "日付をすべてに適用"))
                                     }
                                     .font(.caption.weight(.semibold))
                                     .frame(maxWidth: .infinity)
@@ -3579,7 +3440,7 @@ private struct SlotFormatAndDateEditorSheet: View {
                 .padding(16)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("修改相紙規格與日期")
+            .navigationTitle(L10n.tr("規格與日期", "サイズと日付"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -3703,7 +3564,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                         ProgressView()
                             .controlSize(.large)
                             .tint(.white)
-                        Text("正在套用四頂點透視裁切...")
+                        Text(L10n.tr("裁切中…", "トリミング中…"))
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                     }
@@ -3734,9 +3595,9 @@ private struct StagingPhotoQuadCropEditorView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.14), in: Circle())
+                    .pairingLiquidGlassCircle(size: 36)
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("取消裁切")
 
             Spacer()
@@ -3749,11 +3610,12 @@ private struct StagingPhotoQuadCropEditorView: View {
                 } label: {
                     Text(String(format: "%.1fx", effectiveZoom))
                         .font(.caption.monospacedDigit().weight(.bold))
-                        .foregroundStyle(.yellow)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .background(Color.white.opacity(0.14), in: Capsule())
+                        .pairingLiquidGlassCapsule()
                 }
+                .buttonStyle(.plain)
             }
 
             Button {
@@ -3761,18 +3623,19 @@ private struct StagingPhotoQuadCropEditorView: View {
                     await applyManualQuadCrop()
                 }
             } label: {
-                Text("完成")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.black)
+                Text(L10n.tr("完成", "完了"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(Color.yellow, in: Capsule())
+                    .pairingLiquidGlassCapsule()
             }
             .disabled(isProcessingCrop)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 8)
+        .environment(\.colorScheme, .dark)
     }
 
     // MARK: - 2. 中央互動畫布（透明灰色切除遮罩 + 四頂點拖曳 + 雙指縮放 + 放大鏡十字準星）
@@ -3868,8 +3731,8 @@ private struct StagingPhotoQuadCropEditorView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "hand.point.up.left.and.text")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.yellow)
-                            Text("拖曳四個頂點調整裁切範圍・雙指可縮放畫面")
+                                .foregroundStyle(.white)
+                            Text(L10n.tr("拖曳四角微調 · 雙指縮放", "四隅をドラッグ · ピンチで拡大"))
                                 .font(.caption2.weight(.medium))
                                 .foregroundStyle(.white.opacity(0.85))
                         }
@@ -3933,17 +3796,17 @@ private struct StagingPhotoQuadCropEditorView: View {
 
         return ZStack {
             Circle()
-                .fill(isDragging ? Color.yellow.opacity(0.28) : Color.black.opacity(0.28))
+                .fill(isDragging ? Color.white.opacity(0.28) : Color.black.opacity(0.28))
                 .frame(width: isDragging ? 42 : 30, height: isDragging ? 42 : 30)
 
             Circle()
-                .strokeBorder(isDragging ? Color.yellow : Color.white, lineWidth: 3.0)
+                .strokeBorder(Color.white, lineWidth: 3.0)
                 .background(Circle().fill(Color.white.opacity(0.18)))
                 .frame(width: 22, height: 22)
                 .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
 
             Circle()
-                .fill(isDragging ? Color.yellow : Color.white)
+                .fill(Color.white)
                 .frame(width: 6, height: 6)
         }
         .frame(width: 52, height: 52)
@@ -4025,14 +3888,14 @@ private struct StagingPhotoQuadCropEditorView: View {
                                 path.move(to: CGPoint(x: center, y: center - armLength))
                                 path.addLine(to: CGPoint(x: center, y: center + armLength))
                             }
-                            .stroke(Color.yellow, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                            .stroke(Color.white, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
 
                             Circle()
                                 .strokeBorder(Color.black.opacity(0.75), lineWidth: 2.2)
                                 .frame(width: 7, height: 7)
 
                             Circle()
-                                .strokeBorder(Color.yellow, lineWidth: 1.2)
+                                .strokeBorder(Color.white, lineWidth: 1.2)
                                 .frame(width: 7, height: 7)
                         }
                         .frame(width: loupeDiameter, height: loupeDiameter)
@@ -4040,15 +3903,15 @@ private struct StagingPhotoQuadCropEditorView: View {
                     }
                     .overlay(
                         Circle()
-                            .strokeBorder(Color.yellow, lineWidth: 2.5)
+                            .strokeBorder(Color.white, lineWidth: 2.5)
                     )
                     .overlay(alignment: .bottom) {
                         Text(cornerNames[cornerIndex])
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.black)
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)
-                            .background(Color.yellow, in: Capsule())
+                            .background(.ultraThinMaterial, in: Capsule())
                             .offset(y: 8)
                     }
                     .shadow(color: .black.opacity(0.65), radius: 10, y: 4)
@@ -4086,7 +3949,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                     VStack(spacing: 4) {
                         Image(systemName: "viewfinder.rectangular")
                             .font(.system(size: 18, weight: .semibold))
-                        Text("自動吸附")
+                        Text(L10n.tr("自動", "自動"))
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -4099,7 +3962,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                     VStack(spacing: 4) {
                         Image(systemName: "rotate.left")
                             .font(.system(size: 18, weight: .semibold))
-                        Text("旋轉 90°")
+                        Text(L10n.tr("旋轉", "回転"))
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -4120,7 +3983,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                     VStack(spacing: 4) {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                             .font(.system(size: 17, weight: .semibold))
-                        Text("展開四點")
+                        Text(L10n.tr("展開", "展開"))
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.white)
@@ -4133,10 +3996,10 @@ private struct StagingPhotoQuadCropEditorView: View {
                     VStack(spacing: 4) {
                         Image(systemName: "slider.horizontal.below.square.and.square.filled")
                             .font(.system(size: 17, weight: .semibold))
-                        Text(abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "邊界 %+.1f%%", defaultBorderInsetPercentage) : "邊界設定")
+                        Text(abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "%+.1f%%", defaultBorderInsetPercentage) : L10n.tr("邊界", "余白"))
                             .font(.system(size: 10, weight: .semibold))
                     }
-                    .foregroundStyle(abs(defaultBorderInsetPercentage) > 0.05 ? .yellow : .white)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                 }
             }
@@ -4161,11 +4024,11 @@ private struct StagingPhotoQuadCropEditorView: View {
                 Text(format.displayName)
                     .font(.caption.weight(.bold))
             }
-            .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.85))
+            .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.78))
             .padding(.horizontal, 13)
             .padding(.vertical, 7)
             .background(
-                isSelected ? Color.yellow : Color.white.opacity(0.12),
+                isSelected ? Color.white : Color.white.opacity(0.16),
                 in: Capsule()
             )
         }
@@ -4268,10 +4131,10 @@ private struct StagingPhotoQuadCropEditorView: View {
             }
             if !silent {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
-                showBanner("已自動吸附拍立得四個頂點")
+                showBanner(L10n.tr("已自動吸附", "自動吸着しました"))
             }
         } else if !silent {
-            showBanner("已重設為標準拍立得四頂點範圍")
+            showBanner(L10n.tr("已重設範圍", "範囲をリセットしました"))
         }
     }
 
@@ -4362,7 +4225,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                 onClose()
             }
         } else {
-            showBanner("裁切範圍無效，請確認四個頂點未交錯")
+            showBanner(L10n.tr("頂點不可交錯", "四隅が交差しています"))
         }
     }
 

@@ -365,12 +365,15 @@ func detectQuad(in image: CGImage, imageSize: CGSize) async throws -> DetectionR
         // ratio が正 → 各点が重心から遠ざかる（外側へ拡張）
         // ratio が負 → 各点が重心へ近づく（内側へ収縮）
         let scale = 1.0 + ratio
+        let minX = -Double(imageSize.width) * 0.45
+        let maxX = Double(imageSize.width) * 1.45
+        let minY = -Double(imageSize.height) * 0.45
+        let maxY = Double(imageSize.height) * 1.45
         return corners.map { pt in
             let nx = cx + (Double(pt.x) - cx) * scale
             let ny = cy + (Double(pt.y) - cy) * scale
-            // 画像範囲内にクランプ
-            let clampedX = max(0, min(Double(imageSize.width),  nx))
-            let clampedY = max(0, min(Double(imageSize.height), ny))
+            let clampedX = max(minX, min(maxX, nx))
+            let clampedY = max(minY, min(maxY, ny))
             return CGPoint(x: clampedX, y: clampedY)
         }
     }

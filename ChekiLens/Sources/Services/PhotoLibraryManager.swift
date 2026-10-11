@@ -1,7 +1,9 @@
 import Foundation
 import Photos
 import UIKit
+import CoreImage
 import SwiftUI
+import SwiftData
 import OSLog
 
 @Observable
@@ -51,13 +53,8 @@ final class PhotoLibraryManager {
             targetFolder = try await getOrCreateFolder(folderName: folderName)
         }
         
-        // 2. 尋找現有相簿
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.predicate = NSPredicate(format: "title = %@", albumName)
-        
-        let collections: PHFetchResult<PHAssetCollection>
+        // 2. 尋找現有相簿（使用安全的列舉比對 localizedTitle，避免部分 iOS 版本因 predicate key 拋出例外）
         if let folder = targetFolder {
-            // 從指定資料夾內尋找相簿
             let query = PHCollectionList.fetchCollections(in: folder, options: nil)
             var foundAlbum: PHAssetCollection? = nil
             query.enumerateObjects { (collection, _, stop) in
@@ -70,10 +67,16 @@ final class PhotoLibraryManager {
                 return found
             }
         } else {
-            // 從根目錄尋找
-            collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: fetchOptions)
-            if let album = collections.firstObject {
-                return album
+            let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil)
+            var foundAlbum: PHAssetCollection? = nil
+            collections.enumerateObjects { (album, _, stop) in
+                if album.localizedTitle == albumName {
+                    foundAlbum = album
+                    stop.pointee = true
+                }
+            }
+            if let found = foundAlbum {
+                return found
             }
         }
         
@@ -100,11 +103,15 @@ final class PhotoLibraryManager {
     
     /// 取得或建立資料夾 (Folder)
     private func getOrCreateFolder(folderName: String) async throws -> PHCollectionList {
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.predicate = NSPredicate(format: "title = %@", folderName)
-        
-        let folders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: fetchOptions)
-        if let folder = folders.firstObject {
+        let folders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: nil)
+        var existingFolder: PHCollectionList? = nil
+        folders.enumerateObjects { (folder, _, stop) in
+            if folder.localizedTitle == folderName {
+                existingFolder = folder
+                stop.pointee = true
+            }
+        }
+        if let folder = existingFolder {
             return folder
         }
         
@@ -126,7 +133,9 @@ final class PhotoLibraryManager {
     
     /// 同步照片至 iOS 系統相簿（依免費版 / Pro 版區分裁切寫入行為）：
     /// - **免費版 (`isProLifetimeUnlocked == false`)**：原生相簿**不裁切**（保留未裁切原圖），但依然可同步歸檔至 `ChekiLens › 團體 › 成員` 相簿階層並寫入 OCR 拍攝時間軸；裁切後的照片僅在 App 內（加上浮水印）查看，分享或輸出時亦加上浮水印。
-    /// - **Pro 終身買斷版 (`isProLifetimeUnlocked == true`)**：直接以 `PHContentEditingOutput` 非破壞性原地修改系統相簿原圖為裁切後拍立得（不新增重複照片，且保留原始底圖供隨時復原）。
+    /// - **Pro 終身買斷版 (`isProLifetimeUnlocked == true`)**：
+    ///   - 若為系統相簿既有照片 (`existingAssetIdentifier != nil`)，以 `PHContentEditingOutput` 非破壞性原地修改為裁切後拍立得（不新增重複照片，且保留原始底圖供隨時復原）。
+    ///   - 若為 App 內相機新拍攝的照片 (`existingAssetIdentifier == nil`)，直接將正位裁切／去反光後的成品存入系統相簿（避免觸發二次修改系統彈窗，同時在 App 內 SwiftData 完整保留 `originalFrontImageData` 供隨時復原）。
     /// - Returns: 該張照片在系統相簿中的 `PHAsset.localIdentifier`
     func updateOrSaveImage(
         _ image: UIImage,
@@ -147,12 +156,24 @@ final class PhotoLibraryManager {
            let existingAsset = PHAsset.fetchAssets(withLocalIdentifiers: [existingId], options: nil).firstObject {
             if isPro {
                 // Pro 版：直接以 PHContentEditingOutput 非破壞性修改原圖為裁切後拍立得（不新增照片，且保留原始底圖可復原）
-                try await modifyAssetInPlace(
-                    asset: existingAsset,
-                    croppedImage: image,
-                    creationDate: creationDate,
-                    album: album
-                )
+                // 若因權限或系統取消原地修改，仍確保將該張照片歸入對應系統相簿與時間軸
+                do {
+                    try await modifyAssetInPlace(
+                        asset: existingAsset,
+                        croppedImage: image,
+                        creationDate: creationDate,
+                        album: album
+                    )
+                } catch {
+                    try? await PHPhotoLibrary.shared().performChanges {
+                        let changeRequest = PHAssetChangeRequest(for: existingAsset)
+                        changeRequest.creationDate = creationDate
+                        if let album {
+                            let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
+                            albumChangeRequest?.addAssets([existingAsset] as NSArray)
+                        }
+                    }
+                }
             } else {
                 // 免費版：原生相簿不裁切（維持未裁切原圖），但同步寫入拍攝時間軸與相簿分類
                 try await PHPhotoLibrary.shared().performChanges {
@@ -164,45 +185,46 @@ final class PhotoLibraryManager {
                     }
                 }
             }
+            Self.recordAssetSyncedTimestamp(for: existingAsset.localIdentifier)
             return existingAsset.localIdentifier
         }
         
-        // 2. 若尚未存在於系統相簿：先以「原始未裁切圖片」建立 PHAsset
+        // 2. 若尚未存在於系統相簿（例如使用 App 內建相機拍攝）：
+        // - Pro 版：直接將正位裁切／Mode B 去反光後的成品存入系統相簿（單次寫入、零彈窗、極速完成；原始未裁切底圖已保存在 SwiftData 供隨時復原）
+        // - 免費版：依規則於原生相簿保留未裁切原圖（若無原圖則存 croppedJPEG）
         guard let croppedJPEG = image.jpegData(compressionQuality: 0.92) else {
             throw NSError(domain: "PhotoLibraryManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "影像編碼失敗"])
         }
-        let baseData = originalImageData ?? croppedJPEG
+        let dataToSave = isPro ? croppedJPEG : (originalImageData ?? croppedJPEG)
         var placeholderId: String?
         
-        try await PHPhotoLibrary.shared().performChanges {
-            let creationRequest = PHAssetCreationRequest.forAsset()
-            creationRequest.addResource(with: .photo, data: baseData, options: nil)
-            creationRequest.creationDate = creationDate
-            
-            if let album = album, let placeholder = creationRequest.placeholderForCreatedAsset {
-                let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
-                albumChangeRequest?.addAssets([placeholder] as NSArray)
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                let creationRequest = PHAssetCreationRequest.forAsset()
+                creationRequest.addResource(with: .photo, data: dataToSave, options: nil)
+                creationRequest.creationDate = creationDate
+                
+                if let album = album, let placeholder = creationRequest.placeholderForCreatedAsset {
+                    let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
+                    albumChangeRequest?.addAssets([placeholder] as NSArray)
+                }
+                placeholderId = creationRequest.placeholderForCreatedAsset?.localIdentifier
             }
-            placeholderId = creationRequest.placeholderForCreatedAsset?.localIdentifier
+        } catch {
+            // 若因相簿權限（如 .limited 選取照片模式）導致加入相簿失敗，自動回退為直接寫入系統「最近項目 (Camera Roll)」
+            try await PHPhotoLibrary.shared().performChanges {
+                let creationRequest = PHAssetCreationRequest.forAsset()
+                creationRequest.addResource(with: .photo, data: dataToSave, options: nil)
+                creationRequest.creationDate = creationDate
+                placeholderId = creationRequest.placeholderForCreatedAsset?.localIdentifier
+            }
         }
         
         guard let createdId = placeholderId else {
             throw NSError(domain: "PhotoLibraryManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "儲存照片失敗"])
         }
         
-        // 僅在 Pro 版且提供了原始未裁切底圖時，將裁切結果透過 PHContentEditingOutput 覆蓋於同一張 PHAsset 上（免費版於原生相簿保留未裁切原圖）
-        if isPro,
-           let origData = originalImageData,
-           origData != croppedJPEG,
-           let createdAsset = PHAsset.fetchAssets(withLocalIdentifiers: [createdId], options: nil).firstObject {
-            try? await modifyAssetInPlace(
-                asset: createdAsset,
-                croppedImage: image,
-                creationDate: creationDate,
-                album: nil
-            )
-        }
-        
+        Self.recordAssetSyncedTimestamp(for: createdId)
         return createdId
     }
     
@@ -222,7 +244,9 @@ final class PhotoLibraryManager {
         asset: PHAsset,
         croppedImage: UIImage,
         creationDate: Date? = nil,
-        album: PHAssetCollection? = nil
+        album: PHAssetCollection? = nil,
+        adjustmentFormatIdentifier: String = "wangtc07.ChekiLens.crop",
+        adjustmentPayloadString: String? = nil
     ) async throws {
         guard let jpegData = croppedImage.jpegData(compressionQuality: 0.92) else {
             throw NSError(domain: "PhotoLibraryManager", code: 5, userInfo: [NSLocalizedDescriptionKey: "無法編碼裁切後影像"])
@@ -230,10 +254,11 @@ final class PhotoLibraryManager {
         
         let editingInput = try await requestContentEditingInput(for: asset)
         let output = PHContentEditingOutput(contentEditingInput: editingInput)
+        let payload = adjustmentPayloadString ?? "cheki-perspective-crop-\(Date().timeIntervalSince1970)"
         output.adjustmentData = PHAdjustmentData(
-            formatIdentifier: "wangtc07.ChekiLens.crop",
-            formatVersion: "1.0",
-            data: Data("cheki-perspective-crop-\(Date().timeIntervalSince1970)".utf8)
+            formatIdentifier: adjustmentFormatIdentifier,
+            formatVersion: "1.2",
+            data: Data(payload.utf8)
         )
         try jpegData.write(to: output.renderedContentURL, options: .atomic)
         
@@ -248,6 +273,7 @@ final class PhotoLibraryManager {
                 albumChangeRequest?.addAssets([asset] as NSArray)
             }
         }
+        Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
     }
     
     /// 將既有 `PHAsset` 加入指定相簿（不複製或新建照片）
@@ -262,7 +288,383 @@ final class PhotoLibraryManager {
             albumChangeRequest?.addAssets([asset] as NSArray)
         }
     }
-    
+
+    /// 批次將指定拍立得項目 (`ChekiItem`) 同步並歸入其目前所在的系統相簿 (`ChekiLens › 團體 › 成員` 或 `ChekiLens`)
+    /// - 支援「先從相簿追加匯入、事後再打開相簿同步」以及「變更所屬相冊後即時更新系統相簿」
+    @MainActor
+    @discardableResult
+    func syncItemsToSystemPhotoLibrary(
+        _ items: [ChekiItem],
+        modelContext: ModelContext,
+        onlyAlbumAndDateIfAlreadySynced: Bool = true
+    ) async -> Int {
+        guard !items.isEmpty else { return 0 }
+        guard await requestAuthorization() else { return 0 }
+
+        let overwriteExif = UserDefaults.standard.object(forKey: "overwriteExifDateWithOCR") as? Bool ?? true
+        let useGroupMemberAlbums = UserDefaults.standard.object(forKey: "createGroupMemberAlbumsInPhotos") as? Bool ?? true
+        let timelineStrategy = UserDefaults.standard.string(forKey: "backsideTimelineStrategy") ?? "sameSecond"
+
+        let allMembers = (try? modelContext.fetch(FetchDescriptor<IdolMember>())) ?? []
+        var syncedCount = 0
+
+        for item in items {
+            let assignedMembers = item.assignedMembers(from: allMembers)
+            let targetAlbumSpecs: [(albumName: String, folderName: String?)] = {
+                guard useGroupMemberAlbums, !assignedMembers.isEmpty else {
+                    return [("ChekiLens", nil)]
+                }
+                return assignedMembers.map { ($0.albumTitle, $0.group?.name) }
+            }()
+
+            let frontSyncDate = overwriteExif ? item.displayDate : item.capturedAt
+            let backSyncDate = (timelineStrategy == "plusOneSecond")
+                ? frontSyncDate.addingTimeInterval(1.0)
+                : frontSyncDate
+
+            guard let primarySpec = targetAlbumSpecs.first,
+                  let primaryAlbum = try? await getOrCreateAlbum(albumName: primarySpec.albumName, inFolder: primarySpec.folderName) else {
+                continue
+            }
+
+            var didSyncItem = false
+
+            // 1. 正面同步（先寫入主相簿，若有多位成員再將同一 PHAsset 加入其餘成員相簿）
+            if onlyAlbumAndDateIfAlreadySynced,
+               item.isSyncedToPhotoLibrary,
+               let existingFrontID = item.frontAssetIdentifier,
+               !existingFrontID.isEmpty,
+               PHAsset.fetchAssets(withLocalIdentifiers: [existingFrontID], options: nil).firstObject != nil {
+                try? await addExistingAsset(
+                    identifier: existingFrontID,
+                    creationDate: frontSyncDate,
+                    to: primaryAlbum
+                )
+                didSyncItem = true
+            } else if let frontData = item.frontImageData,
+                      let frontUI = UIImage(data: frontData) {
+                if let updatedFrontID = try? await updateOrSaveImage(
+                    frontUI,
+                    originalImageData: item.originalFrontImageData,
+                    existingAssetIdentifier: item.frontAssetIdentifier,
+                    creationDate: frontSyncDate,
+                    to: primaryAlbum
+                ) {
+                    item.frontAssetIdentifier = updatedFrontID
+                    didSyncItem = true
+                }
+            }
+
+            // 2. 背面同步（若有背面）
+            if onlyAlbumAndDateIfAlreadySynced,
+               item.isSyncedToPhotoLibrary,
+               let existingBackID = item.backAssetIdentifier,
+               !existingBackID.isEmpty,
+               PHAsset.fetchAssets(withLocalIdentifiers: [existingBackID], options: nil).firstObject != nil {
+                try? await addExistingAsset(
+                    identifier: existingBackID,
+                    creationDate: backSyncDate,
+                    to: primaryAlbum
+                )
+            } else if let backData = item.backImageData,
+                      let backUI = UIImage(data: backData) {
+                if let updatedBackID = try? await updateOrSaveImage(
+                    backUI,
+                    originalImageData: item.originalBackImageData,
+                    existingAssetIdentifier: item.backAssetIdentifier,
+                    creationDate: backSyncDate,
+                    to: primaryAlbum
+                ) {
+                    item.backAssetIdentifier = updatedBackID
+                }
+            }
+
+            // 3. 若指派了多位成員，將同一個 PHAsset 一併掛入其餘成員的系統相簿
+            if targetAlbumSpecs.count > 1 {
+                for extraSpec in targetAlbumSpecs.dropFirst() {
+                    guard let extraAlbum = try? await getOrCreateAlbum(albumName: extraSpec.albumName, inFolder: extraSpec.folderName) else {
+                        continue
+                    }
+                    if let frontID = item.frontAssetIdentifier, !frontID.isEmpty {
+                        try? await addExistingAsset(
+                            identifier: frontID,
+                            creationDate: frontSyncDate,
+                            to: extraAlbum
+                        )
+                    }
+                    if let backID = item.backAssetIdentifier, !backID.isEmpty {
+                        try? await addExistingAsset(
+                            identifier: backID,
+                            creationDate: backSyncDate,
+                            to: extraAlbum
+                        )
+                    }
+                }
+            }
+
+            if didSyncItem {
+                item.isSyncedToPhotoLibrary = true
+                item.isDateWrittenToAlbum = overwriteExif && (item.ocrDate != nil)
+                syncedCount += 1
+            }
+        }
+
+        try? modelContext.save()
+        return syncedCount
+    }
+
+    // MARK: - Delete Sync with System Photo Library
+
+    /// 判斷刪除指定拍立得時是否應一併自 iOS 系統相簿 (`Photos.app`) 刪除對應照片：
+    /// - 只要該拍立得已綁定系統相簿 `frontAssetIdentifier` / `backAssetIdentifier` 或 `isSyncedToPhotoLibrary == true`，或系統相簿同步開啟時，一律同步自系統相簿刪除
+    static func shouldSyncDeleteFromSystemPhotoLibrary(for item: ChekiItem? = nil) -> Bool {
+        if let item, !item.isDeleted, item.modelContext != nil {
+            if item.isSyncedToPhotoLibrary { return true }
+            if let f = item.frontAssetIdentifier, !f.isEmpty { return true }
+            if let b = item.backAssetIdentifier, !b.isEmpty { return true }
+        }
+        if let explicit = UserDefaults.standard.object(forKey: "autoSyncToPhotosLibrary") as? Bool {
+            return explicit
+        }
+        if let legacyExplicit = UserDefaults.standard.object(forKey: "autoSyncToPhotos") as? Bool {
+            return legacyExplicit
+        }
+        return true
+    }
+
+    /// 收集待刪除項目對應之 iOS 系統相簿 `PHAsset.localIdentifier`（包含拍攝時間軸 ±2.5 秒自動回退比對）
+    @MainActor
+    private func collectAssetIdentifiersToDelete(
+        for items: [ChekiItem],
+        modelContext: ModelContext
+    ) async -> [String] {
+        let liveItems = items.filter { !$0.isDeleted && $0.modelContext != nil }
+        guard !liveItems.isEmpty else { return [] }
+
+        let deletingIDs = Set(liveItems.map(\.id))
+        let allItems = ((try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? [])
+            .filter { !$0.isDeleted && $0.modelContext != nil }
+
+        var retainedAssetIDs = Set<String>()
+        for existing in allItems where !deletingIDs.contains(existing.id) {
+            if let f = existing.frontAssetIdentifier, !f.isEmpty {
+                retainedAssetIDs.insert(f)
+            }
+            if let b = existing.backAssetIdentifier, !b.isEmpty {
+                retainedAssetIDs.insert(b)
+            }
+        }
+
+        var assetIDsToDelete: [String] = []
+        var fallbackDatesToSearch: [Date] = []
+
+        for item in liveItems {
+            guard Self.shouldSyncDeleteFromSystemPhotoLibrary(for: item) else { continue }
+            var foundExplicitID = false
+            if let frontID = item.frontAssetIdentifier,
+               !frontID.isEmpty,
+               !retainedAssetIDs.contains(frontID) {
+                if !assetIDsToDelete.contains(frontID) {
+                    assetIDsToDelete.append(frontID)
+                }
+                foundExplicitID = true
+            }
+            if let backID = item.backAssetIdentifier,
+               !backID.isEmpty,
+               !retainedAssetIDs.contains(backID) {
+                if !assetIDsToDelete.contains(backID) {
+                    assetIDsToDelete.append(backID)
+                }
+                foundExplicitID = true
+            }
+            if !foundExplicitID {
+                fallbackDatesToSearch.append(item.capturedAt)
+                if abs(item.displayDate.timeIntervalSince(item.capturedAt)) > 1.0 {
+                    fallbackDatesToSearch.append(item.displayDate)
+                }
+            }
+        }
+
+        // 若相機剛拍完背景正位同步剛寫入系統相簿、或舊項目未記錄 frontAssetIdentifier，以拍攝時間軸 ±2.5 秒在系統相簿定位對應相片
+        if !fallbackDatesToSearch.isEmpty, await requestAuthorization() {
+            for targetDate in fallbackDatesToSearch {
+                let opts = PHFetchOptions()
+                let minDate = targetDate.addingTimeInterval(-2.5)
+                let maxDate = targetDate.addingTimeInterval(2.5)
+                opts.predicate = NSPredicate(
+                    format: "creationDate >= %@ AND creationDate <= %@",
+                    minDate as NSDate,
+                    maxDate as NSDate
+                )
+                let matched = PHAsset.fetchAssets(with: .image, options: opts)
+                matched.enumerateObjects { asset, _, _ in
+                    let id = asset.localIdentifier
+                    if !retainedAssetIDs.contains(id) && !assetIDsToDelete.contains(id) {
+                        assetIDsToDelete.append(id)
+                    }
+                }
+            }
+        }
+
+        return assetIDsToDelete
+    }
+
+    /// 非同步安全刪除指定的 `ChekiItem` 陣列：
+    /// 1. 先向 iOS 系統相簿 (`Photos.app`) 請求刪除對應的 `PHAsset`（確保系統相簿確實刪除且視圖狀態穩定不閃退）。
+    /// 2. 執行 `onBeforeContextDelete` 讓單張檢視器先行切換上/下一張或關閉頁面，徹底脫離被刪除物件之引用。
+    /// 3. 最後再解除關聯並從 SwiftData `modelContext` 刪除與儲存。
+    @MainActor
+    func deleteItemsAsync(
+        _ items: [ChekiItem],
+        modelContext: ModelContext,
+        onBeforeContextDelete: (@MainActor () -> Void)? = nil
+    ) async {
+        let liveItems = items.filter { !$0.isDeleted && $0.modelContext != nil }
+        guard !liveItems.isEmpty else {
+            onBeforeContextDelete?()
+            return
+        }
+
+        let assetIDsToDelete = await collectAssetIdentifiersToDelete(for: liveItems, modelContext: modelContext)
+        if !assetIDsToDelete.isEmpty {
+            await deleteAssetsFromSystemPhotoLibrary(identifiers: assetIDsToDelete)
+        }
+
+        onBeforeContextDelete?()
+        await Task.yield()
+
+        for item in liveItems where !item.isDeleted && item.modelContext != nil {
+            if let memo = item.memo {
+                item.memo = nil
+                modelContext.delete(memo)
+            }
+            item.idolMember = nil
+            modelContext.delete(item)
+        }
+        try? modelContext.save()
+    }
+
+    /// 刪除指定的 `ChekiItem` 陣列，並一併自 iOS 系統相簿 (`Photos.app`) 刪除對應的正反面照片
+    @MainActor
+    func deleteItems(
+        _ items: [ChekiItem],
+        modelContext: ModelContext
+    ) {
+        guard !items.isEmpty else { return }
+        Task { @MainActor in
+            await self.deleteItemsAsync(items, modelContext: modelContext)
+        }
+    }
+
+    /// 取消（解除）單張拍立得的背面綁定（不刪除照片）：
+    /// - 若該背面照片原本是從 App 內合併而來（無其他獨立項目持有），自動拆回一張獨立的 `ChekiItem` 保留於 App 圖庫中；
+    /// - 絕不自 iOS 系統相簿刪除該張照片。
+    @MainActor
+    func detachBackside(
+        from item: ChekiItem,
+        modelContext: ModelContext
+    ) {
+        guard !item.isDeleted, item.modelContext != nil,
+              let backData = item.backImageData else { return }
+
+        let backAssetID = item.backAssetIdentifier
+        let allItems = ((try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? [])
+            .filter { !$0.isDeleted && $0.modelContext != nil && $0.id != item.id }
+
+        let alreadyExistsInApp = allItems.contains { existing in
+            if let backAssetID, !backAssetID.isEmpty,
+               (existing.frontAssetIdentifier == backAssetID || existing.backAssetIdentifier == backAssetID) {
+                return true
+            }
+            return existing.frontImageData == backData
+        }
+
+        if !alreadyExistsInApp {
+            let detachedItem = ChekiItem(
+                frontImageData: backData,
+                originalFrontImageData: item.originalBackImageData ?? backData,
+                capturedAt: item.capturedAt,
+                ocrDate: item.ocrDate,
+                originalCapturedAt: item.originalCapturedAt ?? item.capturedAt,
+                isJudgedDateManuallySet: item.isJudgedDateManuallySet,
+                isDateWrittenToAlbum: item.isDateWrittenToAlbum,
+                filmFormat: item.filmFormat,
+                detectedAspectRatio: item.detectedAspectRatio,
+                perspectivePointsJSON: item.backPerspectivePointsJSON,
+                detectionMethod: item.detectionMethod,
+                processingState: .completed,
+                isSyncedToPhotoLibrary: (backAssetID?.isEmpty == false),
+                frontAssetIdentifier: backAssetID,
+                idolMember: item.idolMember
+            )
+            detachedItem.assignedMemberIDsJSON = item.assignedMemberIDsJSON
+            modelContext.insert(detachedItem)
+        }
+
+        item.backImageData = nil
+        item.originalBackImageData = nil
+        item.backPerspectivePointsJSON = nil
+        item.backAssetIdentifier = nil
+        try? modelContext.save()
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    /// 移除單張拍立得的背面照片，並在啟用「系統相簿同步」時一併自 iOS 系統相簿刪除該背面照片
+    @MainActor
+    func removeBackside(
+        from item: ChekiItem,
+        modelContext: ModelContext
+    ) {
+        guard !item.isDeleted, item.modelContext != nil else { return }
+        let removedBackAssetID = item.backAssetIdentifier
+        let shouldDeleteFromPhotos = Self.shouldSyncDeleteFromSystemPhotoLibrary(for: item)
+
+        item.backImageData = nil
+        item.originalBackImageData = nil
+        item.backPerspectivePointsJSON = nil
+        item.backAssetIdentifier = nil
+        try? modelContext.save()
+
+        guard shouldDeleteFromPhotos,
+              let backID = removedBackAssetID,
+              !backID.isEmpty else {
+            return
+        }
+
+        let allItems = ((try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? [])
+            .filter { !$0.isDeleted && $0.modelContext != nil }
+        let isStillReferenced = allItems.contains { existing in
+            existing.frontAssetIdentifier == backID || existing.backAssetIdentifier == backID
+        }
+        guard !isStillReferenced else { return }
+
+        Task {
+            await deleteAssetsFromSystemPhotoLibrary(identifiers: [backID])
+        }
+    }
+
+    /// 自 iOS 系統相簿 (`Photos.app`) 刪除指定 `localIdentifier` 的照片 (`PHAsset`)
+    func deleteAssetsFromSystemPhotoLibrary(identifiers: [String]) async {
+        let validIDs = identifiers.filter { !$0.isEmpty }
+        guard !validIDs.isEmpty else { return }
+        guard await requestAuthorization() else { return }
+
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: validIDs, options: nil)
+        guard fetchResult.count > 0 else { return }
+
+        // 等待 SwiftUI confirmationDialog (UIAlertController) 收合動畫完成，避免阻擋 iOS 系統相簿刪除權限對話框彈出
+        try? await Task.sleep(nanoseconds: 350_000_000)
+
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.deleteAssets(fetchResult)
+            }
+            logger.info("已同步自 iOS 系統相簿刪除 \(fetchResult.count) 張照片")
+        } catch {
+            logger.error("自 iOS 系統相簿刪除照片失敗或使用者取消：\(error.localizedDescription)")
+        }
+    }
+
     /// 將系統相簿中的 `PHAsset` 復原為未裁切的原始圖片 (`revertAssetContentToOriginal`)
     func revertAssetToOriginal(assetIdentifier: String) async throws {
         guard !assetIdentifier.isEmpty,
@@ -273,6 +675,7 @@ final class PhotoLibraryManager {
             let changeRequest = PHAssetChangeRequest(for: asset)
             changeRequest.revertAssetContentToOriginal()
         }
+        Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
     }
     
     private func requestContentEditingInput(for asset: PHAsset) async throws -> PHContentEditingInput {
@@ -291,166 +694,507 @@ final class PhotoLibraryManager {
             }
         }
     }
-    
-    // MARK: - Task 4.4 & 4.6 System Photo Library Seeder (10 張帶手寫日期拍立得寫入 iOS 原生相簿)
-    
-    private static let systemSeedFlagKey = "debug.didSeedSystemPhotoLibraryV3_Dated10"
-    
-    /// 將 10 張帶有封面手寫日期的實體拍立得測試相片寫入 iOS 原生相簿 (`Photos.app`)，
-    /// 供使用者點擊「＋」(`PhotosPicker`) 實測導入並自動辨識封面手寫日期與原地裁切（不新增照片、保留原圖可復原）。
-    /// - Parameter force: 若為 `true` 則無視已寫入標記，強制再次寫入一組測試相片至系統相簿。
-    /// - Returns: 實際寫入系統相簿的相片張數（若先前已自動寫入且 `force == false` 則回傳 0）
+
+    // MARK: - Task 6.5.8 (Part A): 系統相簿調色／修改同步更新 (Sync Color Adjustments from iOS Photos.app)
+
+    private static let assetSyncTimestampPrefix = "systemAssetLastSyncedModTime."
+
+    static func recordAssetSyncedTimestamp(for assetIdentifier: String, modificationDate: Date? = nil) {
+        guard !assetIdentifier.isEmpty else { return }
+        let resolvedModDate: Date? = {
+            if let modificationDate { return modificationDate }
+            return PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil).firstObject?.modificationDate
+        }()
+        let timestamp = (resolvedModDate ?? Date()).timeIntervalSince1970
+        UserDefaults.standard.set(timestamp, forKey: assetSyncTimestampPrefix + assetIdentifier)
+    }
+
+    private static func lastKnownSyncedTimestamp(for assetIdentifier: String) -> TimeInterval? {
+        guard !assetIdentifier.isEmpty else { return nil }
+        let key = assetSyncTimestampPrefix + assetIdentifier
+        guard UserDefaults.standard.object(forKey: key) != nil else { return nil }
+        return UserDefaults.standard.double(forKey: key)
+    }
+
+    /// 讀取 `PHAsset` 在 iOS 系統相簿中最新渲染後的影像資料（`.version = .current`，包含系統相簿內所有調色、色溫、濾鏡與曝光修改）
+    private func requestCurrentRenderedImageData(for asset: PHAsset) async -> Data? {
+        await withCheckedContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.version = .current
+            options.deliveryMode = .highQualityFormat
+            options.isNetworkAccessAllowed = true
+            options.isSynchronous = false
+            var didResume = false
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, info in
+                guard !didResume else { return }
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if isDegraded { return }
+                didResume = true
+                continuation.resume(returning: data)
+            }
+        }
+    }
+
+    /// 檢查 `PHAsset` 是否在系統相簿中含有外部編輯（如 `Photos.app` 的調色修改）或 `modificationDate` 較上次同步更新
+    private func hasExternalSystemEdit(for asset: PHAsset) async -> Bool {
+        let assetID = asset.localIdentifier
+        let currentModTime = asset.modificationDate?.timeIntervalSince1970 ?? 0
+
+        if let lastKnown = Self.lastKnownSyncedTimestamp(for: assetID) {
+            return currentModTime > lastKnown + 0.5
+        }
+
+        // 若為舊項目尚未紀錄 timestamp，檢查該 PHAsset 是否含有非 ChekiLens 寫入之系統調色 (.adjustmentData)
+        let resources = PHAssetResource.assetResources(for: asset)
+        let hasAdjustmentResource = resources.contains { $0.type == .adjustmentData }
+        guard hasAdjustmentResource else {
+            Self.recordAssetSyncedTimestamp(for: assetID, modificationDate: asset.modificationDate)
+            return false
+        }
+
+        return await withCheckedContinuation { continuation in
+            let options = PHContentEditingInputRequestOptions()
+            options.isNetworkAccessAllowed = false
+            var detectedFormatID: String? = nil
+            options.canHandleAdjustmentData = { adjustmentData in
+                detectedFormatID = adjustmentData.formatIdentifier
+                return false
+            }
+            asset.requestContentEditingInput(with: options) { _, _ in
+                if let formatID = detectedFormatID {
+                    // 若 formatIdentifier 不是 ChekiLens 寫入的（例如 com.apple.photo 原生相簿調色），代表在系統相簿有調色修改
+                    let isExternal = !formatID.hasPrefix("wangtc07.ChekiLens")
+                    if !isExternal {
+                        Self.recordAssetSyncedTimestamp(for: assetID, modificationDate: asset.modificationDate)
+                    }
+                    continuation.resume(returning: isExternal)
+                } else {
+                    continuation.resume(returning: true)
+                }
+            }
+        }
+    }
+
+    /// 將從系統相簿讀取到的最新調色影像套用回單面（若系統相簿為未裁切原圖且 App 內存有四頂點座標，自動重新套用相同四頂點透視裁切以保留調色與白邊裁切）
+    private func buildUpdatedSideDataFromSystemAsset(
+        renderedData: Data,
+        existingCroppedData: Data?,
+        existingOriginalData: Data?,
+        savedCornersJSON: String?,
+        filmFormat: FilmFormat
+    ) async -> (updatedCroppedData: Data, updatedOriginalData: Data?)? {
+        guard let renderedUI = UIImage(data: renderedData)?.normalizedImage,
+              let renderedCG = renderedUI.cgImage else {
+            return nil
+        }
+        let renderedJPEG = renderedUI.jpegData(compressionQuality: 0.92) ?? renderedData
+        let renderedSize = CGSize(width: renderedCG.width, height: renderedCG.height)
+
+        if let savedNormCorners = ChekiItem.decodeNormalizedCorners(from: savedCornersJSON),
+           savedNormCorners.count == 4 {
+            var isRenderedUncroppedOriginal = false
+            if let origData = existingOriginalData,
+               let origUI = UIImage(data: origData)?.normalizedImage,
+               let cropData = existingCroppedData,
+               let cropUI = UIImage(data: cropData)?.normalizedImage {
+                let origW = origUI.size.width * origUI.scale
+                let origH = origUI.size.height * origUI.scale
+                let cropW = cropUI.size.width * cropUI.scale
+                let cropH = cropUI.size.height * cropUI.scale
+                let distToOrig = hypot(renderedSize.width - origW, renderedSize.height - origH)
+                let distToCrop = hypot(renderedSize.width - cropW, renderedSize.height - cropH)
+                if distToOrig + 8.0 < distToCrop {
+                    isRenderedUncroppedOriginal = true
+                }
+            } else if !Self.isProLifetimeUnlocked {
+                isRenderedUncroppedOriginal = true
+            }
+
+            if isRenderedUncroppedOriginal {
+                let pixelCorners = savedNormCorners.map {
+                    CGPoint(x: $0.x * renderedSize.width, y: $0.y * renderedSize.height)
+                }
+                let visionManager = VisionManager()
+                let chekiFormat: ChekiFilmFormat = {
+                    switch filmFormat {
+                    case .mini: return .mini
+                    case .square: return .square
+                    case .wide: return .wide
+                    case .auto: return .auto
+                    }
+                }()
+                let manualDetection = DetectionResult(
+                    corners: pixelCorners,
+                    method: .visionNative,
+                    confidence: 1.0,
+                    imageSize: renderedSize
+                )
+                if let cropResult = try? await visionManager.perspectiveCorrect(
+                    image: renderedCG,
+                    corners: pixelCorners,
+                    detection: manualDetection,
+                    format: chekiFormat,
+                    preserveCornerOrder: true
+                ),
+                let reCroppedJPEG = UIImage(cgImage: cropResult.cgImage).jpegData(compressionQuality: 0.92) {
+                    return (reCroppedJPEG, renderedJPEG)
+                }
+            }
+        }
+
+        return (renderedJPEG, existingOriginalData)
+    }
+
+    /// 單張檢查並同步系統相簿 (`Photos.app`) 的調色或編輯修改（於點開單張照片時呼叫）
     @MainActor
-    func seedTestChekiPhotosToSystemLibrary(force: Bool = false) async throws -> Int {
-        if !force && UserDefaults.standard.bool(forKey: Self.systemSeedFlagKey) {
-            return 0
+    @discardableResult
+    func syncExternalEditsFromSystemPhotoLibrary(
+        for item: ChekiItem,
+        modelContext: ModelContext
+    ) async -> Bool {
+        guard !item.isDeleted, item.modelContext != nil else { return false }
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else { return false }
+
+        var didUpdate = false
+
+        // 1. 檢查正面 PHAsset
+        if let frontID = item.frontAssetIdentifier,
+           !frontID.isEmpty,
+           let frontAsset = PHAsset.fetchAssets(withLocalIdentifiers: [frontID], options: nil).firstObject {
+            if await hasExternalSystemEdit(for: frontAsset),
+               let renderedData = await requestCurrentRenderedImageData(for: frontAsset),
+               let updated = await buildUpdatedSideDataFromSystemAsset(
+                   renderedData: renderedData,
+                   existingCroppedData: item.frontImageData,
+                   existingOriginalData: item.originalFrontImageData,
+                   savedCornersJSON: item.perspectivePointsJSON,
+                   filmFormat: item.filmFormat
+               ) {
+                guard !item.isDeleted, item.modelContext != nil else { return false }
+                item.frontImageData = updated.updatedCroppedData
+                if let updatedOrig = updated.updatedOriginalData {
+                    item.originalFrontImageData = updatedOrig
+                }
+                Self.recordAssetSyncedTimestamp(for: frontID, modificationDate: frontAsset.modificationDate)
+                didUpdate = true
+            }
         }
-        
-        guard await requestAuthorization() else {
-            throw NSError(domain: "PhotoLibraryManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "尚未取得 iOS 系統相簿存取權限，請於系統設定開啟相簿權限。"])
+
+        // 2. 檢查背面 PHAsset
+        if let backID = item.backAssetIdentifier,
+           !backID.isEmpty,
+           let backAsset = PHAsset.fetchAssets(withLocalIdentifiers: [backID], options: nil).firstObject {
+            if await hasExternalSystemEdit(for: backAsset),
+               let renderedData = await requestCurrentRenderedImageData(for: backAsset),
+               let updated = await buildUpdatedSideDataFromSystemAsset(
+                   renderedData: renderedData,
+                   existingCroppedData: item.backImageData,
+                   existingOriginalData: item.originalBackImageData,
+                   savedCornersJSON: item.backPerspectivePointsJSON,
+                   filmFormat: item.filmFormat
+               ) {
+                guard !item.isDeleted, item.modelContext != nil else { return false }
+                item.backImageData = updated.updatedCroppedData
+                if let updatedOrig = updated.updatedOriginalData {
+                    item.originalBackImageData = updatedOrig
+                }
+                Self.recordAssetSyncedTimestamp(for: backID, modificationDate: backAsset.modificationDate)
+                didUpdate = true
+            }
         }
-        
-        let testImages = Self.buildTask44SystemTestImages()
-        guard !testImages.isEmpty else { return 0 }
-        
-        let album = try? await getOrCreateAlbum(albumName: "ChekiLens 帶日期拍立得測試 (10張)")
-        let baseDate = Date()
-        
-        for (idx, item) in testImages.enumerated() {
-            // 依序遞減 5 秒，確保在系統相簿與 PhotosPicker 中順序固定且清晰
-            let photoDate = baseDate.addingTimeInterval(TimeInterval(-idx * 5))
-            _ = try await saveImage(item.image, creationDate: photoDate, to: album)
+
+        if didUpdate {
+            try? modelContext.save()
+            logger.info("已從 iOS 系統相簿同步更新拍立得調色修改 (item: \(item.id.uuidString))")
         }
-        
-        UserDefaults.standard.set(true, forKey: Self.systemSeedFlagKey)
-        logger.info("已成功寫入 \(testImages.count) 張帶日期拍立得相片至 iOS 系統相簿 (Photos.app)")
-        return testImages.count
+        return didUpdate
     }
-    
-    /// 建立供寫入系統相簿的 10 張帶封面手寫日期之真實拍立得測試相片：
-    /// - 優先讀取專案 `TestData/images/` 下帶有真實手寫日期的 10 張拍立得 JPG（在模擬器環境可直接讀取 Mac 路徑）
-    /// - 若檔案不存在（如實機執行），自動回退生成帶有清晰手寫日期與拍立得外框的高解析度擬真測試相片
-    private static func buildTask44SystemTestImages() -> [(title: String, image: UIImage)] {
-        let projectTestDir = "/Users/tcwang/Documents/ChekiLens/TestData/images"
-        
-        // 10 張帶有真實封面手寫日期的拍立得（均已經過 VisionManager.recognizeDate 100% 驗證）：
-        let specs: [(seq: Int, fileName: String, title: String, isBackside: Bool, colors: [UIColor], dateText: String)] = [
-            (1,  "DSCF0073.JPG",        "手寫日期 2025.11.3 (正面)",  false, [.systemPink, .systemIndigo],   "2025.11.3"),
-            (2,  "DSCF0010.JPG",        "手寫日期 2025.07.31 (正面)", false, [.systemPurple, .systemPink],   "2025.07.31"),
-            (3,  "193422_DSCF1405.JPG", "手寫日期 2026.06.26 (正面)", false, [.systemTeal, .systemBlue],     "2026.06.26"),
-            (4,  "193424_DSCF1411.JPG", "手寫日期 2026.07.31 (正面)", false, [.systemOrange, .systemPink],   "2026.07.31"),
-            (5,  "193425_DSCF1414.JPG", "手寫日期 2026.8-5 (正面)",   false, [.systemIndigo, .systemCyan],   "2026.8-5"),
-            (6,  "193426_DSCF1417.JPG", "手寫日期 2026.8.11 (正面)",  false, [.systemBlue, .systemPurple],   "2026.8.11"),
-            (7,  "193427_DSCF1421.JPG", "手寫日期 2026.08.23 (正面)", false, [.systemRed, .systemOrange],    "2026.08.23"),
-            (8,  "193428_DSCF1424.JPG", "手寫日期 2026.8.22 (正面)",  false, [.systemMint, .systemTeal],     "2026.8.22"),
-            (9,  "193430_DSCF1429.JPG", "手寫日期 2026.08.24 (正面)", false, [.systemPink, .systemPurple],   "2026.08.24"),
-            (10, "193430_DSCF1430.JPG", "手寫日期 2026.8.28 (正面)",  false, [.systemIndigo, .systemBlue],   "2026.8.28")
+
+    /// 批次檢查並同步所有關聯系統相簿之拍立得調色修改（於 App 啟動或從背景返回前景時呼叫）
+    @MainActor
+    @discardableResult
+    func syncAllExternalEditsFromSystemPhotoLibrary(modelContext: ModelContext) async -> Int {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else { return 0 }
+
+        let allItems = ((try? modelContext.fetch(FetchDescriptor<ChekiItem>())) ?? [])
+            .filter { !$0.isDeleted && $0.modelContext != nil }
+        var updatedCount = 0
+
+        for item in allItems {
+            let hasAssetID = (item.frontAssetIdentifier?.isEmpty == false) || (item.backAssetIdentifier?.isEmpty == false)
+            guard hasAssetID else { continue }
+            if await syncExternalEditsFromSystemPhotoLibrary(for: item, modelContext: modelContext) {
+                updatedCount += 1
+            }
+        }
+        return updatedCount
+    }
+
+    // MARK: - Task 6.5.8 (Part B): 點選白色部分自動白平衡 (Tap-on-White Auto White Balance via Core Image CITemperatureAndTint)
+
+    struct AutoWhiteBalanceOutcome: Sendable {
+        let calibratedImage: UIImage
+        let calibratedJPEGData: Data
+        /// 估計的原始取樣點色溫（Kelvin，標準中性白為 6500K）
+        let sampledTemperatureKelvin: Double
+        /// 估計的原始取樣點色調偏移（Tint，標準中性白為 0）
+        let sampledTint: Double
+        /// 套用的色溫補償量（ΔK = 6500 - sampledTemperatureKelvin）
+        var deltaTemperatureKelvin: Int {
+            Int((6500.0 - sampledTemperatureKelvin).rounded())
+        }
+        /// 套用的色調補償量
+        var deltaTint: Int {
+            Int((-sampledTint).rounded())
+        }
+    }
+
+    enum AutoWhiteBalanceError: LocalizedError {
+        case invalidImage
+        case sampleTooDark
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidImage:
+                return L10n.tr("無法讀取拍立得影像進行白平衡校正", "ホワイトバランス補正用の画像を読み込めませんでした")
+            case .sampleTooDark:
+                return L10n.tr("所選位置過暗，請點選拍立得「白色邊框」區域", "選択箇所が暗すぎます。チェキの「白い余白」部分をタップしてください")
+            }
+        }
+    }
+
+    private static let sharedWhiteBalanceCIContext = CIContext(options: [
+        .workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB) as Any,
+        .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any
+    ])
+
+    /// 根據使用者在拍立得上點選的白色區域座標 (`normalizedTapPoint`, 0...1)，
+    /// 取樣周圍像素並透過 Core Image 原生 `CITemperatureAndTint`（色溫／色調）＋亮度守恆微調自動校正白平衡。
+    static func applyAutoWhiteBalance(
+        to sourceImage: UIImage,
+        normalizedTapPoint: CGPoint
+    ) -> Result<AutoWhiteBalanceOutcome, AutoWhiteBalanceError> {
+        let normalizedUI = sourceImage.normalizedImage
+        guard let cgImage = normalizedUI.cgImage else {
+            return .failure(.invalidImage)
+        }
+
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 4, height > 4 else {
+            return .failure(.invalidImage)
+        }
+
+        let clampedX = min(max(normalizedTapPoint.x, 0.0), 1.0)
+        let clampedY = min(max(normalizedTapPoint.y, 0.0), 1.0)
+        let centerX = Int((clampedX * CGFloat(width - 1)).rounded())
+        let centerY = Int((clampedY * CGFloat(height - 1)).rounded())
+
+        // 1. 取樣點選位置周圍 13x13 像素區塊的平均 sRGB 值
+        let radius = 6
+        let minX = max(0, centerX - radius)
+        let maxX = min(width - 1, centerX + radius)
+        let minY = max(0, centerY - radius)
+        let maxY = min(height - 1, centerY + radius)
+        let patchW = max(1, maxX - minX + 1)
+        let patchH = max(1, maxY - minY + 1)
+
+        guard let croppedPatch = cgImage.cropping(to: CGRect(x: minX, y: minY, width: patchW, height: patchH)) else {
+            return .failure(.invalidImage)
+        }
+
+        var rawPixels = [UInt8](repeating: 0, count: patchW * patchH * 4)
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &rawPixels,
+            width: patchW,
+            height: patchH,
+            bitsPerComponent: 8,
+            bytesPerRow: patchW * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return .failure(.invalidImage)
+        }
+        ctx.draw(croppedPatch, in: CGRect(x: 0, y: 0, width: patchW, height: patchH))
+
+        var sumR: Double = 0
+        var sumG: Double = 0
+        var sumB: Double = 0
+        var validCount: Double = 0
+
+        for i in stride(from: 0, to: rawPixels.count, by: 4) {
+            let r = Double(rawPixels[i]) / 255.0
+            let g = Double(rawPixels[i + 1]) / 255.0
+            let b = Double(rawPixels[i + 2]) / 255.0
+            let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            // 排除完全死白過曝 (>0.992) 或深黑字跡 (<0.18) 的像素，優先取樣真實白邊紙質基底
+            if luma >= 0.18 && luma <= 0.992 {
+                sumR += r
+                sumG += g
+                sumB += b
+                validCount += 1.0
+            }
+        }
+
+        if validCount < 1.0 {
+            for i in stride(from: 0, to: rawPixels.count, by: 4) {
+                sumR += Double(rawPixels[i]) / 255.0
+                sumG += Double(rawPixels[i + 1]) / 255.0
+                sumB += Double(rawPixels[i + 2]) / 255.0
+                validCount += 1.0
+            }
+        }
+
+        let avgR = sumR / max(1.0, validCount)
+        let avgG = sumG / max(1.0, validCount)
+        let avgB = sumB / max(1.0, validCount)
+        let luma = 0.2126 * avgR + 0.7152 * avgG + 0.0722 * avgB
+
+        guard luma >= 0.12 else {
+            return .failure(.sampleTooDark)
+        }
+
+        // 2. 計算取樣白點對應的 Core Image CITemperatureAndTint 色溫 (Kelvin) 與色調 (Tint)
+        let safeG = max(0.12, avgG)
+        let rbRatioDiff = min(max((avgR - avgB) / safeG, -0.60), 0.60)
+        let gmRatioDiff = min(max((avgG - 0.5 * (avgR + avgB)) / safeG, -0.45), 0.45)
+
+        // 在 CITemperatureAndTint 中：
+        // inputNeutral 代表原圖白點的色溫與色調，inputTargetNeutral = (6500, 0) 為目標標準中性白
+        let sampledTempK = min(max(6500.0 - rbRatioDiff * 4000.0, 2800.0), 10500.0)
+        let sampledTint = min(max(gmRatioDiff * 135.0, -95.0), 95.0)
+
+        let baseCI = CIImage(cgImage: cgImage)
+        var workingCI = baseCI
+
+        // (A) 主校正：Core Image 原生 CITemperatureAndTint (色溫 / 色調濾鏡)
+        if let tempTintFilter = CIFilter(name: "CITemperatureAndTint") {
+            tempTintFilter.setValue(workingCI, forKey: kCIInputImageKey)
+            tempTintFilter.setValue(CIVector(x: CGFloat(sampledTempK), y: CGFloat(sampledTint)), forKey: "inputNeutral")
+            tempTintFilter.setValue(CIVector(x: 6500, y: 0), forKey: "inputTargetNeutral")
+            if let out = tempTintFilter.outputImage {
+                workingCI = out.cropped(to: baseCI.extent)
+            }
+        }
+
+        // (B) 殘差白點精準平衡：讀取 CITemperatureAndTint 後同位置的色偏殘差，以溫和的亮度守恆增益收斂至純淨白邊
+        let sampleExtent = CGRect(x: minX, y: height - 1 - maxY, width: patchW, height: patchH)
+            .intersection(workingCI.extent)
+        if !sampleExtent.isEmpty,
+           let areaAvg = CIFilter(name: "CIAreaAverage", parameters: [
+               kCIInputImageKey: workingCI,
+               kCIInputExtentKey: CIVector(cgRect: sampleExtent)
+           ])?.outputImage {
+            var px = [UInt8](repeating: 0, count: 4)
+            sharedWhiteBalanceCIContext.render(
+                areaAvg,
+                toBitmap: &px,
+                rowBytes: 4,
+                bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                format: .RGBA8,
+                colorSpace: colorSpace
+            )
+            let postR = max(0.10, Double(px[0]) / 255.0)
+            let postG = max(0.10, Double(px[1]) / 255.0)
+            let postB = max(0.10, Double(px[2]) / 255.0)
+            let postLuma = 0.2126 * postR + 0.7152 * postG + 0.0722 * postB
+
+            // 限制殘差補償增益在 0.80 ~ 1.25 之間，確保人物膚色自然不失真
+            let gainR = min(max(postLuma / postR, 0.80), 1.25)
+            let gainG = min(max(postLuma / postG, 0.80), 1.25)
+            let gainB = min(max(postLuma / postB, 0.80), 1.25)
+
+            // 混合 75% 殘差收斂，讓拍立得白邊既乾淨又保留自然相紙質感
+            let finalGainR = CGFloat(1.0 + (gainR - 1.0) * 0.75)
+            let finalGainG = CGFloat(1.0 + (gainG - 1.0) * 0.75)
+            let finalGainB = CGFloat(1.0 + (gainB - 1.0) * 0.75)
+
+            if let matrixFilter = CIFilter(name: "CIColorMatrix") {
+                matrixFilter.setValue(workingCI, forKey: kCIInputImageKey)
+                matrixFilter.setValue(CIVector(x: finalGainR, y: 0, z: 0, w: 0), forKey: "inputRVector")
+                matrixFilter.setValue(CIVector(x: 0, y: finalGainG, z: 0, w: 0), forKey: "inputGVector")
+                matrixFilter.setValue(CIVector(x: 0, y: 0, z: finalGainB, w: 0), forKey: "inputBVector")
+                matrixFilter.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+                if let out = matrixFilter.outputImage {
+                    workingCI = out.cropped(to: baseCI.extent)
+                }
+            }
+        }
+
+        guard let outCG = sharedWhiteBalanceCIContext.createCGImage(workingCI, from: baseCI.extent) else {
+            return .failure(.invalidImage)
+        }
+        let calibratedUI = UIImage(cgImage: outCG, scale: normalizedUI.scale, orientation: .up)
+        guard let jpegData = calibratedUI.jpegData(compressionQuality: 0.92) else {
+            return .failure(.invalidImage)
+        }
+
+        return .success(
+            AutoWhiteBalanceOutcome(
+                calibratedImage: calibratedUI,
+                calibratedJPEGData: jpegData,
+                sampledTemperatureKelvin: sampledTempK,
+                sampledTint: sampledTint
+            )
+        )
+    }
+
+    /// 將白平衡（色溫／色調）校正結果以非破壞性 `PHContentEditingOutput` + `PHAdjustmentData` 寫入 iOS 系統相簿紀錄
+    @MainActor
+    func syncWhiteBalanceEditToSystemPhotoLibrary(
+        for item: ChekiItem,
+        backside: Bool,
+        outcome: AutoWhiteBalanceOutcome,
+        normalizedTapPoint: CGPoint
+    ) async -> Bool {
+        let assetID = backside ? item.backAssetIdentifier : item.frontAssetIdentifier
+        guard let assetID,
+              !assetID.isEmpty,
+              let existingAsset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject else {
+            return false
+        }
+        guard await requestAuthorization() else { return false }
+
+        let payloadDict: [String: Any] = [
+            "type": "whiteBalanceAndCrop",
+            "sampledTemperatureKelvin": outcome.sampledTemperatureKelvin,
+            "targetTemperatureKelvin": 6500.0,
+            "deltaTemperatureKelvin": outcome.deltaTemperatureKelvin,
+            "sampledTint": outcome.sampledTint,
+            "deltaTint": outcome.deltaTint,
+            "tapX": Double(normalizedTapPoint.x),
+            "tapY": Double(normalizedTapPoint.y),
+            "timestamp": Date().timeIntervalSince1970
         ]
-        
-        var results: [(title: String, image: UIImage)] = []
-        for spec in specs {
-            let fullPath = (projectTestDir as NSString).appendingPathComponent(spec.fileName)
-            if FileManager.default.fileExists(atPath: fullPath),
-               let diskImage = UIImage(contentsOfFile: fullPath) {
-                results.append((spec.title, diskImage))
-            } else {
-                let fallbackImage = renderFallbackTestChekiImage(
-                    sequence: spec.seq,
-                    title: spec.title,
-                    colors: spec.colors,
-                    isBackside: spec.isBackside,
-                    dateText: spec.dateText
-                )
-                results.append((spec.title, fallbackImage))
-            }
+        let payloadJSON = (try? JSONSerialization.data(withJSONObject: payloadDict))
+            .flatMap { String(data: $0, encoding: .utf8) }
+            ?? "cheki-wb-\(outcome.deltaTemperatureKelvin)K-\(outcome.deltaTint)"
+
+        // 若為免費版且系統相簿保留未裁切原圖，則對未裁切原圖套用相同色溫／色調校正後寫入系統相簿
+        var imageForSystemAsset = outcome.calibratedImage
+        if !Self.isProLifetimeUnlocked,
+           let origData = (backside ? item.originalBackImageData : item.originalFrontImageData),
+           let origUI = UIImage(data: origData),
+           case .success(let origWB) = Self.applyAutoWhiteBalance(to: origUI, normalizedTapPoint: normalizedTapPoint) {
+            imageForSystemAsset = origWB.calibratedImage
         }
-        return results
-    }
-    
-    /// 當不在 Mac 模擬器路徑時，繪製帶有真實 Vision OCR 錨點 (`Don't put in mouth` / `FUJIFILM instax`) 的高解析度測試相片
-    static func renderFallbackTestChekiImage(
-        sequence: Int,
-        title: String,
-        colors: [UIColor],
-        isBackside: Bool,
-        dateText: String
-    ) -> UIImage {
-        let size = CGSize(width: 540, height: 860)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { ctx in
-            let cg = ctx.cgContext
-            cg.setFillColor(UIColor(white: isBackside ? 0.92 : 0.98, alpha: 1.0).cgColor)
-            cg.fill(CGRect(origin: .zero, size: size))
-            
-            if isBackside {
-                // 頂部黑膠帶警告文字（供 BacksideDetector Layer 0 100% 識別）
-                let topWarnAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 20, weight: .bold),
-                    .foregroundColor: UIColor(white: 0.20, alpha: 1.0)
-                ]
-                NSAttributedString(string: "Don't put in mouth.", attributes: topWarnAttrs)
-                    .draw(at: CGPoint(x: 155, y: 18))
-            }
-            
-            let innerRect = CGRect(x: 40, y: 52, width: 460, height: 616)
-            cg.saveGState()
-            cg.addRect(innerRect)
-            cg.clip()
-            
-            let cgColors = colors.map {
-                isBackside ? $0.withAlphaComponent(0.22).cgColor : $0.cgColor
-            } as CFArray
-            
-            if let gradient = CGGradient(
-                colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                colors: cgColors,
-                locations: [0.0, 1.0]
-            ) {
-                cg.drawLinearGradient(
-                    gradient,
-                    start: CGPoint(x: innerRect.minX, y: innerRect.minY),
-                    end: CGPoint(x: innerRect.maxX, y: innerRect.maxY),
-                    options: []
-                )
-            }
-            
-            if !isBackside {
-                cg.setFillColor(UIColor.white.withAlphaComponent(0.30).cgColor)
-                cg.fillEllipse(in: CGRect(x: 195, y: 170, width: 150, height: 150))
-                cg.fillEllipse(in: CGRect(x: 120, y: 340, width: 300, height: 280))
-            } else {
-                let backAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 26, weight: .semibold),
-                    .foregroundColor: UIColor.darkGray
-                ]
-                NSAttributedString(string: "いつもありがとう！♡\nまた来週のライブでね", attributes: backAttrs)
-                    .draw(in: CGRect(x: 80, y: 240, width: 380, height: 140))
-            }
-            cg.restoreGState()
-            
-            let dateAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.monospacedSystemFont(ofSize: 28, weight: .bold),
-                .foregroundColor: UIColor(white: 0.22, alpha: 1.0)
-            ]
-            NSAttributedString(string: dateText, attributes: dateAttrs)
-                .draw(at: CGPoint(x: 56, y: 710))
-            
-            let seqAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 20, weight: .medium),
-                .foregroundColor: UIColor.secondaryLabel
-            ]
-            NSAttributedString(string: "#\(sequence) \(title)", attributes: seqAttrs)
-                .draw(at: CGPoint(x: 56, y: 752))
-            
-            if isBackside {
-                // 底部品牌標記（供 BacksideDetector 雙錨點定位）
-                let instaxAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.monospacedSystemFont(ofSize: 24, weight: .bold),
-                    .foregroundColor: UIColor(white: 0.25, alpha: 1.0)
-                ]
-                NSAttributedString(string: "FUJIFILM instax", attributes: instaxAttrs)
-                    .draw(at: CGPoint(x: 150, y: 798))
-            }
+
+        do {
+            try await modifyAssetInPlace(
+                asset: existingAsset,
+                croppedImage: imageForSystemAsset,
+                creationDate: nil,
+                album: nil,
+                adjustmentFormatIdentifier: "wangtc07.ChekiLens.whitebalance",
+                adjustmentPayloadString: payloadJSON
+            )
+            return true
+        } catch {
+            logger.error("同步白平衡修改紀錄至系統相簿失敗：\(error.localizedDescription)")
+            return false
         }
     }
 }
@@ -569,6 +1313,8 @@ struct ChekiWatermarkOverlayView: View {
                         Text("ChekiLens")
                             .font(.system(size: fontSize, weight: .bold, design: .rounded))
                             .tracking(0.4)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
                             .foregroundStyle(Color.white.opacity(0.90))
                             .padding(.horizontal, hPad)
                             .padding(.vertical, vPad)

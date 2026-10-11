@@ -38,11 +38,18 @@ final class ChekiItem {
 
     // MARK: Timestamp
 
-    /// 數位翻拍的實際時間（匯入時由系統取得）
+    /// 對外展示、以及寫入系統相簿的判斷日期（OCR 或手動修正後會覆寫這裡）
     var capturedAt: Date
 
     /// OCR 從底部白邊手寫日期解析出的真實拍攝日期（nil 表示尚未辨識或辨識失敗）
     var ocrDate: Date?
+
+    /// 手機實際按下快門或匯入當下的時間。只存在 App 內，不寫入系統相簿。
+    /// 舊資料沒有此欄時，排序會退回 `capturedAt`。
+    var originalCapturedAt: Date?
+
+    /// 使用者已手動指定判斷日期。背景 OCR 不得再覆寫 `capturedAt`／`ocrDate`。
+    var isJudgedDateManuallySet: Bool = false
 
     /// 是否已以 ocrDate 回寫系統相簿的 creationDate
     var isDateWrittenToAlbum: Bool
@@ -93,9 +100,12 @@ final class ChekiItem {
     /// 背面照片對應之 iOS 系統相簿 `PHAsset.localIdentifier`
     var backAssetIdentifier: String?
 
+    /// 多成員歸檔 ID 清單 JSON（支援一張拍立得同時歸檔至多位成員，與 `idolMember` 主關聯保持相容）
+    var assignedMemberIDsJSON: String?
+
     // MARK: Relations
 
-    /// 所屬偶像成員（可為 nil，表示尚未分類）
+    /// 所屬主偶像成員（可為 nil，表示尚未分類；當指派多位成員時為第一位成員）
     var idolMember: IdolMember?
 
     /// 附屬的備忘錄（若無則為 nil，懶加載）
@@ -112,6 +122,8 @@ final class ChekiItem {
         originalBackImageData: Data? = nil,
         capturedAt: Date = Date(),
         ocrDate: Date? = nil,
+        originalCapturedAt: Date? = nil,
+        isJudgedDateManuallySet: Bool = false,
         isDateWrittenToAlbum: Bool = false,
         filmFormat: FilmFormat = .mini,
         detectedAspectRatio: Double = FilmFormat.mini.aspectRatio,
@@ -124,6 +136,7 @@ final class ChekiItem {
         frontAssetIdentifier: String? = nil,
         backAssetIdentifier: String? = nil,
         idolMember: IdolMember? = nil,
+        assignedMembers: [IdolMember]? = nil,
         memo: ChekiMemo? = nil
     ) {
         self.id = id
@@ -133,6 +146,8 @@ final class ChekiItem {
         self.originalBackImageData = originalBackImageData ?? backImageData
         self.capturedAt = capturedAt
         self.ocrDate = ocrDate
+        self.originalCapturedAt = originalCapturedAt ?? capturedAt
+        self.isJudgedDateManuallySet = isJudgedDateManuallySet
         self.isDateWrittenToAlbum = isDateWrittenToAlbum
         self.filmFormat = filmFormat
         self.detectedAspectRatio = detectedAspectRatio
@@ -144,25 +159,201 @@ final class ChekiItem {
         self.isSyncedToPhotoLibrary = isSyncedToPhotoLibrary
         self.frontAssetIdentifier = frontAssetIdentifier
         self.backAssetIdentifier = backAssetIdentifier
-        self.idolMember = idolMember
+        let resolvedMembers: [IdolMember] = {
+            if let assignedMembers, !assignedMembers.isEmpty {
+                return assignedMembers
+            }
+            if let idolMember {
+                return [idolMember]
+            }
+            return []
+        }()
+        self.idolMember = resolvedMembers.first
+        self.assignedMemberIDsJSON = Self.encodeMemberIDs(resolvedMembers.map(\.id))
         self.memo = memo
     }
 
+}
+
+// MARK: - Date Sort Basis
+
+/// 圖庫排序所依據的日期。判斷日期會同步到系統相簿；原始拍攝日期只存在 App。
+enum ChekiDateSortBasis: String, CaseIterable, Identifiable {
+    case judgedDate
+    case originalCaptureDate
+
+    var id: String { rawValue }
+
+    var menuTitle: String {
+        switch self {
+        case .judgedDate:
+            return L10n.tr("判斷日期", "判定日")
+        case .originalCaptureDate:
+            return L10n.tr("原始拍攝日期", "元の撮影日")
+        }
+    }
+}
+
+enum ChekiLibrarySort {
+    static func sorted(_ items: [ChekiItem], basis: ChekiDateSortBasis, ascending: Bool) -> [ChekiItem] {
+        items.sorted { lhs, rhs in
+            let left = lhs.gridSortDate(basis: basis)
+            let right = rhs.gridSortDate(basis: basis)
+            if left != right {
+                return ascending ? left < right : left > right
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
 }
 
 // MARK: - Computed Helpers
 
 extension ChekiItem {
 
-    /// 對外展示用日期：優先使用 OCR 手寫日期，否則用翻拍時間
+    /// 對外展示用日期：優先使用 OCR 手寫日期，否則用判斷後的拍攝時間。系統相簿同步也使用這個日期。
     var displayDate: Date {
         ocrDate ?? capturedAt
+    }
+
+    /// App 內「原始拍攝日期」排序用。只代表按下快門或匯入的當下，不寫入系統相簿。
+    var appOriginalCaptureDate: Date {
+        originalCapturedAt ?? capturedAt
+    }
+
+    func gridSortDate(basis: ChekiDateSortBasis) -> Date {
+        switch basis {
+        case .judgedDate:
+            return displayDate
+        case .originalCaptureDate:
+            return appOriginalCaptureDate
+        }
+    }
+
+    /// 背景 OCR 寫入判斷日期。使用者已手動鎖定時保持原值，也不改 `originalCapturedAt`。
+    func applyAutomaticJudgedDate(_ recognizedDate: Date, preservingTimeFrom baseTimestamp: Date) {
+        guard !isJudgedDateManuallySet else { return }
+        let merged = Self.mergeRecognizedDate(recognizedDate, into: baseTimestamp)
+        ocrDate = merged
+        capturedAt = merged
+    }
+
+    /// 使用者手動指定判斷日期，並鎖定以免背景 OCR 事後覆寫。不改原始拍攝時間。
+    func lockJudgedDate(_ date: Date) {
+        capturedAt = date
+        ocrDate = date
+        isJudgedDateManuallySet = true
     }
 
     /// 是否具有背面資料
     var hasBothSides: Bool {
         backImageData != nil
     }
+
+    /// 已指派的所有成員 UUID 陣列（去重且保序，並包含主 `idolMember`）
+    var assignedMemberIDs: [UUID] {
+        var ids: [UUID] = []
+        if let json = assignedMemberIDsJSON,
+           let data = json.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            for str in decoded {
+                if let uuid = UUID(uuidString: str), !ids.contains(uuid) {
+                    ids.append(uuid)
+                }
+            }
+        }
+        if let primary = idolMember, !primary.isDeleted, primary.modelContext != nil {
+            if !ids.contains(primary.id) {
+                ids.insert(primary.id, at: 0)
+            }
+        } else if idolMember == nil, assignedMemberIDsJSON == nil {
+            return []
+        }
+        return ids
+    }
+
+    /// 是否為「未分類」（無任何指派成員）
+    var isUncategorized: Bool {
+        if let primary = idolMember, !primary.isDeleted, primary.modelContext != nil {
+            return false
+        }
+        return assignedMemberIDs.isEmpty
+    }
+
+    /// 判斷此拍立得是否歸屬於指定成員（支援單一與多成員指派）
+    func isAssigned(to member: IdolMember) -> Bool {
+        guard !member.isDeleted, member.modelContext != nil else { return false }
+        if idolMember?.id == member.id { return true }
+        return assignedMemberIDs.contains(member.id)
+    }
+
+    /// 判斷此拍立得是否歸屬於指定成員 ID
+    func isAssigned(toMemberID memberID: UUID) -> Bool {
+        if idolMember?.id == memberID { return true }
+        return assignedMemberIDs.contains(memberID)
+    }
+
+    /// 從傳入的全部成員清單解析出此拍立得目前已指派的成員陣列（保序）
+    func assignedMembers(from allMembers: [IdolMember]) -> [IdolMember] {
+        let validPool = allMembers.filter { !$0.isDeleted && $0.modelContext != nil }
+        let byID = Dictionary(uniqueKeysWithValues: validPool.map { ($0.id, $0) })
+        var result: [IdolMember] = []
+        for id in assignedMemberIDs {
+            if let member = byID[id], !result.contains(where: { $0.id == member.id }) {
+                result.append(member)
+            }
+        }
+        if let primary = idolMember,
+           !primary.isDeleted,
+           primary.modelContext != nil,
+           !result.contains(where: { $0.id == primary.id }) {
+            result.insert(primary, at: 0)
+        }
+        return result
+    }
+
+    /// 設定此拍立得的歸檔成員清單（可為多位成員，或空陣列代表「未分類」）
+    func setAssignedMembers(_ members: [IdolMember]) {
+        var unique: [IdolMember] = []
+        for member in members where !member.isDeleted && member.modelContext != nil {
+            if !unique.contains(where: { $0.id == member.id }) {
+                unique.append(member)
+            }
+        }
+        self.idolMember = unique.first
+        self.assignedMemberIDsJSON = Self.encodeMemberIDs(unique.map(\.id))
+    }
+
+    /// 切換（勾選/取消勾選）某位成員的歸檔狀態（支援多選，不覆蓋其他已選成員）
+    func toggleAssignedMember(_ member: IdolMember, allMembers: [IdolMember]) {
+        var current = assignedMembers(from: allMembers)
+        if let idx = current.firstIndex(where: { $0.id == member.id }) {
+            current.remove(at: idx)
+        } else {
+            current.append(member)
+        }
+        setAssignedMembers(current)
+    }
+
+    /// 格式化顯示目前已指派的成員名稱摘要（例如：「河田陽菜、與田祐希」或「未分類」）
+    func assignedMembersDisplayString(from allMembers: [IdolMember], includeGroupForSingle: Bool = false) -> String {
+        let members = assignedMembers(from: allMembers)
+        guard !members.isEmpty else {
+            return L10n.tr("未分類", "未分類")
+        }
+        if members.count == 1 {
+            return includeGroupForSingle ? members[0].albumTitle : members[0].stageName
+        }
+        return members.map(\.stageName).joined(separator: "、")
+    }
+
+    private static func encodeMemberIDs(_ ids: [UUID]) -> String? {
+        guard !ids.isEmpty else { return nil }
+        let strings = ids.map(\.uuidString)
+        guard let data = try? JSONEncoder().encode(strings) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
 
     /// 指定面（正面或背面）是否保留有可復原的原始未裁切圖片
     func canRevertToOriginal(backside: Bool = false) -> Bool {
@@ -188,26 +379,26 @@ extension ChekiItem {
         }
     }
 
-    /// 將像素座標四角點 [TL, TR, BR, BL] 轉為正規化 (0.0~1.0) JSON 字串
+    /// 將像素座標四角點 [TL, TR, BR, BL] 轉為正規化 (-0.5~1.5，支援移出相片邊界外) JSON 字串
     static func encodeNormalizedCorners(_ pixelCorners: [CGPoint], imageSize: CGSize) -> String? {
         guard pixelCorners.count == 4, imageSize.width > 0, imageSize.height > 0 else { return nil }
         let normalized: [[Double]] = pixelCorners.map { pt in
             [
-                max(0.0, min(1.0, Double(pt.x / imageSize.width))),
-                max(0.0, min(1.0, Double(pt.y / imageSize.height)))
+                max(-0.5, min(1.5, Double(pt.x / imageSize.width))),
+                max(-0.5, min(1.5, Double(pt.y / imageSize.height)))
             ]
         }
         guard let data = try? JSONEncoder().encode(normalized) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    /// 將已正規化 (0.0~1.0) 的四角點 [TL, TR, BR, BL] 轉為 JSON 字串
+    /// 將已正規化 (-0.5~1.5，支援移出相片邊界外) 的四角點 [TL, TR, BR, BL] 轉為 JSON 字串
     static func encodeNormalizedCorners(_ normalizedCorners: [CGPoint]) -> String? {
         guard normalizedCorners.count == 4 else { return nil }
         let pairs: [[Double]] = normalizedCorners.map { pt in
             [
-                max(0.0, min(1.0, Double(pt.x))),
-                max(0.0, min(1.0, Double(pt.y)))
+                max(-0.5, min(1.5, Double(pt.x))),
+                max(-0.5, min(1.5, Double(pt.y)))
             ]
         }
         guard let data = try? JSONEncoder().encode(pairs) else { return nil }
@@ -226,10 +417,10 @@ extension ChekiItem {
         }
     }
 
-    /// 統一拍攝日期格式化：`yyyy年M月d日 EEEE`（例如 `2025年11月3日 星期一`）
+    /// 統一拍攝日期格式化：`yyyy年M月d日 EEEE`（例如繁中 `2025年11月3日 星期一` / 日文 `2025年11月3日 月曜日`）
     static func formatFullDateWithWeekday(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_Hant_TW")
+        formatter.locale = L10n.formattingLocale
         formatter.dateFormat = "yyyy年M月d日 EEEE"
         return formatter.string(from: date)
     }
@@ -264,10 +455,10 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     case auto   = "auto"
 
     /// 三種實體拍立得規格（資訊卡片中固定顯示與切換此三種）
-    static let concreteFormats: [FilmFormat] = [.mini, .square, .wide]
+    nonisolated static let concreteFormats: [FilmFormat] = [.mini, .square, .wide]
 
     /// 若為 `.auto` 則正規化為三種具體規格之一（預設 `.mini`）
-    var concreteFormat: FilmFormat {
+    nonisolated var concreteFormat: FilmFormat {
         switch self {
         case .mini, .square, .wide:
             return self
@@ -277,7 +468,7 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     }
 
     /// 根據使用者偏好、Vision 透視規格或裁切尺寸，解析為三種具體規格之一（基本上為 `.mini`）
-    static func resolvedConcreteFormat(
+    nonisolated static func resolvedConcreteFormat(
         preferred: FilmFormat = .auto,
         specName: String? = nil,
         outputSize: CGSize? = nil
@@ -309,7 +500,7 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     }
 
     /// 長邊 / 短邊比例（用於 CIPerspectiveCorrection 比例鎖定）
-    var aspectRatio: Double {
+    nonisolated var aspectRatio: Double {
         switch self {
         case .mini:   return 86.0 / 54.0   // ≈ 1.593
         case .square: return 86.0 / 72.0   // ≈ 1.194
@@ -319,7 +510,7 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     }
 
     /// 物理尺寸（mm）：(長邊, 短邊)
-    var physicalSizeMM: (width: Double, height: Double) {
+    nonisolated var physicalSizeMM: (width: Double, height: Double) {
         switch self {
         case .mini:   return (86, 54)
         case .square: return (86, 72)
@@ -333,7 +524,7 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
         case .mini:   return "Instax Mini"
         case .square: return "Instax Square"
         case .wide:   return "Instax Wide"
-        case .auto:   return "自動識別"
+        case .auto:   return L10n.tr("自動", "自動")
         }
     }
 
@@ -345,10 +536,10 @@ enum FilmFormat: String, Codable, CaseIterable, Sendable {
     /// 含毫米尺寸的完整顯示名稱
     var detailDisplayName: String {
         switch concreteFormat {
-        case .mini:   return "Instax Mini (86×54mm)"
-        case .square: return "Instax Square (86×72mm)"
-        case .wide:   return "Instax Wide (86×108mm)"
-        case .auto:   return "Instax Mini (86×54mm)"
+        case .mini:   return "Instax Mini · 86×54mm"
+        case .square: return "Instax Square · 86×72mm"
+        case .wide:   return "Instax Wide · 86×108mm"
+        case .auto:   return "Instax Mini · 86×54mm"
         }
     }
 }
@@ -392,13 +583,13 @@ enum ProcessingState: String, Codable, CaseIterable, Sendable {
 
     var displayName: String {
         switch self {
-        case .unprocessed:    return "未處理"
-        case .detecting:      return "偵測中"
-        case .awaitingReview: return "等待確認"
-        case .corrected:      return "校正完成"
-        case .recognizingDate:return "OCR 辨識中"
-        case .completed:      return "完成"
-        case .error:          return "錯誤"
+        case .unprocessed:    return L10n.tr("未處理", "未処理")
+        case .detecting:      return L10n.tr("偵測中", "検出中")
+        case .awaitingReview: return L10n.tr("等待確認", "確認待ち")
+        case .corrected:      return L10n.tr("校正完成", "補正完了")
+        case .recognizingDate:return L10n.tr("OCR 辨識中", "OCR 認識中")
+        case .completed:      return L10n.tr("完成", "完了")
+        case .error:          return L10n.tr("錯誤", "エラー")
         }
     }
 }
