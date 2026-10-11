@@ -931,6 +931,7 @@ struct AlbumsRootView: View {
     @State private var memberRegistry = AlbumCardRegistry()
     @State private var liftedGroupID: UUID?
     @State private var liftedMemberID: UUID?
+    @State private var blockAlbumOpen = false
     private var chromeState = NavigationChromeState.shared
 
     private var sortMethod: AlbumSortMethod {
@@ -1309,6 +1310,7 @@ struct AlbumsRootView: View {
                     enabled: !isSelectingAlbums,
                     registry: mode == .groups ? groupRegistry : memberRegistry,
                     onArm: { id in
+                        blockAlbumOpen = true
                         if mode == .groups {
                             liftedGroupID = id
                         } else {
@@ -1325,6 +1327,9 @@ struct AlbumsRootView: View {
                     onEnd: {
                         liftedGroupID = nil
                         liftedMemberID = nil
+                        DispatchQueue.main.async {
+                            blockAlbumOpen = false
+                        }
                     }
                 )
             }
@@ -1424,7 +1429,8 @@ struct AlbumsRootView: View {
             } else {
                 NavigationLink(value: group) { card }
                     .buttonStyle(.plain)
-                    .contextMenu {
+                    .allowsHitTesting(!blockAlbumOpen)
+                    .albumCardContextMenu {
                         AlbumAddMenuItems(
                             onCamera: {
                                 actionTargetMember = group.sortedMembers.first
@@ -1536,7 +1542,8 @@ struct AlbumsRootView: View {
             } else {
                 NavigationLink(value: member) { card }
                     .buttonStyle(.plain)
-                    .contextMenu {
+                    .allowsHitTesting(!blockAlbumOpen)
+                    .albumCardContextMenu {
                         AlbumAddMenuItems(
                             onCamera: {
                                 actionTargetMember = member
@@ -1592,9 +1599,9 @@ struct AlbumsRootView: View {
             }
         }
         .buttonStyle(.plain)
-        .allowsHitTesting(!isSelectingAlbums)
+        .allowsHitTesting(!isSelectingAlbums && !blockAlbumOpen)
         .opacity(isSelectingAlbums ? 0.4 : 1)
-        .contextMenu {
+        .albumCardContextMenu {
             AlbumAddMenuItems(
                 onCamera: {
                     actionTargetMember = nil
@@ -1897,12 +1904,24 @@ final class AlbumCardRegistry {
     func frames(in coordinateView: UIView) -> [UUID: CGRect] {
         var result: [UUID: CGRect] = [:]
         for (id, box) in boxes {
-            guard let anchor = box.view, anchor.window != nil else { continue }
-            let frame = coordinateView.convert(anchor.bounds, from: anchor)
+            guard let anchor = box.view, let card = Self.resolvedCard(for: anchor) else { continue }
+            let frame = coordinateView.convert(card.bounds, from: card)
             guard frame.width > 1, frame.height > 1 else { continue }
             result[id] = frame
         }
         return result
+    }
+
+    private static func resolvedCard(for anchor: UIView) -> UIView? {
+        guard anchor.window != nil else { return nil }
+        if anchor.bounds.width > 1, anchor.bounds.height > 1 { return anchor }
+        var current = anchor.superview
+        while let view = current {
+            if view is UIScrollView { return nil }
+            if view.bounds.width > 1, view.bounds.height > 1 { return view }
+            current = view.superview
+        }
+        return nil
     }
 
     func hit(_ point: CGPoint, in coordinateView: UIView, excluding: UUID? = nil) -> UUID? {
@@ -2009,18 +2028,68 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
         }
     }
 
-    /// 捲動與選單不能把已成立的長按取消掉。
-    final class ReorderPress: UILongPressGestureRecognizer {
+    /// 按住一小段後、選單出現前若手指移動，就進入排序。停住不動則把這次手勢讓給選單。
+    final class ReorderTouch: UIGestureRecognizer {
+        var origin: CGPoint = .zero
+        private var startTime: TimeInterval = 0
+        private let minimumHold: TimeInterval = 0.18
+        private let movementThreshold: CGFloat = 12
+
         override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool {
             false
         }
 
         override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
-            if preventedGestureRecognizer is UIPanGestureRecognizer,
-               preventedGestureRecognizer.view is UIScrollView {
-                return false
+            false
+        }
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard state == .possible, let view, let touch = touches.first else {
+                state = .failed
+                return
             }
-            return true
+            origin = touch.location(in: view)
+            startTime = touch.timestamp
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard let view, let touch = touches.first else { return }
+            let point = touch.location(in: view)
+            let distance = hypot(point.x - origin.x, point.y - origin.y)
+            if state == .possible {
+                guard distance >= movementThreshold else { return }
+                guard touch.timestamp - startTime >= minimumHold else {
+                    state = .failed
+                    return
+                }
+                cancelsTouchesInView = true
+                state = .began
+            } else if state == .began || state == .changed {
+                state = .changed
+            }
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+            if state == .began || state == .changed {
+                state = .ended
+            } else {
+                state = .failed
+            }
+        }
+
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+            if state == .began || state == .changed {
+                state = .cancelled
+            } else {
+                state = .failed
+            }
+        }
+
+        override func reset() {
+            super.reset()
+            cancelsTouchesInView = false
+            origin = .zero
+            startTime = 0
         }
     }
 
@@ -2032,24 +2101,22 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
         var onEnd: () -> Void = {}
 
         private static var recognizerKey: UInt8 = 0
-        private var startPoint: CGPoint = .zero
         private var draggedID: UUID?
         private var armed = false
         private var lastTarget: UUID?
         private var suspendedScrolls: [(scroll: UIScrollView, enabled: Bool, canCancel: Bool)] = []
+        private var silenced: [UIGestureRecognizer] = []
 
         func install(from marker: UIView) {
             guard let scroll = scrollView(from: marker) else { return }
-            if let existing = objc_getAssociatedObject(scroll, &Self.recognizerKey) as? ReorderPress {
+            if let existing = objc_getAssociatedObject(scroll, &Self.recognizerKey) as? ReorderTouch {
                 existing.removeTarget(nil, action: nil)
                 existing.addTarget(self, action: #selector(handle(_:)))
                 existing.delegate = self
                 existing.isEnabled = enabled
                 return
             }
-            let recognizer = ReorderPress(target: self, action: #selector(handle(_:)))
-            recognizer.minimumPressDuration = 0.3
-            recognizer.allowableMovement = 28
+            let recognizer = ReorderTouch(target: self, action: #selector(handle(_:)))
             recognizer.cancelsTouchesInView = false
             recognizer.delaysTouchesBegan = false
             recognizer.delegate = self
@@ -2059,7 +2126,10 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            enabled
+            guard enabled, let view = gestureRecognizer.view, let touch = gestureRecognizer as? ReorderTouch else {
+                return false
+            }
+            return registry.hit(touch.origin, in: view) != nil
         }
 
         func gestureRecognizer(
@@ -2069,29 +2139,22 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
             true
         }
 
-        @objc private func handle(_ recognizer: UILongPressGestureRecognizer) {
-            guard let view = recognizer.view else { return }
+        @objc private func handle(_ recognizer: UIGestureRecognizer) {
+            guard let view = recognizer.view, let touch = recognizer as? ReorderTouch else { return }
             let point = recognizer.location(in: view)
             switch recognizer.state {
             case .began:
-                startPoint = point
-                draggedID = registry.hit(point, in: view)
-                armed = false
+                guard let draggedID = registry.hit(touch.origin, in: view) else { return }
+                self.draggedID = draggedID
+                armed = true
                 lastTarget = nil
-                if draggedID != nil {
-                    lockScrolling(from: view)
-                }
+                lockScrolling(from: view)
+                silenceCompeting(except: recognizer, in: view)
+                dismissContextMenus(in: view)
+                onArm(draggedID)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             case .changed:
-                guard enabled, let draggedID else { return }
-                let distance = hypot(point.x - startPoint.x, point.y - startPoint.y)
-                if !armed {
-                    guard distance > 8 else { return }
-                    armed = true
-                    lockScrolling(from: view)
-                    cancelCompetingRecognizers(except: recognizer, in: view)
-                    onArm(draggedID)
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                }
+                guard let draggedID else { return }
                 let frames = registry.frames(in: view)
                 if let lastTarget, let frame = frames[lastTarget], !frame.contains(point) {
                     self.lastTarget = nil
@@ -2102,6 +2165,7 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
                 }
             case .ended, .cancelled, .failed:
                 restoreScrolling()
+                restoreSilenced()
                 if armed {
                     onEnd()
                 }
@@ -2147,32 +2211,50 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
             suspendedScrolls.removeAll()
         }
 
-        private func cancelCompetingRecognizers(except recognizer: UIGestureRecognizer, in view: UIView?) {
+        private func silenceCompeting(except recognizer: UIGestureRecognizer, in view: UIView?) {
             guard let root = view else { return }
-            func silence(_ node: UIView) {
-                node.gestureRecognizers?.forEach { other in
-                    guard other !== recognizer else { return }
-                    if other is UIPanGestureRecognizer, other.view is UIScrollView { return }
-                    if other.state == .possible || other.state == .began || other.state == .changed {
-                        other.isEnabled = false
-                        other.isEnabled = true
-                    }
-                }
-                node.subviews.forEach(silence)
+            func consider(_ other: UIGestureRecognizer) {
+                guard other !== recognizer, other.isEnabled else { return }
+                if other is UIPanGestureRecognizer, other.view is UIScrollView { return }
+                guard other.state == .possible || other.state == .began || other.state == .changed else { return }
+                other.isEnabled = false
+                silenced.append(other)
             }
-            silence(root)
+            func walk(_ node: UIView) {
+                node.gestureRecognizers?.forEach(consider)
+                node.subviews.forEach(walk)
+            }
+            walk(root)
             var current = root.superview
             while let node = current {
-                node.gestureRecognizers?.forEach { other in
-                    guard other !== recognizer else { return }
-                    if other is UIPanGestureRecognizer, other.view is UIScrollView { return }
-                    if other.state == .possible || other.state == .began || other.state == .changed {
-                        other.isEnabled = false
-                        other.isEnabled = true
-                    }
-                }
+                node.gestureRecognizers?.forEach(consider)
                 current = node.superview
             }
+        }
+
+        private func restoreSilenced() {
+            silenced.forEach { $0.isEnabled = true }
+            silenced.removeAll()
+        }
+
+        private func dismissContextMenus(in view: UIView?) {
+            guard let root = view else { return }
+            func walk(_ node: UIView) {
+                node.interactions.forEach { interaction in
+                    (interaction as? UIContextMenuInteraction)?.dismissMenu()
+                }
+                node.subviews.forEach(walk)
+            }
+            walk(root)
+        }
+    }
+}
+
+private extension View {
+    /// 長按選單保留，但不把卡片放大成預覽。
+    func albumCardContextMenu<Menu: View>(@ViewBuilder _ menu: () -> Menu) -> some View {
+        contextMenu(menuItems: menu) {
+            Color.clear.frame(width: 1, height: 1)
         }
     }
 }
@@ -2206,6 +2288,7 @@ private struct GroupMembersAlbumView: View {
     @State private var renameText: String = ""
     @State private var cardRegistry = AlbumCardRegistry()
     @State private var liftedMemberID: UUID?
+    @State private var blockAlbumOpen = false
     @State private var isSelectingAlbums: Bool = false
     @State private var selectedMemberIDs: Set<UUID> = []
     @State private var pendingMemberDeletionIDs: Set<UUID>?
@@ -2303,11 +2386,19 @@ private struct GroupMembersAlbumView: View {
             AlbumLongPressReorder(
                 enabled: !isSelectingAlbums && !displayedMembers.isEmpty,
                 registry: cardRegistry,
-                onArm: { liftedMemberID = $0 },
+                onArm: { id in
+                    blockAlbumOpen = true
+                    liftedMemberID = id
+                },
                 onMove: { dragged, target in
                     reorderDisplayedMembers(dragged: dragged, target: target)
                 },
-                onEnd: { liftedMemberID = nil }
+                onEnd: {
+                    liftedMemberID = nil
+                    DispatchQueue.main.async {
+                        blockAlbumOpen = false
+                    }
+                }
             )
         }
         }
@@ -2529,7 +2620,8 @@ private struct GroupMembersAlbumView: View {
             } else {
                 NavigationLink(value: member) { card }
                     .buttonStyle(.plain)
-                    .contextMenu {
+                    .allowsHitTesting(!blockAlbumOpen)
+                    .albumCardContextMenu {
                         AlbumAddMenuItems(
                             onCamera: {
                                 actionTargetMember = member
