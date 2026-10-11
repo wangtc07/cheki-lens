@@ -406,21 +406,19 @@ struct ChekiDetailView: View {
     // MARK: - 1. 頂部懸浮導覽列與「日期時間藥丸」 (Apple iOS 18 Photos Header)
 
     private func topOverlayNavigationBar(isLandscape: Bool) -> some View {
-        let buttonSize: CGFloat = isLandscape ? 30 : 36
-        let iconSize: CGFloat = isLandscape ? 13 : 15.5
-
-        return HStack(alignment: .center, spacing: 10) {
-            // 左側：圓形液態玻璃返回按鈕
+        return HStack(alignment: .center, spacing: ChromeMetrics.groupSpacing) {
+            // 左側：圓形液態玻璃返回按鈕（直向與橫向同為 44 pt）
             Button {
                 triggerAnimatedDismissToGrid()
             } label: {
                 Image(systemName: "chevron.backward")
-                    .font(.system(size: iconSize, weight: .semibold))
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .detailLiquidGlassCircle(size: buttonSize)
+                    .detailLiquidGlassCircle(size: ChromeMetrics.circle)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("返回")
+            .accessibilityLabel(L10n.tr("返回", "戻る"))
+            .accessibilityIdentifier(ChromeID.detailBack)
 
             Spacer()
 
@@ -609,11 +607,12 @@ struct ChekiDetailView: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: iconSize, weight: .semibold))
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .detailLiquidGlassCircle(size: buttonSize)
+                    .detailLiquidGlassCircle(size: ChromeMetrics.circle)
             }
             .accessibilityLabel("更多")
+            .accessibilityIdentifier(ChromeID.detailMore)
         }
         .padding(.horizontal, 16)
         .padding(.top, isLandscape ? 4 : 8)
@@ -1337,10 +1336,10 @@ struct ChekiDetailView: View {
     }
 
     private func standardFiveIconToolbar(isLandscape: Bool) -> some View {
-        let iconFontSize: CGFloat = isLandscape ? 14 : 18
-        let pillHeight: CGFloat = isLandscape ? 34 : 44
-        let centerButtonWidth: CGFloat = isLandscape ? 38 : 44
-        let outerPillSpacing: CGFloat = isLandscape ? 18 : 24
+        let iconFontSize = ChromeMetrics.iconPointSize
+        let pillHeight = ChromeMetrics.circle
+        let centerButtonWidth = ChromeMetrics.circle
+        let outerPillSpacing = ChromeMetrics.groupSpacing
 
         return HStack(alignment: .center, spacing: outerPillSpacing) {
             // 左側獨立圓形膠囊：1. 分享 (Share)
@@ -1354,6 +1353,7 @@ struct ChekiDetailView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("分享")
+            .accessibilityIdentifier(ChromeID.detailShare)
 
             // 中央膠囊：2. 愛心 (Favorite) + 3. 資訊 (Info) + 4. 點選白邊白平衡 (Eyedropper WB) + 5. 調整邊界 (Adjust)
             HStack(spacing: isLandscape ? 2 : 2) {
@@ -1440,6 +1440,7 @@ struct ChekiDetailView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("刪除")
+            .accessibilityIdentifier(ChromeID.detailDelete)
         }
     }
 

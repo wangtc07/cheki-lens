@@ -16,6 +16,14 @@ enum ChromeID {
     static let libraryCamera = "chrome.library.camera"
     static let libraryImport = "chrome.library.import"
     static let libraryFilter = "chrome.library.filter"
+    static let librarySelect = "chrome.library.select"
+    static let libraryPhoto = "chrome.library.photo"
+    static let librarySelectionShare = "chrome.library.selection.share"
+    static let librarySelectionDelete = "chrome.library.selection.delete"
+    static let detailBack = "chrome.detail.back"
+    static let detailMore = "chrome.detail.more"
+    static let detailShare = "chrome.detail.share"
+    static let detailDelete = "chrome.detail.delete"
 }
 
 enum ChromeInk {

@@ -207,4 +207,72 @@ final class ChekiLensUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [becameActive], timeout: 3), .completed, "點擊後閃光燈應離開關閉，實際 \(flashed.label)")
         saveAuditScreenshot(app, name: "task_6_6_4_flash_on")
     }
+
+    /// Task 6.6.5：選取列與單張檢視的返回、分享、刪除圓鈕皆為 44 pt，且左右同一水平線。
+    @MainActor
+    func testDetailAndSelectionChromeIsUniform44() throws {
+        let app = launchLibraryApp()
+        let filter = app.buttons["chrome.library.filter"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 12))
+        try ensureLibraryHasPhoto(app)
+
+        let select = app.buttons["chrome.library.select"]
+        XCTAssertTrue(select.waitForExistence(timeout: 8), "典藏庫沒有可選取的照片。\(app.debugDescription)")
+        select.tap()
+
+        let selectionShare = app.buttons["chrome.library.selection.share"]
+        let selectionDelete = app.buttons["chrome.library.selection.delete"]
+        XCTAssertTrue(selectionShare.waitForExistence(timeout: 4), "選取列沒有分享鈕")
+        XCTAssertTrue(selectionDelete.waitForExistence(timeout: 2))
+        assertCircleFramesMatch(selectionShare, selectionDelete, expectedSide: 44)
+        saveAuditScreenshot(app, name: "task_6_6_5_selection")
+
+        select.tap()
+        let photo = app.buttons["chrome.library.photo"].firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 6), "離開選取後找不到照片")
+        photo.tap()
+
+        let back = app.buttons["chrome.detail.back"]
+        let more = app.buttons["chrome.detail.more"]
+        let share = app.buttons["chrome.detail.share"]
+        let delete = app.buttons["chrome.detail.delete"]
+        XCTAssertTrue(back.waitForExistence(timeout: 6), "沒有進入單張檢視。\(app.debugDescription)")
+        XCTAssertTrue(more.waitForExistence(timeout: 2))
+        XCTAssertTrue(share.waitForExistence(timeout: 2))
+        XCTAssertTrue(delete.waitForExistence(timeout: 2))
+        assertCircleFramesMatch(back, more, expectedSide: 44)
+        assertCircleFramesMatch(share, delete, expectedSide: 44)
+        saveAuditScreenshot(app, name: "task_6_6_5_detail")
+    }
+
+    @MainActor
+    private func ensureLibraryHasPhoto(_ app: XCUIApplication) throws {
+        let select = app.buttons["chrome.library.select"]
+        if select.waitForExistence(timeout: 3) { return }
+
+        let importer = app.buttons["chrome.library.import"]
+        XCTAssertTrue(importer.waitForExistence(timeout: 4))
+        importer.tap()
+
+        let cancelPicker = app.buttons["取消"]
+        let cancelPickerEn = app.buttons["Cancel"]
+        let pickerVisible = cancelPicker.waitForExistence(timeout: 6) || cancelPickerEn.waitForExistence(timeout: 2)
+        XCTAssertTrue(pickerVisible, "沒有打開系統相簿選擇器")
+
+        let pickerPhoto = app.images.matching(
+            NSPredicate(format: "identifier == 'PXGGridLayout-Info'")
+        ).element(boundBy: 0)
+        XCTAssertTrue(pickerPhoto.waitForExistence(timeout: 6), "相簿選擇器沒有可點的照片")
+        pickerPhoto.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+
+        let done = app.buttons["完了"]
+        XCTAssertTrue(done.waitForExistence(timeout: 4))
+        done.tap()
+
+        let readyToArchive = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '歸檔'")).firstMatch
+        XCTAssertTrue(readyToArchive.waitForExistence(timeout: 40), "照片尚未完成偵測")
+        readyToArchive.tap()
+
+        XCTAssertTrue(select.waitForExistence(timeout: 30), "歸檔後典藏庫仍沒有照片")
+    }
 }

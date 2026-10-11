@@ -535,6 +535,7 @@ struct LibraryView: View {
                 .fixedSize()
                 .layoutPriority(1)
                 .accessibilityLabel(isSelectionMode ? "完成選取" : "選取拍立得")
+                .accessibilityIdentifier(ChromeID.librarySelect)
             }
         }
     }
@@ -618,6 +619,7 @@ struct LibraryView: View {
                 AppleLibraryPhotoCell(item: item, cornerRadius: cornerRadius, scopeID: "library-all")
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier(ChromeID.libraryPhoto)
             .contextMenu {
                 Menu {
                     MemberAssignmentMenuContent(item: item) { showingQuickCreateSheet = true }
@@ -3632,13 +3634,13 @@ private struct ApplePhotosSelectionBottomBar: View {
                 onShare()
             } label: {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 19, weight: .semibold))
-                    .darkSystemCircleChrome(size: 48)
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
+                    .darkSystemCircleChrome(size: ChromeMetrics.circle)
             }
             .buttonStyle(.plain)
             .disabled(selectedCount == 0)
-            .opacity(selectedCount == 0 ? 0.42 : 1.0)
             .accessibilityLabel("分享")
+            .accessibilityIdentifier(ChromeID.librarySelectionShare)
 
             Spacer()
 
@@ -3658,17 +3660,17 @@ private struct ApplePhotosSelectionBottomBar: View {
                 onDelete()
             } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 19, weight: .semibold))
-                    .darkSystemCircleChrome(size: 48)
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
+                    .darkSystemCircleChrome(size: ChromeMetrics.circle)
             }
             .buttonStyle(.plain)
             .disabled(selectedCount == 0)
-            .opacity(selectedCount == 0 ? 0.42 : 1.0)
             .accessibilityLabel("刪除")
+            .accessibilityIdentifier(ChromeID.librarySelectionDelete)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, ChromeMetrics.edgeHorizontal)
         .padding(.top, 10)
-        .padding(.bottom, 8)
+        .padding(.bottom, ChromeMetrics.edgeBottom)
         .background(
             LinearGradient(
                 colors: [
