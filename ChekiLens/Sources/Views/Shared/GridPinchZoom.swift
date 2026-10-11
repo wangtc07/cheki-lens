@@ -15,21 +15,24 @@ enum GridPinchZoom {
     }
 
     /// 放大減少欄數，縮小增加欄數。未過門檻時維持基準欄數。
+    /// 只有 1／2／3 欄時每次最多移動一階，避免從 1 或 3 直接跳過 2。
     static func columnCount(after magnification: CGFloat, from baseline: Int, counts: [Int] = columnCounts) -> Int {
         guard !counts.isEmpty else { return baseline }
         let baseIndex = counts.firstIndex(of: baseline) ?? (counts.count - 1)
-        let targetIndex: Int
+        let step: Int
         if magnification > 1.58 {
-            targetIndex = max(0, baseIndex - 2)
+            step = -2
         } else if magnification > 1.15 {
-            targetIndex = max(0, baseIndex - 1)
+            step = -1
         } else if magnification < 0.62 {
-            targetIndex = min(counts.count - 1, baseIndex + 2)
+            step = 2
         } else if magnification < 0.86 {
-            targetIndex = min(counts.count - 1, baseIndex + 1)
+            step = 1
         } else {
-            targetIndex = baseIndex
+            step = 0
         }
+        let limitedStep = counts.count <= 3 ? max(-1, min(1, step)) : step
+        let targetIndex = min(counts.count - 1, max(0, baseIndex + limitedStep))
         return counts[targetIndex]
     }
 

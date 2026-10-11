@@ -806,6 +806,63 @@ private struct AppleLibraryPhotoCell: View {
     }
 }
 
+// MARK: - 相冊刪除（移走拍立得後再刪相冊，避免 cascade 把照片一起刪掉）
+
+private enum AlbumPendingDeletion {
+    case groups(Set<UUID>)
+    case members(Set<UUID>)
+}
+
+private enum AlbumLibraryDeletion {
+    static func deleteMembers(
+        _ members: [IdolMember],
+        allItems: [ChekiItem],
+        allMembers: [IdolMember],
+        in context: ModelContext
+    ) {
+        let doomedIDs = Set(members.map(\.id))
+        guard !doomedIDs.isEmpty else { return }
+        for item in allItems where !item.isDeleted && item.modelContext != nil {
+            let current = item.assignedMembers(from: allMembers)
+            let remaining = current.filter { !doomedIDs.contains($0.id) }
+            if remaining.count != current.count {
+                item.setAssignedMembers(remaining)
+            }
+        }
+        try? context.save()
+        for member in members where !member.isDeleted && member.modelContext != nil {
+            context.delete(member)
+        }
+        try? context.save()
+    }
+
+    static func deleteGroups(
+        _ groups: [IdolGroup],
+        allItems: [ChekiItem],
+        allMembers: [IdolMember],
+        in context: ModelContext
+    ) {
+        let members = groups.flatMap(\.members)
+        deleteMembers(members, allItems: allItems, allMembers: allMembers, in: context)
+        for group in groups where !group.isDeleted && group.modelContext != nil {
+            context.delete(group)
+        }
+        try? context.save()
+    }
+}
+
+private struct AlbumSelectionBadge: View {
+    let isSelected: Bool
+
+    var body: some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.title3)
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(isSelected ? .white : .white.opacity(0.9), isSelected ? .blue : .black.opacity(0.35))
+            .padding(10)
+    }
+}
+
 // MARK: - 2. AlbumsRootView (底部左側 Tab 2：「相冊」— 仿照 Apple 原生相簿設計)
 
 /// Apple 原生相簿風格的「相冊」視圖
@@ -826,6 +883,14 @@ struct AlbumsRootView: View {
     @State private var livePinchScale: CGFloat = 1
 
     @State private var hierarchyMode: AlbumHierarchyMode = .groups
+    @State private var isSelectingAlbums: Bool = false
+    @State private var selectedGroupIDs: Set<UUID> = []
+    @State private var selectedMemberIDs: Set<UUID> = []
+    @State private var pendingDeletion: AlbumPendingDeletion?
+    @State private var groupsSegmentHidden: Bool = false
+    @State private var membersSegmentHidden: Bool = false
+    @State private var groupScrollPosition = ScrollPosition(edge: .top)
+    @State private var memberScrollPosition = ScrollPosition(edge: .top)
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingBatchPairingSheet: Bool = false
@@ -850,6 +915,17 @@ struct AlbumsRootView: View {
 
     private var displayMode: AlbumDisplayMode {
         AlbumDisplayMode(rawValue: displayModeRaw) ?? .grid
+    }
+
+    private var segmentHidden: Bool {
+        hierarchyMode == .groups ? groupsSegmentHidden : membersSegmentHidden
+    }
+
+    private var currentSelectionIsEmpty: Bool {
+        switch hierarchyMode {
+        case .groups: selectedGroupIDs.isEmpty
+        case .members: selectedMemberIDs.isEmpty
+        }
     }
 
     private var albumColumns: [GridItem] {
@@ -931,21 +1007,14 @@ struct AlbumsRootView: View {
                 Color(.systemBackground)
                     .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        switch hierarchyMode {
-                        case .groups:
-                            groupsAlbumGrid
-                        case .members:
-                            allMembersAlbumGrid
-                        }
-                    }
-                    .padding(.top, 96)
-                    .padding(.bottom, 28)
-                    .scaleEffect(displayMode == .grid ? livePinchScale : 1, anchor: .top)
-                    .animation(ChekiMotion.layoutCommit, value: columnCount)
+                TabView(selection: $hierarchyMode) {
+                    albumModeScroll(.groups)
+                        .tag(AlbumHierarchyMode.groups)
+                    albumModeScroll(.members)
+                        .tag(AlbumHierarchyMode.members)
                 }
-                .gridPinchGesture(enabled: displayMode == .grid, pinchZoomGesture)
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .animation(ChekiMotion.toggle, value: hierarchyMode)
                 .accessibilityIdentifier(ChromeID.albumsGrid)
                 .accessibilityValue("\(columnCount)")
 
@@ -956,11 +1025,25 @@ struct AlbumsRootView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
-                AlbumNavTrailingToolbar(onCreate: { showingQuickCreateSheet = true }) {
-                    albumsToolbarMenuContent
+                if isSelectingAlbums {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(L10n.tr("取消", "キャンセル")) {
+                            exitAlbumSelection()
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(L10n.tr("刪除", "削除"), role: .destructive) {
+                            queueVisibleSelectionForDelete()
+                        }
+                        .disabled(currentSelectionIsEmpty)
+                    }
+                } else {
+                    AlbumNavTrailingToolbar(onCreate: { showingQuickCreateSheet = true }) {
+                        albumsToolbarMenuContent
+                    }
                 }
             }
-            .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+            .toolbar(isSelectingAlbums || chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
             .photosPicker(
                 isPresented: $showingAlbumPhotosPicker,
                 selection: $selectedAlbumPhotos,
@@ -1045,6 +1128,23 @@ struct AlbumsRootView: View {
                     renamingMember = nil
                 }
             }
+            .confirmationDialog(
+                L10n.tr("刪除相冊？", "アルバムを削除？"),
+                isPresented: Binding(
+                    get: { pendingDeletion != nil },
+                    set: { if !$0 { pendingDeletion = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button(L10n.tr("刪除", "削除"), role: .destructive) {
+                    performPendingDeletion()
+                }
+                Button(L10n.tr("取消", "キャンセル"), role: .cancel) {
+                    pendingDeletion = nil
+                }
+            } message: {
+                Text(L10n.tr("相冊會刪除，裡面的拍立得會移到未分類。", "アルバムは削除され、中のチェキは未分類に移動します。"))
+            }
             .navigationDestination(for: IdolGroup.self) { group in
                 GroupMembersAlbumView(group: group, allItems: validChekiItems)
             }
@@ -1075,6 +1175,14 @@ struct AlbumsRootView: View {
 
     @ViewBuilder
     private var albumsToolbarMenuContent: some View {
+            Button {
+                withAnimation(ChekiMotion.toggle) {
+                    isSelectingAlbums = true
+                }
+            } label: {
+                Label(L10n.tr("選擇", "選択"), systemImage: "checkmark.circle")
+            }
+
             AlbumAddMenuItems(
                 onCamera: {
                     actionTargetMember = nil
@@ -1138,30 +1246,58 @@ struct AlbumsRootView: View {
 
                 Spacer()
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.systemBackground).ignoresSafeArea(edges: .top))
 
-            // 頂部「團體 | 成員」原地切換（點擊「成員」直接在此頁面展開所有成員相冊）
             Picker("相冊檢視階層", selection: $hierarchyMode.animation(ChekiMotion.toggle)) {
                 ForEach(AlbumHierarchyMode.allCases) { mode in
                     Text(mode.displayName).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+            .opacity(segmentHidden ? 0 : 1)
+            .animation(.easeInOut(duration: 0.25), value: segmentHidden)
+            .allowsHitTesting(!segmentHidden)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(.systemBackground).opacity(0.65),
-                    Color(.systemBackground).opacity(0.28),
-                    Color(.systemBackground).opacity(0.0)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea(edges: .top)
-        )
+    }
+
+    private func albumModeScroll(_ mode: AlbumHierarchyMode) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                switch mode {
+                case .groups:
+                    groupsAlbumGrid
+                case .members:
+                    allMembersAlbumGrid
+                }
+            }
+            .padding(.top, 96)
+            .padding(.bottom, 28)
+            .scaleEffect(displayMode == .grid ? livePinchScale : 1, anchor: .top)
+            .animation(ChekiMotion.layoutCommit, value: columnCount)
+        }
+        .scrollPosition(mode == .groups ? $groupScrollPosition : $memberScrollPosition)
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentOffset.y + geometry.contentInsets.top
+        } action: { _, offset in
+            let hidden = offset > 40
+            let shown = offset <= 2
+            guard hidden || shown else { return }
+            switch mode {
+            case .groups where groupsSegmentHidden != hidden:
+                groupsSegmentHidden = hidden
+            case .members where membersSegmentHidden != hidden:
+                membersSegmentHidden = hidden
+            default:
+                break
+            }
+        }
+        .gridPinchGesture(enabled: displayMode == .grid && !isSelectingAlbums, pinchZoomGesture)
     }
 
     // MARK: - 團體相冊網格 / 清單（基本相簿構造：團體 > 成員）
@@ -1210,62 +1346,65 @@ struct AlbumsRootView: View {
     @ViewBuilder
     private func groupAlbumEntryView(for group: IdolGroup, isList: Bool) -> some View {
         let covers = Self.groupCoverImages(for: group, allItems: validChekiItems)
-        NavigationLink(value: group) {
-            if isList {
-                ApplePhotoAlbumListRow(
-                    primaryTitle: group.name,
-                    secondaryTitle: nil,
-                    coverImagesData: covers,
-                    showsDragHandle: sortMethod == .custom
-                )
-            } else {
-                ApplePhotoAlbumTile(
-                    primaryTitle: group.name,
-                    secondaryTitle: nil,
-                    coverImagesData: covers
-                )
-            }
-        }
-        .buttonStyle(.plain)
-        .onDrag {
-            draggingGroupID = group.id
-            return NSItemProvider(object: group.id.uuidString as NSString)
-        }
-        .onDrop(
-            of: [UTType.text],
-            delegate: GroupAlbumDropDelegate(
-                targetGroup: group,
-                groups: sortedGroups,
-                draggingGroupID: $draggingGroupID,
-                onReorder: { reordered in
-                    sortMethodRaw = AlbumSortMethod.custom.rawValue
-                    for (idx, item) in reordered.enumerated() {
-                        item.sortOrder = idx
-                    }
-                    try? modelContext.save()
-                }
-            )
+        let card = albumCard(
+            isList: isList,
+            title: group.name,
+            covers: covers,
+            showsDragHandle: sortMethod == .custom
         )
-        .contextMenu {
-            AlbumAddMenuItems(
-                onCamera: {
-                    actionTargetMember = group.sortedMembers.first
-                    showingCameraScanner = true
-                },
-                onImport: {
-                    actionTargetMember = group.sortedMembers.first
-                    showingAlbumPhotosPicker = true
-                }
-            )
-
-            Divider()
-
-            Button {
-                renameText = group.name
-                renamingGroup = group
-            } label: {
-                Label(L10n.tr("團體名", "グループ名"), systemImage: "pencil")
+        if isSelectingAlbums {
+            selectableAlbumCard(card, isSelected: selectedGroupIDs.contains(group.id), isList: isList) {
+                toggleAlbumSelection(&selectedGroupIDs, id: group.id)
             }
+        } else {
+            NavigationLink(value: group) { card }
+                .buttonStyle(.plain)
+                .onDrag {
+                    draggingGroupID = group.id
+                    return NSItemProvider(object: group.id.uuidString as NSString)
+                }
+                .onDrop(
+                    of: [UTType.text],
+                    delegate: GroupAlbumDropDelegate(
+                        targetGroup: group,
+                        groups: sortedGroups,
+                        draggingGroupID: $draggingGroupID,
+                        onReorder: { reordered in
+                            sortMethodRaw = AlbumSortMethod.custom.rawValue
+                            for (idx, item) in reordered.enumerated() {
+                                item.sortOrder = idx
+                            }
+                            try? modelContext.save()
+                        }
+                    )
+                )
+                .contextMenu {
+                    AlbumAddMenuItems(
+                        onCamera: {
+                            actionTargetMember = group.sortedMembers.first
+                            showingCameraScanner = true
+                        },
+                        onImport: {
+                            actionTargetMember = group.sortedMembers.first
+                            showingAlbumPhotosPicker = true
+                        }
+                    )
+
+                    Divider()
+
+                    Button {
+                        renameText = group.name
+                        renamingGroup = group
+                    } label: {
+                        Label(L10n.tr("團體名", "グループ名"), systemImage: "pencil")
+                    }
+
+                    Button(role: .destructive) {
+                        pendingDeletion = .groups([group.id])
+                    } label: {
+                        Label(L10n.tr("刪除", "削除"), systemImage: "trash")
+                    }
+                }
         }
     }
 
@@ -1315,62 +1454,65 @@ struct AlbumsRootView: View {
     @ViewBuilder
     private func memberAlbumEntryView(for member: IdolMember, isList: Bool) -> some View {
         let covers = Self.memberCoverImages(for: member, allItems: validChekiItems)
-        NavigationLink(value: member) {
-            if isList {
-                ApplePhotoAlbumListRow(
-                    primaryTitle: member.albumTitle,
-                    secondaryTitle: nil,
-                    coverImagesData: covers,
-                    showsDragHandle: sortMethod == .custom
-                )
-            } else {
-                ApplePhotoAlbumTile(
-                    primaryTitle: member.albumTitle,
-                    secondaryTitle: nil,
-                    coverImagesData: covers
-                )
-            }
-        }
-        .buttonStyle(.plain)
-        .onDrag {
-            draggingMemberID = member.id
-            return NSItemProvider(object: member.id.uuidString as NSString)
-        }
-        .onDrop(
-            of: [UTType.text],
-            delegate: MemberAlbumDropDelegate(
-                targetMember: member,
-                members: allExpandedMembers,
-                draggingMemberID: $draggingMemberID,
-                onReorder: { reordered in
-                    sortMethodRaw = AlbumSortMethod.custom.rawValue
-                    for (idx, item) in reordered.enumerated() {
-                        item.sortOrder = idx
-                    }
-                    try? modelContext.save()
-                }
-            )
+        let card = albumCard(
+            isList: isList,
+            title: member.albumTitle,
+            covers: covers,
+            showsDragHandle: sortMethod == .custom
         )
-        .contextMenu {
-            AlbumAddMenuItems(
-                onCamera: {
-                    actionTargetMember = member
-                    showingCameraScanner = true
-                },
-                onImport: {
-                    actionTargetMember = member
-                    showingAlbumPhotosPicker = true
-                }
-            )
-
-            Divider()
-
-            Button {
-                renameText = member.stageName
-                renamingMember = member
-            } label: {
-                Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
+        if isSelectingAlbums {
+            selectableAlbumCard(card, isSelected: selectedMemberIDs.contains(member.id), isList: isList) {
+                toggleAlbumSelection(&selectedMemberIDs, id: member.id)
             }
+        } else {
+            NavigationLink(value: member) { card }
+                .buttonStyle(.plain)
+                .onDrag {
+                    draggingMemberID = member.id
+                    return NSItemProvider(object: member.id.uuidString as NSString)
+                }
+                .onDrop(
+                    of: [UTType.text],
+                    delegate: MemberAlbumDropDelegate(
+                        targetMember: member,
+                        members: allExpandedMembers,
+                        draggingMemberID: $draggingMemberID,
+                        onReorder: { reordered in
+                            sortMethodRaw = AlbumSortMethod.custom.rawValue
+                            for (idx, item) in reordered.enumerated() {
+                                item.sortOrder = idx
+                            }
+                            try? modelContext.save()
+                        }
+                    )
+                )
+                .contextMenu {
+                    AlbumAddMenuItems(
+                        onCamera: {
+                            actionTargetMember = member
+                            showingCameraScanner = true
+                        },
+                        onImport: {
+                            actionTargetMember = member
+                            showingAlbumPhotosPicker = true
+                        }
+                    )
+
+                    Divider()
+
+                    Button {
+                        renameText = member.stageName
+                        renamingMember = member
+                    } label: {
+                        Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
+                    }
+
+                    Button(role: .destructive) {
+                        pendingDeletion = .members([member.id])
+                    } label: {
+                        Label(L10n.tr("刪除", "削除"), systemImage: "trash")
+                    }
+                }
         }
     }
 
@@ -1394,6 +1536,8 @@ struct AlbumsRootView: View {
             }
         }
         .buttonStyle(.plain)
+        .allowsHitTesting(!isSelectingAlbums)
+        .opacity(isSelectingAlbums ? 0.4 : 1)
         .contextMenu {
             AlbumAddMenuItems(
                 onCamera: {
@@ -1405,6 +1549,95 @@ struct AlbumsRootView: View {
                     showingAlbumPhotosPicker = true
                 }
             )
+        }
+    }
+
+    @ViewBuilder
+    private func albumCard(isList: Bool, title: String, covers: [Data], showsDragHandle: Bool) -> some View {
+        if isList {
+            ApplePhotoAlbumListRow(
+                primaryTitle: title,
+                secondaryTitle: nil,
+                coverImagesData: covers,
+                showsDragHandle: showsDragHandle
+            )
+        } else {
+            ApplePhotoAlbumTile(
+                primaryTitle: title,
+                secondaryTitle: nil,
+                coverImagesData: covers
+            )
+        }
+    }
+
+    private func selectableAlbumCard<Card: View>(
+        _ card: Card,
+        isSelected: Bool,
+        isList: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            card.overlay(alignment: isList ? .trailing : .bottomTrailing) {
+                AlbumSelectionBadge(isSelected: isSelected)
+                    .padding(.trailing, isList ? 8 : 0)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func toggleAlbumSelection(_ selection: inout Set<UUID>, id: UUID) {
+        UISelectionFeedbackGenerator().selectionChanged()
+        if selection.contains(id) {
+            selection.remove(id)
+        } else {
+            selection.insert(id)
+        }
+    }
+
+    private func exitAlbumSelection() {
+        withAnimation(ChekiMotion.toggle) {
+            isSelectingAlbums = false
+            selectedGroupIDs.removeAll()
+            selectedMemberIDs.removeAll()
+        }
+    }
+
+    private func queueVisibleSelectionForDelete() {
+        switch hierarchyMode {
+        case .groups where !selectedGroupIDs.isEmpty:
+            pendingDeletion = .groups(selectedGroupIDs)
+        case .members where !selectedMemberIDs.isEmpty:
+            pendingDeletion = .members(selectedMemberIDs)
+        default:
+            break
+        }
+    }
+
+    private func performPendingDeletion() {
+        guard let pendingDeletion else { return }
+        switch pendingDeletion {
+        case .groups(let ids):
+            let groups = sortedGroups.filter { ids.contains($0.id) }
+            AlbumLibraryDeletion.deleteGroups(
+                groups,
+                allItems: validChekiItems,
+                allMembers: idolMembers,
+                in: modelContext
+            )
+            selectedGroupIDs.subtract(ids)
+        case .members(let ids):
+            let members = allExpandedMembers.filter { ids.contains($0.id) }
+            AlbumLibraryDeletion.deleteMembers(
+                members,
+                allItems: validChekiItems,
+                allMembers: idolMembers,
+                in: modelContext
+            )
+            selectedMemberIDs.subtract(ids)
+        }
+        self.pendingDeletion = nil
+        if currentSelectionIsEmpty {
+            isSelectingAlbums = false
         }
     }
 
@@ -1655,6 +1888,10 @@ private struct GroupMembersAlbumView: View {
     @State private var renamingMember: IdolMember? = nil
     @State private var renameText: String = ""
     @State private var draggingMemberID: UUID? = nil
+    @State private var isSelectingAlbums: Bool = false
+    @State private var selectedMemberIDs: Set<UUID> = []
+    @State private var pendingMemberDeletionIDs: Set<UUID>?
+    @Query(sort: \IdolMember.sortOrder, order: .forward) private var idolMembers: [IdolMember]
 
     private var sortMethod: AlbumSortMethod {
         AlbumSortMethod(rawValue: sortMethodRaw) ?? .custom
@@ -1727,7 +1964,7 @@ private struct GroupMembersAlbumView: View {
         }
         .scaleEffect(displayMode == .grid ? livePinchScale : 1, anchor: .top)
         .animation(ChekiMotion.layoutCommit, value: columnCount)
-        .gridPinchGesture(enabled: displayMode == .grid, pinchZoomGesture)
+        .gridPinchGesture(enabled: displayMode == .grid && !isSelectingAlbums, pinchZoomGesture)
         .background(Color(.systemBackground))
         .navigationTitle(group.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -1744,9 +1981,34 @@ private struct GroupMembersAlbumView: View {
             selectedAlbumPhotos = []
             showingBatchPairingSheet = true
         }
+        .toolbar(isSelectingAlbums ? .hidden : .visible, for: .tabBar)
         .toolbar {
-            AlbumNavTrailingToolbar(onCreate: { showingQuickCreateSheet = true }) {
-                AlbumAddMenuItems(
+            if isSelectingAlbums {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.tr("取消", "キャンセル")) {
+                        withAnimation(ChekiMotion.toggle) {
+                            isSelectingAlbums = false
+                            selectedMemberIDs.removeAll()
+                        }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.tr("刪除", "削除"), role: .destructive) {
+                        pendingMemberDeletionIDs = selectedMemberIDs
+                    }
+                    .disabled(selectedMemberIDs.isEmpty)
+                }
+            } else {
+                AlbumNavTrailingToolbar(onCreate: { showingQuickCreateSheet = true }) {
+                    Button {
+                        withAnimation(ChekiMotion.toggle) {
+                            isSelectingAlbums = true
+                        }
+                    } label: {
+                        Label(L10n.tr("選擇", "選択"), systemImage: "checkmark.circle")
+                    }
+
+                    AlbumAddMenuItems(
                     onCamera: {
                         actionTargetMember = displayedMembers.first
                         showingCameraScanner = true
@@ -1790,6 +2052,7 @@ private struct GroupMembersAlbumView: View {
                 Divider()
 
                 SettingsMenuButton { showingSettingsSheet = true }
+                }
             }
         }
         .sheet(isPresented: $showingQuickCreateSheet) {
@@ -1857,18 +2120,47 @@ private struct GroupMembersAlbumView: View {
                 renamingMember = nil
             }
         }
+        .confirmationDialog(
+            L10n.tr("刪除相冊？", "アルバムを削除？"),
+            isPresented: Binding(
+                get: { pendingMemberDeletionIDs != nil },
+                set: { if !$0 { pendingMemberDeletionIDs = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(L10n.tr("刪除", "削除"), role: .destructive) {
+                let ids = pendingMemberDeletionIDs ?? []
+                let members = displayedMembers.filter { ids.contains($0.id) }
+                AlbumLibraryDeletion.deleteMembers(
+                    members,
+                    allItems: allItems,
+                    allMembers: idolMembers,
+                    in: modelContext
+                )
+                selectedMemberIDs.subtract(ids)
+                pendingMemberDeletionIDs = nil
+                if selectedMemberIDs.isEmpty {
+                    isSelectingAlbums = false
+                }
+            }
+            Button(L10n.tr("取消", "キャンセル"), role: .cancel) {
+                pendingMemberDeletionIDs = nil
+            }
+        } message: {
+            Text(L10n.tr("相冊會刪除，裡面的拍立得會移到未分類。", "アルバムは削除され、中のチェキは未分類に移動します。"))
+        }
     }
 
     @ViewBuilder
     private func groupMemberAlbumEntry(for member: IdolMember, isList: Bool) -> some View {
         let covers = AlbumsRootView.memberCoverImages(for: member, allItems: allItems)
-        NavigationLink(value: member) {
+        let card = Group {
             if isList {
                 ApplePhotoAlbumListRow(
                     primaryTitle: member.albumTitle,
                     secondaryTitle: nil,
                     coverImagesData: covers,
-                    showsDragHandle: sortMethod == .custom
+                    showsDragHandle: sortMethod == .custom && !isSelectingAlbums
                 )
             } else {
                 ApplePhotoAlbumTile(
@@ -1878,46 +2170,70 @@ private struct GroupMembersAlbumView: View {
                 )
             }
         }
-        .buttonStyle(.plain)
-        .onDrag {
-            draggingMemberID = member.id
-            return NSItemProvider(object: member.id.uuidString as NSString)
-        }
-        .onDrop(
-            of: [UTType.text],
-            delegate: MemberAlbumDropDelegate(
-                targetMember: member,
-                members: displayedMembers,
-                draggingMemberID: $draggingMemberID,
-                onReorder: { reordered in
-                    sortMethodRaw = AlbumSortMethod.custom.rawValue
-                    for (idx, item) in reordered.enumerated() {
-                        item.sortOrder = idx
-                    }
-                    try? modelContext.save()
-                }
-            )
-        )
-        .contextMenu {
-            AlbumAddMenuItems(
-                onCamera: {
-                    actionTargetMember = member
-                    showingCameraScanner = true
-                },
-                onImport: {
-                    actionTargetMember = member
-                    showingAlbumPhotosPicker = true
-                }
-            )
-
-            Divider()
-
+        if isSelectingAlbums {
             Button {
-                renameText = member.stageName
-                renamingMember = member
+                UISelectionFeedbackGenerator().selectionChanged()
+                if selectedMemberIDs.contains(member.id) {
+                    selectedMemberIDs.remove(member.id)
+                } else {
+                    selectedMemberIDs.insert(member.id)
+                }
             } label: {
-                Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
+                card.overlay(alignment: isList ? .trailing : .bottomTrailing) {
+                    AlbumSelectionBadge(isSelected: selectedMemberIDs.contains(member.id))
+                        .padding(.trailing, isList ? 8 : 0)
+                }
             }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink(value: member) { card }
+                .buttonStyle(.plain)
+                .onDrag {
+                    draggingMemberID = member.id
+                    return NSItemProvider(object: member.id.uuidString as NSString)
+                }
+                .onDrop(
+                    of: [UTType.text],
+                    delegate: MemberAlbumDropDelegate(
+                        targetMember: member,
+                        members: displayedMembers,
+                        draggingMemberID: $draggingMemberID,
+                        onReorder: { reordered in
+                            sortMethodRaw = AlbumSortMethod.custom.rawValue
+                            for (idx, item) in reordered.enumerated() {
+                                item.sortOrder = idx
+                            }
+                            try? modelContext.save()
+                        }
+                    )
+                )
+                .contextMenu {
+                    AlbumAddMenuItems(
+                        onCamera: {
+                            actionTargetMember = member
+                            showingCameraScanner = true
+                        },
+                        onImport: {
+                            actionTargetMember = member
+                            showingAlbumPhotosPicker = true
+                        }
+                    )
+
+                    Divider()
+
+                    Button {
+                        renameText = member.stageName
+                        renamingMember = member
+                    } label: {
+                        Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
+                    }
+
+                    Button(role: .destructive) {
+                        pendingMemberDeletionIDs = [member.id]
+                    } label: {
+                        Label(L10n.tr("刪除", "削除"), systemImage: "trash")
+                    }
+                }
         }
     }
 }
