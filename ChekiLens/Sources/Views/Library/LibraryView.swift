@@ -930,8 +930,13 @@ struct AlbumsRootView: View {
     @State private var renameText: String = ""
     @State private var groupRegistry = AlbumCardRegistry()
     @State private var memberRegistry = AlbumCardRegistry()
-    @State private var liftedGroupID: UUID?
-    @State private var liftedMemberID: UUID?
+    @State private var menuLiftedGroupID: UUID?
+    @State private var menuLiftedMemberID: UUID?
+    @State private var dragLiftedGroupID: UUID?
+    @State private var dragLiftedMemberID: UUID?
+    @State private var groupDragTranslation: CGSize = .zero
+    @State private var memberDragTranslation: CGSize = .zero
+    @State private var uncategorizedMenuLifted = false
     @State private var blockAlbumOpen = false
     private var chromeState = NavigationChromeState.shared
 
@@ -1312,22 +1317,34 @@ struct AlbumsRootView: View {
                     registry: mode == .groups ? groupRegistry : memberRegistry,
                     onArm: { id in
                         blockAlbumOpen = true
-                        if mode == .groups {
-                            liftedGroupID = id
-                        } else {
-                            liftedMemberID = id
+                        withAnimation(ChekiMotion.small) {
+                            if mode == .groups {
+                                dragLiftedGroupID = id
+                                menuLiftedGroupID = nil
+                            } else {
+                                dragLiftedMemberID = id
+                                menuLiftedMemberID = nil
+                            }
                         }
                     },
-                    onMove: { dragged, target in
-                        if mode == .groups {
-                            reorderGroups(dragged: dragged, target: target)
-                        } else {
-                            reorderMembers(dragged: dragged, target: target)
-                        }
+                    onTrack: { translation in
+                        trackAlbumDrag(translation, groups: mode == .groups)
                     },
-                    onEnd: {
-                        liftedGroupID = nil
-                        liftedMemberID = nil
+                    onEnd: { hover in
+                        let dragged = mode == .groups ? dragLiftedGroupID : dragLiftedMemberID
+                        withAnimation(ChekiMotion.small) {
+                            if let dragged, let hover {
+                                if mode == .groups {
+                                    reorderGroups(dragged: dragged, target: hover)
+                                } else {
+                                    reorderMembers(dragged: dragged, target: hover)
+                                }
+                            }
+                            dragLiftedGroupID = nil
+                            dragLiftedMemberID = nil
+                            groupDragTranslation = .zero
+                            memberDragTranslation = .zero
+                        }
                         DispatchQueue.main.async {
                             blockAlbumOpen = false
                         }
@@ -1445,15 +1462,27 @@ struct AlbumsRootView: View {
                         renameText = group.name
                         renamingGroup = group
                     },
-                    onDelete: { pendingDeletion = .groups([group.id]) }
+                    onDelete: { pendingDeletion = .groups([group.id]) },
+                    onMenuVisible: { visible in
+                        withAnimation(ChekiMotion.small) {
+                            if visible {
+                                menuLiftedGroupID = group.id
+                            } else if menuLiftedGroupID == group.id {
+                                menuLiftedGroupID = nil
+                            }
+                        }
+                    }
                 )
             }
         }
-        .scaleEffect(liftedGroupID == group.id ? 1.05 : 1)
-        .zIndex(liftedGroupID == group.id ? 1 : 0)
+        .albumCardLift(
+            lifted: menuLiftedGroupID == group.id || dragLiftedGroupID == group.id,
+            translation: dragLiftedGroupID == group.id ? groupDragTranslation : .zero
+        )
         .overlay {
             AlbumCardAnchor(id: group.id, registry: groupRegistry)
         }
+        .zIndex(menuLiftedGroupID == group.id || dragLiftedGroupID == group.id ? 2 : 0)
     }
 
     // MARK: - 成員相冊網格 / 清單（無視團體階層，直接在原本頁面展開所有成員相冊）
@@ -1547,15 +1576,27 @@ struct AlbumsRootView: View {
                         renameText = member.stageName
                         renamingMember = member
                     },
-                    onDelete: { pendingDeletion = .members([member.id]) }
+                    onDelete: { pendingDeletion = .members([member.id]) },
+                    onMenuVisible: { visible in
+                        withAnimation(ChekiMotion.small) {
+                            if visible {
+                                menuLiftedMemberID = member.id
+                            } else if menuLiftedMemberID == member.id {
+                                menuLiftedMemberID = nil
+                            }
+                        }
+                    }
                 )
             }
         }
-        .scaleEffect(liftedMemberID == member.id ? 1.05 : 1)
-        .zIndex(liftedMemberID == member.id ? 1 : 0)
+        .albumCardLift(
+            lifted: menuLiftedMemberID == member.id || dragLiftedMemberID == member.id,
+            translation: dragLiftedMemberID == member.id ? memberDragTranslation : .zero
+        )
         .overlay {
             AlbumCardAnchor(id: member.id, registry: memberRegistry)
         }
+        .zIndex(menuLiftedMemberID == member.id || dragLiftedMemberID == member.id ? 2 : 0)
     }
 
     @ViewBuilder
@@ -1589,9 +1630,16 @@ struct AlbumsRootView: View {
                 onImport: {
                     actionTargetMember = nil
                     showingAlbumPhotosPicker = true
+                },
+                onMenuVisible: { visible in
+                    withAnimation(ChekiMotion.small) {
+                        uncategorizedMenuLifted = visible
+                    }
                 }
             )
+            .albumCardLift(lifted: uncategorizedMenuLifted, translation: .zero)
             .opacity(isSelectingAlbums ? 0.4 : 1)
+            .zIndex(uncategorizedMenuLifted ? 2 : 0)
     }
 
     @ViewBuilder
@@ -1679,12 +1727,24 @@ struct AlbumsRootView: View {
         let moved = updated.remove(at: from)
         updated.insert(moved, at: to)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(ChekiMotion.toggle) {
-            sortMethodRaw = AlbumSortMethod.custom.rawValue
-            for (index, group) in updated.enumerated() {
-                group.sortOrder = index
+        sortMethodRaw = AlbumSortMethod.custom.rawValue
+        for (index, group) in updated.enumerated() {
+            group.sortOrder = index
+        }
+        try? modelContext.save()
+    }
+
+    private func trackAlbumDrag(_ translation: CGSize, groups: Bool) {
+        let scale = max(displayMode == .grid ? livePinchScale : 1, 0.01)
+        let scaled = CGSize(width: translation.width / scale, height: translation.height / scale)
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if groups {
+                groupDragTranslation = scaled
+            } else {
+                memberDragTranslation = scaled
             }
-            try? modelContext.save()
         }
     }
 
@@ -1696,13 +1756,11 @@ struct AlbumsRootView: View {
         let moved = updated.remove(at: from)
         updated.insert(moved, at: to)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(ChekiMotion.toggle) {
-            sortMethodRaw = AlbumSortMethod.custom.rawValue
-            for (index, member) in updated.enumerated() {
-                member.sortOrder = index
-            }
-            try? modelContext.save()
+        sortMethodRaw = AlbumSortMethod.custom.rawValue
+        for (index, member) in updated.enumerated() {
+            member.sortOrder = index
         }
+        try? modelContext.save()
     }
 
     static func groupCoverImages(for group: IdolGroup, allItems: [ChekiItem] = []) -> [Data] {
@@ -1971,8 +2029,8 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
     var enabled: Bool
     var registry: AlbumCardRegistry
     var onArm: (UUID) -> Void
-    var onMove: (UUID, UUID) -> Void
-    var onEnd: () -> Void
+    var onTrack: (CGSize) -> Void
+    var onEnd: (UUID?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -1988,7 +2046,7 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
         context.coordinator.enabled = enabled
         context.coordinator.registry = registry
         context.coordinator.onArm = onArm
-        context.coordinator.onMove = onMove
+        context.coordinator.onTrack = onTrack
         context.coordinator.onEnd = onEnd
         uiView.coordinator = context.coordinator
         uiView.installIfNeeded()
@@ -2010,6 +2068,7 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
     /// 按住一小段後、選單出現前若手指移動，就進入排序。停住不動則把這次手勢讓給選單。
     final class ReorderTouch: UIGestureRecognizer {
         var origin: CGPoint = .zero
+        var armedOrigin: CGPoint = .zero
         private var startTime: TimeInterval = 0
         private let minimumHold: TimeInterval = 0.18
         private let movementThreshold: CGFloat = 12
@@ -2041,6 +2100,7 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
                     state = .failed
                     return
                 }
+                armedOrigin = point
                 cancelsTouchesInView = true
                 state = .began
             } else if state == .began || state == .changed {
@@ -2068,6 +2128,7 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
             super.reset()
             cancelsTouchesInView = false
             origin = .zero
+            armedOrigin = .zero
             startTime = 0
         }
     }
@@ -2076,8 +2137,8 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
         var enabled = true
         var registry = AlbumCardRegistry()
         var onArm: (UUID) -> Void = { _ in }
-        var onMove: (UUID, UUID) -> Void = { _, _ in }
-        var onEnd: () -> Void = {}
+        var onTrack: (CGSize) -> Void = { _ in }
+        var onEnd: (UUID?) -> Void = { _ in }
 
         private static var recognizerKey: UInt8 = 0
         private var draggedID: UUID?
@@ -2131,22 +2192,25 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
                 silenceCompeting(except: recognizer, in: view)
                 dismissContextMenus(in: view)
                 onArm(draggedID)
+                onTrack(.zero)
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             case .changed:
                 guard let draggedID else { return }
-                let frames = registry.frames(in: view)
-                if let lastTarget, let frame = frames[lastTarget], !frame.contains(point) {
-                    self.lastTarget = nil
-                }
-                if let target = registry.hit(point, in: view, excluding: draggedID), target != lastTarget {
+                let translation = CGSize(
+                    width: point.x - touch.armedOrigin.x,
+                    height: point.y - touch.armedOrigin.y
+                )
+                onTrack(translation)
+                let target = registry.hit(point, in: view, excluding: draggedID)
+                if target != lastTarget {
                     lastTarget = target
-                    onMove(draggedID, target)
                 }
             case .ended, .cancelled, .failed:
+                let hover = lastTarget
                 restoreScrolling()
                 restoreSilenced()
                 if armed {
-                    onEnd()
+                    onEnd(hover)
                 }
                 draggedID = nil
                 armed = false
@@ -2229,8 +2293,24 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
     }
 }
 
+private enum AlbumCardLift {
+    /// 選單與拖動時，卡片相對原位往上浮的距離。
+    static let floatY: CGFloat = -12
+    static let opacity: Double = 0.75
+}
+
 private extension View {
-    /// 長按選單掛在蓋住卡片的透明層。卡片不是選單來源，所以不會被藏起來，也不會被放大。
+    /// 長按選單或拖動時：稍微上浮、半透明。拖動位移由 `translation` 帶入，放開時呼叫端把它動畫回零。
+    func albumCardLift(lifted: Bool, translation: CGSize) -> some View {
+        shadow(color: Color.black.opacity(lifted ? 0.28 : 0), radius: lifted ? 16 : 0, y: lifted ? 10 : 0)
+            .opacity(lifted ? AlbumCardLift.opacity : 1)
+            .offset(
+                x: lifted ? translation.width : 0,
+                y: lifted ? translation.height + AlbumCardLift.floatY : 0
+            )
+    }
+
+    /// 長按選單掛在蓋住卡片的透明層。卡片不是選單來源，所以不會被藏起來，也不會被放大成預覽。
     func albumCardContextMenu(
         isEnabled: Bool,
         accessibilityLabel: String,
@@ -2239,7 +2319,8 @@ private extension View {
         onImport: @escaping () -> Void,
         renameTitle: String? = nil,
         onRename: (() -> Void)? = nil,
-        onDelete: (() -> Void)? = nil
+        onDelete: (() -> Void)? = nil,
+        onMenuVisible: @escaping (Bool) -> Void = { _ in }
     ) -> some View {
         overlay {
             AlbumCardMenuPlate(
@@ -2249,7 +2330,8 @@ private extension View {
                 onImport: onImport,
                 renameTitle: renameTitle,
                 onRename: onRename,
-                onDelete: onDelete
+                onDelete: onDelete,
+                onMenuVisible: onMenuVisible
             )
             .accessibilityLabel(accessibilityLabel)
             .accessibilityAddTraits(.isButton)
@@ -2267,6 +2349,7 @@ private struct AlbumCardMenuPlate: UIViewRepresentable {
     var renameTitle: String?
     var onRename: (() -> Void)?
     var onDelete: (() -> Void)?
+    var onMenuVisible: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -2299,6 +2382,7 @@ private struct AlbumCardMenuPlate: UIViewRepresentable {
         coordinator.renameTitle = renameTitle
         coordinator.onRename = onRename
         coordinator.onDelete = onDelete
+        coordinator.onMenuVisible = onMenuVisible
     }
 
     final class PlateView: UIView {
@@ -2319,6 +2403,7 @@ private struct AlbumCardMenuPlate: UIViewRepresentable {
         var renameTitle: String?
         var onRename: (() -> Void)?
         var onDelete: (() -> Void)?
+        var onMenuVisible: (Bool) -> Void = { _ in }
         weak var interaction: UIContextMenuInteraction?
         private var ignoreOpenUntil: TimeInterval = 0
         private let decoy: UIView = {
@@ -2379,6 +2464,7 @@ private struct AlbumCardMenuPlate: UIViewRepresentable {
             animator: (any UIContextMenuInteractionAnimating)?
         ) {
             ignoreOpenUntil = CACurrentMediaTime() + 60
+            onMenuVisible(true)
             keepCardVisible(from: interaction.view)
             animator?.addAnimations { [weak self] in
                 self?.keepCardVisible(from: interaction.view)
@@ -2396,6 +2482,7 @@ private struct AlbumCardMenuPlate: UIViewRepresentable {
             willEndFor configuration: UIContextMenuConfiguration,
             animator: (any UIContextMenuInteractionAnimating)?
         ) {
+            onMenuVisible(false)
             animator?.addCompletion { [weak self] in
                 self?.ignoreOpenUntil = CACurrentMediaTime() + 0.35
                 self?.keepCardVisible(from: interaction.view)
@@ -2415,12 +2502,12 @@ private struct AlbumCardMenuPlate: UIViewRepresentable {
         }
 
         private func keepCardVisible(from view: UIView?) {
-            var current = view
+            view?.alpha = 1
+            view?.isHidden = false
+            var current = view?.superview
             var steps = 0
-            while let node = current, steps < 6 {
-                node.alpha = 1
+            while let node = current, steps < 6, !(node is UIScrollView) {
                 node.isHidden = false
-                if node is UIScrollView { break }
                 current = node.superview
                 steps += 1
             }
@@ -2494,7 +2581,9 @@ private struct GroupMembersAlbumView: View {
     @State private var renamingMember: IdolMember? = nil
     @State private var renameText: String = ""
     @State private var cardRegistry = AlbumCardRegistry()
-    @State private var liftedMemberID: UUID?
+    @State private var menuLiftedMemberID: UUID?
+    @State private var dragLiftedMemberID: UUID?
+    @State private var memberDragTranslation: CGSize = .zero
     @State private var blockAlbumOpen = false
     @State private var isSelectingAlbums: Bool = false
     @State private var selectedMemberIDs: Set<UUID> = []
@@ -2595,13 +2684,23 @@ private struct GroupMembersAlbumView: View {
                 registry: cardRegistry,
                 onArm: { id in
                     blockAlbumOpen = true
-                    liftedMemberID = id
+                    withAnimation(ChekiMotion.small) {
+                        dragLiftedMemberID = id
+                        menuLiftedMemberID = nil
+                    }
                 },
-                onMove: { dragged, target in
-                    reorderDisplayedMembers(dragged: dragged, target: target)
+                onTrack: { translation in
+                    trackMemberDrag(translation)
                 },
-                onEnd: {
-                    liftedMemberID = nil
+                onEnd: { hover in
+                    let dragged = dragLiftedMemberID
+                    withAnimation(ChekiMotion.small) {
+                        if let dragged, let hover {
+                            reorderDisplayedMembers(dragged: dragged, target: hover)
+                        }
+                        dragLiftedMemberID = nil
+                        memberDragTranslation = .zero
+                    }
                     DispatchQueue.main.async {
                         blockAlbumOpen = false
                     }
@@ -2842,15 +2941,27 @@ private struct GroupMembersAlbumView: View {
                         renameText = member.stageName
                         renamingMember = member
                     },
-                    onDelete: { pendingMemberDeletionIDs = [member.id] }
+                    onDelete: { pendingMemberDeletionIDs = [member.id] },
+                    onMenuVisible: { visible in
+                        withAnimation(ChekiMotion.small) {
+                            if visible {
+                                menuLiftedMemberID = member.id
+                            } else if menuLiftedMemberID == member.id {
+                                menuLiftedMemberID = nil
+                            }
+                        }
+                    }
                 )
             }
         }
-        .scaleEffect(liftedMemberID == member.id ? 1.05 : 1)
-        .zIndex(liftedMemberID == member.id ? 1 : 0)
+        .albumCardLift(
+            lifted: menuLiftedMemberID == member.id || dragLiftedMemberID == member.id,
+            translation: dragLiftedMemberID == member.id ? memberDragTranslation : .zero
+        )
         .overlay {
             AlbumCardAnchor(id: member.id, registry: cardRegistry)
         }
+        .zIndex(menuLiftedMemberID == member.id || dragLiftedMemberID == member.id ? 2 : 0)
     }
 
     private func reorderDisplayedMembers(dragged: UUID, target: UUID) {
@@ -2861,12 +2972,20 @@ private struct GroupMembersAlbumView: View {
         let moved = updated.remove(at: from)
         updated.insert(moved, at: to)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(ChekiMotion.toggle) {
-            sortMethodRaw = AlbumSortMethod.custom.rawValue
-            for (index, member) in updated.enumerated() {
-                member.sortOrder = index
-            }
-            try? modelContext.save()
+        sortMethodRaw = AlbumSortMethod.custom.rawValue
+        for (index, member) in updated.enumerated() {
+            member.sortOrder = index
+        }
+        try? modelContext.save()
+    }
+
+    private func trackMemberDrag(_ translation: CGSize) {
+        let scale = max(displayMode == .grid ? livePinchScale : 1, 0.01)
+        let scaled = CGSize(width: translation.width / scale, height: translation.height / scale)
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            memberDragTranslation = scaled
         }
     }
 }
