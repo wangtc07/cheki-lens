@@ -10,9 +10,9 @@
 - **最後更新時間**：2026-10-11
 - **當前所屬階段**：Phase 6.6 — UI／UX 一致性重整 (iOS 26 UI Consistency Pass)
 - **當前分支**：`main`
-- **當前進行中任務**：已完成 **Task 6.6.7**。`GridPinchZoom` 為格狀縮放的唯一邏輯。全部頁改為跟手縮放、放開才切欄；成員頁改由同一元件驅動。iPhone 12 mini：預設 3 欄，放大放開後變為 1 欄。
-- **最新穩定 Git Commit**：feat(UI): 完成 Task 6.6.7 全部頁跟手縮放
-- **下一動執行指示**：執行 **Task 6.6.8**（相冊頁封面磚加上 `GridPinchZoom`，欄數以 `@AppStorage` 保存並與選單同步）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md`。
+- **當前進行中任務**：已完成 **Task 6.6.8**。相冊封面磚可雙指縮放，欄數為 1／2／3，預設 2，存在 `albumCoverColumnCount`，並與漢堡選單「欄數」同步。清單模式不接受縮放。iPhone 12 mini：選單設為 2 欄後，放大放開變成 1 欄。
+- **最新穩定 Git Commit**：feat(UI): 完成 Task 6.6.8 相冊封面雙指縮放
+- **下一動執行指示**：執行 **Task 6.6.9**（依規範 §11 驗收繁中／日文、淺色／深色、小螢幕／大螢幕）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md`。
 
 ---
 
@@ -349,7 +349,7 @@
 - [x] **Task 6.6.5**: 單張檢視返回鈕與底部工具列、選取模式底部列統一為 44 pt（移除橫向 30 pt 與 48 pt 例外）（對應 A7、A8。iPhone 12 mini：返回與更多、底部分享與刪除、選取列分享與刪除皆 44×44 且左右同一水平線）
 - [x] **Task 6.6.6**: 建立 `ChekiMotion` 動畫 token 並取代各畫面散寫的 spring／snappy 參數、支援「減少動態效果」（對應 A11。`spring`／`snappy` 數字只留在 `ChekiMotion.swift`；減少動態效果時為 `.easeInOut(0.15)`。iPhone 12 mini 全部頁仍可開啟，右上圓鈕維持 36×36）
 - [x] **Task 6.6.7**: 抽出 `GridPinchZoom`（以成員頁 `AlbumHeroDetailView.pinchZoomGesture` 為基準），「全部」頁改為跟手縮放、放開才定位，成員頁改由共用元件驅動（對應 A9。門檻單元測試 3 項通過。iPhone 12 mini：預設 3 欄，放大放開後為 1 欄）
-- [ ] **Task 6.6.8**: 「相冊」頁（團體／成員封面磚）新增雙指縮放並沿用 `GridPinchZoom`，欄數偏好以 `@AppStorage` 保存並與漢堡選單同步（對應 A10）
+- [x] **Task 6.6.8**: 「相冊」頁（團體／成員封面磚）新增雙指縮放並沿用 `GridPinchZoom`，欄數偏好以 `@AppStorage` 保存並與漢堡選單同步（對應 A10。欄數 1／2／3，預設 2，鍵 `albumCoverColumnCount`。iPhone 12 mini：選單設 2 欄後，放大放開為 1 欄，且沒有誤開相冊）
 - [ ] **Task 6.6.9 (驗收)**: 依規範文件 §11 逐項驗收（繁中／日文、淺色／深色、iPhone 12 mini／大螢幕、跨畫面按鈕無跳動），並更新 §9 全部標示完成
 
 ---

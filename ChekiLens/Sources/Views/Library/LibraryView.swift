@@ -821,6 +821,9 @@ struct AlbumsRootView: View {
 
     @AppStorage("albumSortMethod") private var sortMethodRaw: String = AlbumSortMethod.custom.rawValue
     @AppStorage("albumDisplayMode") private var displayModeRaw: String = AlbumDisplayMode.grid.rawValue
+    @AppStorage("albumCoverColumnCount") private var columnCount: Int = 2
+    @State private var pinchBaselineColumnCount: Int?
+    @State private var livePinchScale: CGFloat = 1
 
     @State private var hierarchyMode: AlbumHierarchyMode = .groups
     @State private var showingQuickCreateSheet: Bool = false
@@ -849,10 +852,19 @@ struct AlbumsRootView: View {
         AlbumDisplayMode(rawValue: displayModeRaw) ?? .grid
     }
 
-    private let albumColumns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
-    ]
+    private var albumColumns: [GridItem] {
+        let count = GridPinchZoom.albumColumnCounts.contains(columnCount) ? columnCount : 2
+        return Array(repeating: GridItem(.flexible(), spacing: 12), count: count)
+    }
+
+    private var pinchZoomGesture: some Gesture {
+        GridPinchZoom.gesture(
+            columnCount: $columnCount,
+            liveScale: $livePinchScale,
+            baseline: $pinchBaselineColumnCount,
+            counts: GridPinchZoom.albumColumnCounts
+        )
+    }
 
     private var validChekiItems: [ChekiItem] {
         chekiItems.filter { !$0.isDeleted && $0.modelContext != nil }
@@ -930,7 +942,12 @@ struct AlbumsRootView: View {
                     }
                     .padding(.top, 96)
                     .padding(.bottom, 28)
+                    .scaleEffect(displayMode == .grid ? livePinchScale : 1, anchor: .top)
+                    .animation(ChekiMotion.layoutCommit, value: columnCount)
                 }
+                .gridPinchGesture(enabled: displayMode == .grid, pinchZoomGesture)
+                .accessibilityIdentifier(ChromeID.albumsGrid)
+                .accessibilityValue("\(columnCount)")
 
                 // 頂部固定標頭 + 「團體 | 成員」切換控制（設定 zIndex 並與下方卡片嚴格隔離點擊區域）
                 albumsTopHeaderBar
@@ -1099,7 +1116,11 @@ struct AlbumsRootView: View {
 
             Divider()
 
-            AlbumSortDisplayMenus(sortMethodRaw: $sortMethodRaw, displayModeRaw: $displayModeRaw)
+            AlbumSortDisplayMenus(
+                sortMethodRaw: $sortMethodRaw,
+                displayModeRaw: $displayModeRaw,
+                columnCount: $columnCount
+            )
 
             Divider()
 
@@ -1615,6 +1636,9 @@ private struct GroupMembersAlbumView: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage("albumSortMethod") private var sortMethodRaw: String = AlbumSortMethod.custom.rawValue
     @AppStorage("albumDisplayMode") private var displayModeRaw: String = AlbumDisplayMode.grid.rawValue
+    @AppStorage("albumCoverColumnCount") private var columnCount: Int = 2
+    @State private var pinchBaselineColumnCount: Int?
+    @State private var livePinchScale: CGFloat = 1
 
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
@@ -1651,10 +1675,19 @@ private struct GroupMembersAlbumView: View {
         }
     }
 
-    private let albumColumns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
-    ]
+    private var albumColumns: [GridItem] {
+        let count = GridPinchZoom.albumColumnCounts.contains(columnCount) ? columnCount : 2
+        return Array(repeating: GridItem(.flexible(), spacing: 12), count: count)
+    }
+
+    private var pinchZoomGesture: some Gesture {
+        GridPinchZoom.gesture(
+            columnCount: $columnCount,
+            liveScale: $livePinchScale,
+            baseline: $pinchBaselineColumnCount,
+            counts: GridPinchZoom.albumColumnCounts
+        )
+    }
 
     var body: some View {
         ScrollView {
@@ -1692,6 +1725,9 @@ private struct GroupMembersAlbumView: View {
                 .padding(.bottom, 28)
             }
         }
+        .scaleEffect(displayMode == .grid ? livePinchScale : 1, anchor: .top)
+        .animation(ChekiMotion.layoutCommit, value: columnCount)
+        .gridPinchGesture(enabled: displayMode == .grid, pinchZoomGesture)
         .background(Color(.systemBackground))
         .navigationTitle(group.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -1745,7 +1781,11 @@ private struct GroupMembersAlbumView: View {
 
                 Divider()
 
-                AlbumSortDisplayMenus(sortMethodRaw: $sortMethodRaw, displayModeRaw: $displayModeRaw)
+                AlbumSortDisplayMenus(
+                    sortMethodRaw: $sortMethodRaw,
+                    displayModeRaw: $displayModeRaw,
+                    columnCount: $columnCount
+                )
 
                 Divider()
 

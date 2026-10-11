@@ -44,6 +44,7 @@ struct AlbumAddMenuItems: View {
 struct AlbumSortDisplayMenus: View {
     @Binding var sortMethodRaw: String
     @Binding var displayModeRaw: String
+    var columnCount: Binding<Int>? = nil
 
     private var sortMethod: AlbumSortMethod { AlbumSortMethod(rawValue: sortMethodRaw) ?? .custom }
     private var displayMode: AlbumDisplayMode { AlbumDisplayMode(rawValue: displayModeRaw) ?? .grid }
@@ -75,6 +76,25 @@ struct AlbumSortDisplayMenus: View {
             }
         } label: {
             Label(L10n.tr("顯示", "表示"), systemImage: displayMode.iconName)
+        }
+
+        if let columnCount, displayMode == .grid {
+            Menu {
+                ForEach(GridPinchZoom.albumColumnCounts, id: \.self) { count in
+                    Button {
+                        withAnimation(ChekiMotion.layoutCommit) {
+                            columnCount.wrappedValue = count
+                        }
+                    } label: {
+                        Label(
+                            L10n.tr("\(count) 欄", "\(count) 列"),
+                            systemImage: columnCount.wrappedValue == count ? "checkmark" : "square.grid.3x3"
+                        )
+                    }
+                }
+            } label: {
+                Label(L10n.tr("欄數", "列数"), systemImage: "square.grid.3x3")
+            }
         }
     }
 }

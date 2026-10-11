@@ -4,6 +4,8 @@ import UIKit
 /// 格狀頁面的雙指縮放：手指移動時只跟手縮放，放開才切換欄數。
 enum GridPinchZoom {
     static let columnCounts = [1, 2, 3, 5]
+    /// 相冊封面磚。預設 2 欄，放大可到 1 欄，縮小可到 3 欄。
+    static let albumColumnCounts = [1, 2, 3]
 
     static func dampedScale(magnification: CGFloat) -> CGFloat {
         if magnification >= 1 {
@@ -61,5 +63,16 @@ enum GridPinchZoom {
                 }
                 baseline.wrappedValue = nil
             }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func gridPinchGesture<G: Gesture>(enabled: Bool, _ gesture: G) -> some View {
+        if enabled {
+            highPriorityGesture(gesture)
+        } else {
+            self
+        }
     }
 }

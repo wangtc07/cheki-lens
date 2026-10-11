@@ -6,7 +6,9 @@ final class GridPinchZoomTests: XCTestCase {
         XCTAssertEqual(GridPinchZoom.columnCount(after: 1.10, from: 3), 3)
         XCTAssertEqual(GridPinchZoom.columnCount(after: 1.16, from: 3), 2)
         XCTAssertEqual(GridPinchZoom.columnCount(after: 1.59, from: 3), 1)
-        XCTAssertEqual(GridPinchZoom.columnCount(after: 3, from: 1), 1)
+        XCTAssertEqual(GridPinchZoom.columnCount(after: 1.59, from: 2, counts: GridPinchZoom.albumColumnCounts), 1)
+        XCTAssertEqual(GridPinchZoom.columnCount(after: 0.85, from: 2, counts: GridPinchZoom.albumColumnCounts), 3)
+        XCTAssertEqual(GridPinchZoom.columnCount(after: 1.1, from: 2, counts: GridPinchZoom.albumColumnCounts), 2)
     }
 
     func testZoomOutAddsColumnsOnlyPastThresholds() {

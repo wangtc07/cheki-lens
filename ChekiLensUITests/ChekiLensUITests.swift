@@ -295,4 +295,56 @@ final class ChekiLensUITests: XCTestCase {
         )
         saveAuditScreenshot(app, name: "task_6_6_7_after")
     }
+
+    /// Task 6.6.8：相冊封面磚可雙指縮放，放開後欄數改變並寫入可讀取的欄數值。
+    @MainActor
+    func testAlbumCoverPinchCommitsColumnCount() throws {
+        let app = launchLibraryApp()
+        let albums = app.buttons["相冊"]
+        XCTAssertTrue(albums.waitForExistence(timeout: 12))
+        albums.tap()
+
+        let more = app.buttons["更多"]
+        XCTAssertTrue(more.waitForExistence(timeout: 6))
+        more.tap()
+        let gridMode = app.buttons["格狀"]
+        if !gridMode.waitForExistence(timeout: 2) {
+            let displayMenu = app.buttons["顯示"]
+            XCTAssertTrue(displayMenu.waitForExistence(timeout: 2), "選單裡找不到顯示方式")
+            displayMenu.tap()
+        }
+        XCTAssertTrue(app.buttons["格狀"].waitForExistence(timeout: 2))
+        app.buttons["格狀"].tap()
+
+        more.tap()
+        let columnMenu = app.buttons["欄數"]
+        if !columnMenu.waitForExistence(timeout: 2) {
+            XCTAssertTrue(more.waitForExistence(timeout: 2))
+            more.tap()
+        }
+        XCTAssertTrue(app.buttons["欄數"].waitForExistence(timeout: 2), "選單裡找不到欄數")
+        app.buttons["欄數"].tap()
+        let twoColumns = app.buttons["2 欄"]
+        XCTAssertTrue(twoColumns.waitForExistence(timeout: 2))
+        twoColumns.tap()
+
+        let grid = app.descendants(matching: .any)["chrome.albums.grid"]
+        XCTAssertTrue(grid.waitForExistence(timeout: 6), "找不到相冊格狀。\(app.debugDescription)")
+        let becameTwo = NSPredicate(format: "value == '2'")
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: becameTwo, object: grid)], timeout: 3),
+            .completed,
+            "選單應把欄數設為 2，實際 \(String(describing: grid.value))"
+        )
+        saveAuditScreenshot(app, name: "task_6_6_8_before")
+
+        grid.pinch(withScale: 2.4, velocity: 1.5)
+        let becameOne = NSPredicate(format: "value == '1'")
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: becameOne, object: grid)], timeout: 4),
+            .completed,
+            "放大放開後應為 1 欄，實際 \(String(describing: grid.value))"
+        )
+        saveAuditScreenshot(app, name: "task_6_6_8_after")
+    }
 }
