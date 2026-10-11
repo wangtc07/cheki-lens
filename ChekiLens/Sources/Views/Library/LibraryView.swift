@@ -1,7 +1,6 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
-import UniformTypeIdentifiers
 import UIKit
 
 // MARK: - Album Hierarchy Mode (相冊頂部分段控制：團體 vs 成員)
@@ -905,8 +904,10 @@ struct AlbumsRootView: View {
     @State private var renamingGroup: IdolGroup? = nil
     @State private var renamingMember: IdolMember? = nil
     @State private var renameText: String = ""
-    @State private var draggingGroupID: UUID? = nil
-    @State private var draggingMemberID: UUID? = nil
+    @State private var groupFrames: [UUID: CGRect] = [:]
+    @State private var memberFrames: [UUID: CGRect] = [:]
+    @State private var liftedGroupID: UUID?
+    @State private var liftedMemberID: UUID?
     private var chromeState = NavigationChromeState.shared
 
     private var sortMethod: AlbumSortMethod {
@@ -1280,6 +1281,30 @@ struct AlbumsRootView: View {
             .padding(.bottom, 28)
             .scaleEffect(displayMode == .grid ? livePinchScale : 1, anchor: .top)
             .animation(ChekiMotion.layoutCommit, value: columnCount)
+            .background {
+                AlbumLongPressReorder(
+                    enabled: !isSelectingAlbums,
+                    frames: mode == .groups ? groupFrames : memberFrames,
+                    onArm: { id in
+                        if mode == .groups {
+                            liftedGroupID = id
+                        } else {
+                            liftedMemberID = id
+                        }
+                    },
+                    onMove: { dragged, target in
+                        if mode == .groups {
+                            reorderGroups(dragged: dragged, target: target)
+                        } else {
+                            reorderMembers(dragged: dragged, target: target)
+                        }
+                    },
+                    onEnd: {
+                        liftedGroupID = nil
+                        liftedMemberID = nil
+                    }
+                )
+            }
         }
         .scrollPosition(mode == .groups ? $groupScrollPosition : $memberScrollPosition)
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -1352,59 +1377,52 @@ struct AlbumsRootView: View {
             covers: covers,
             showsDragHandle: sortMethod == .custom
         )
-        if isSelectingAlbums {
-            selectableAlbumCard(card, isSelected: selectedGroupIDs.contains(group.id), isList: isList) {
-                toggleAlbumSelection(&selectedGroupIDs, id: group.id)
-            }
-        } else {
-            NavigationLink(value: group) { card }
-                .buttonStyle(.plain)
-                .onDrag {
-                    draggingGroupID = group.id
-                    return NSItemProvider(object: group.id.uuidString as NSString)
+        Group {
+            if isSelectingAlbums {
+                selectableAlbumCard(card, isSelected: selectedGroupIDs.contains(group.id), isList: isList) {
+                    toggleAlbumSelection(&selectedGroupIDs, id: group.id)
                 }
-                .onDrop(
-                    of: [UTType.text],
-                    delegate: GroupAlbumDropDelegate(
-                        targetGroup: group,
-                        groups: sortedGroups,
-                        draggingGroupID: $draggingGroupID,
-                        onReorder: { reordered in
-                            sortMethodRaw = AlbumSortMethod.custom.rawValue
-                            for (idx, item) in reordered.enumerated() {
-                                item.sortOrder = idx
+            } else {
+                NavigationLink(value: group) { card }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        AlbumAddMenuItems(
+                            onCamera: {
+                                actionTargetMember = group.sortedMembers.first
+                                showingCameraScanner = true
+                            },
+                            onImport: {
+                                actionTargetMember = group.sortedMembers.first
+                                showingAlbumPhotosPicker = true
                             }
-                            try? modelContext.save()
+                        )
+
+                        Divider()
+
+                        Button {
+                            renameText = group.name
+                            renamingGroup = group
+                        } label: {
+                            Label(L10n.tr("團體名", "グループ名"), systemImage: "pencil")
                         }
-                    )
-                )
-                .contextMenu {
-                    AlbumAddMenuItems(
-                        onCamera: {
-                            actionTargetMember = group.sortedMembers.first
-                            showingCameraScanner = true
-                        },
-                        onImport: {
-                            actionTargetMember = group.sortedMembers.first
-                            showingAlbumPhotosPicker = true
+
+                        Button(role: .destructive) {
+                            pendingDeletion = .groups([group.id])
+                        } label: {
+                            Label(L10n.tr("刪除", "削除"), systemImage: "trash")
                         }
-                    )
-
-                    Divider()
-
-                    Button {
-                        renameText = group.name
-                        renamingGroup = group
-                    } label: {
-                        Label(L10n.tr("團體名", "グループ名"), systemImage: "pencil")
                     }
-
-                    Button(role: .destructive) {
-                        pendingDeletion = .groups([group.id])
-                    } label: {
-                        Label(L10n.tr("刪除", "削除"), systemImage: "trash")
-                    }
-                }
+            }
+        }
+        .scaleEffect(liftedGroupID == group.id ? 1.05 : 1)
+        .zIndex(liftedGroupID == group.id ? 1 : 0)
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .global)
+        } action: { frame in
+            groupFrames[group.id] = frame
+        }
+        .onDisappear {
+            groupFrames[group.id] = nil
         }
     }
 
@@ -1460,59 +1478,52 @@ struct AlbumsRootView: View {
             covers: covers,
             showsDragHandle: sortMethod == .custom
         )
-        if isSelectingAlbums {
-            selectableAlbumCard(card, isSelected: selectedMemberIDs.contains(member.id), isList: isList) {
-                toggleAlbumSelection(&selectedMemberIDs, id: member.id)
-            }
-        } else {
-            NavigationLink(value: member) { card }
-                .buttonStyle(.plain)
-                .onDrag {
-                    draggingMemberID = member.id
-                    return NSItemProvider(object: member.id.uuidString as NSString)
+        Group {
+            if isSelectingAlbums {
+                selectableAlbumCard(card, isSelected: selectedMemberIDs.contains(member.id), isList: isList) {
+                    toggleAlbumSelection(&selectedMemberIDs, id: member.id)
                 }
-                .onDrop(
-                    of: [UTType.text],
-                    delegate: MemberAlbumDropDelegate(
-                        targetMember: member,
-                        members: allExpandedMembers,
-                        draggingMemberID: $draggingMemberID,
-                        onReorder: { reordered in
-                            sortMethodRaw = AlbumSortMethod.custom.rawValue
-                            for (idx, item) in reordered.enumerated() {
-                                item.sortOrder = idx
+            } else {
+                NavigationLink(value: member) { card }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        AlbumAddMenuItems(
+                            onCamera: {
+                                actionTargetMember = member
+                                showingCameraScanner = true
+                            },
+                            onImport: {
+                                actionTargetMember = member
+                                showingAlbumPhotosPicker = true
                             }
-                            try? modelContext.save()
+                        )
+
+                        Divider()
+
+                        Button {
+                            renameText = member.stageName
+                            renamingMember = member
+                        } label: {
+                            Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
                         }
-                    )
-                )
-                .contextMenu {
-                    AlbumAddMenuItems(
-                        onCamera: {
-                            actionTargetMember = member
-                            showingCameraScanner = true
-                        },
-                        onImport: {
-                            actionTargetMember = member
-                            showingAlbumPhotosPicker = true
+
+                        Button(role: .destructive) {
+                            pendingDeletion = .members([member.id])
+                        } label: {
+                            Label(L10n.tr("刪除", "削除"), systemImage: "trash")
                         }
-                    )
-
-                    Divider()
-
-                    Button {
-                        renameText = member.stageName
-                        renamingMember = member
-                    } label: {
-                        Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
                     }
-
-                    Button(role: .destructive) {
-                        pendingDeletion = .members([member.id])
-                    } label: {
-                        Label(L10n.tr("刪除", "削除"), systemImage: "trash")
-                    }
-                }
+            }
+        }
+        .scaleEffect(liftedMemberID == member.id ? 1.05 : 1)
+        .zIndex(liftedMemberID == member.id ? 1 : 0)
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .global)
+        } action: { frame in
+            memberFrames[member.id] = frame
+        }
+        .onDisappear {
+            memberFrames[member.id] = nil
         }
     }
 
@@ -1638,6 +1649,40 @@ struct AlbumsRootView: View {
         self.pendingDeletion = nil
         if currentSelectionIsEmpty {
             isSelectingAlbums = false
+        }
+    }
+
+    private func reorderGroups(dragged: UUID, target: UUID) {
+        guard let from = sortedGroups.firstIndex(where: { $0.id == dragged }),
+              let to = sortedGroups.firstIndex(where: { $0.id == target }),
+              from != to else { return }
+        var updated = sortedGroups
+        let moved = updated.remove(at: from)
+        updated.insert(moved, at: to)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(ChekiMotion.toggle) {
+            sortMethodRaw = AlbumSortMethod.custom.rawValue
+            for (index, group) in updated.enumerated() {
+                group.sortOrder = index
+            }
+            try? modelContext.save()
+        }
+    }
+
+    private func reorderMembers(dragged: UUID, target: UUID) {
+        guard let from = allExpandedMembers.firstIndex(where: { $0.id == dragged }),
+              let to = allExpandedMembers.firstIndex(where: { $0.id == target }),
+              from != to else { return }
+        var updated = allExpandedMembers
+        let moved = updated.remove(at: from)
+        updated.insert(moved, at: to)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(ChekiMotion.toggle) {
+            sortMethodRaw = AlbumSortMethod.custom.rawValue
+            for (index, member) in updated.enumerated() {
+                member.sortOrder = index
+            }
+            try? modelContext.save()
         }
     }
 
@@ -1796,66 +1841,186 @@ struct ApplePhotoAlbumListRow: View {
     }
 }
 
-private struct GroupAlbumDropDelegate: DropDelegate {
-    let targetGroup: IdolGroup
-    let groups: [IdolGroup]
-    @Binding var draggingGroupID: UUID?
-    let onReorder: ([IdolGroup]) -> Void
+private struct AlbumLongPressReorder: UIViewRepresentable {
+    var enabled: Bool
+    var frames: [UUID: CGRect]
+    var onArm: (UUID) -> Void
+    var onMove: (UUID, UUID) -> Void
+    var onEnd: () -> Void
 
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> InstallerView {
+        let view = InstallerView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        view.coordinator = context.coordinator
+        return view
     }
 
-    func performDrop(info: DropInfo) -> Bool {
-        draggingGroupID = nil
-        return true
+    func updateUIView(_ uiView: InstallerView, context: Context) {
+        context.coordinator.enabled = enabled
+        context.coordinator.frames = frames
+        context.coordinator.onArm = onArm
+        context.coordinator.onMove = onMove
+        context.coordinator.onEnd = onEnd
+        uiView.coordinator = context.coordinator
+        uiView.installIfNeeded()
     }
 
-    func dropEntered(info: DropInfo) {
-        guard let draggingID = draggingGroupID,
-              draggingID != targetGroup.id,
-              let fromIndex = groups.firstIndex(where: { $0.id == draggingID }),
-              let toIndex = groups.firstIndex(where: { $0.id == targetGroup.id }) else {
-            return
+    final class InstallerView: UIView {
+        weak var coordinator: Coordinator?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            installIfNeeded()
         }
-        var updated = groups
-        let moved = updated.remove(at: fromIndex)
-        updated.insert(moved, at: toIndex)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(ChekiMotion.toggle) {
-            onReorder(updated)
+
+        func installIfNeeded() {
+            coordinator?.install(from: self)
         }
     }
-}
 
-private struct MemberAlbumDropDelegate: DropDelegate {
-    let targetMember: IdolMember
-    let members: [IdolMember]
-    @Binding var draggingMemberID: UUID?
-    let onReorder: ([IdolMember]) -> Void
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var enabled = true
+        var frames: [UUID: CGRect] = [:]
+        var onArm: (UUID) -> Void = { _ in }
+        var onMove: (UUID, UUID) -> Void = { _, _ in }
+        var onEnd: () -> Void = {}
 
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
+        private static var recognizerKey: UInt8 = 0
+        private var startPoint: CGPoint = .zero
+        private var draggedID: UUID?
+        private var armed = false
+        private var lastTarget: UUID?
+        private var disabledScrolls: [UIScrollView] = []
 
-    func performDrop(info: DropInfo) -> Bool {
-        draggingMemberID = nil
-        return true
-    }
-
-    func dropEntered(info: DropInfo) {
-        guard let draggingID = draggingMemberID,
-              draggingID != targetMember.id,
-              let fromIndex = members.firstIndex(where: { $0.id == draggingID }),
-              let toIndex = members.firstIndex(where: { $0.id == targetMember.id }) else {
-            return
+        func install(from marker: UIView) {
+            guard let container = containerView(from: marker) else { return }
+            if objc_getAssociatedObject(container, &Self.recognizerKey) != nil { return }
+            let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handle(_:)))
+            recognizer.minimumPressDuration = 0.35
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesBegan = false
+            recognizer.delegate = self
+            container.addGestureRecognizer(recognizer)
+            objc_setAssociatedObject(container, &Self.recognizerKey, recognizer, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
-        var updated = members
-        let moved = updated.remove(at: fromIndex)
-        updated.insert(moved, at: toIndex)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(ChekiMotion.toggle) {
-            onReorder(updated)
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+
+        @objc private func handle(_ recognizer: UILongPressGestureRecognizer) {
+            let point = touchPoint(recognizer)
+            switch recognizer.state {
+            case .began:
+                startPoint = point
+                draggedID = hitID(at: point)
+                armed = false
+                lastTarget = nil
+            case .changed:
+                guard enabled, let draggedID else { return }
+                let distance = hypot(point.x - startPoint.x, point.y - startPoint.y)
+                if !armed {
+                    guard distance > 12 else { return }
+                    armed = true
+                    cancelCompetingRecognizers(except: recognizer, in: recognizer.view)
+                    disableAncestorScrolling(from: recognizer.view)
+                    onArm(draggedID)
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
+                if let lastTarget, let frame = frames[lastTarget], !frame.contains(point) {
+                    self.lastTarget = nil
+                }
+                if let target = hitID(at: point, excluding: draggedID), target != lastTarget {
+                    lastTarget = target
+                    onMove(draggedID, target)
+                }
+            case .ended, .cancelled, .failed:
+                restoreScrolling()
+                if armed {
+                    onEnd()
+                }
+                draggedID = nil
+                armed = false
+                lastTarget = nil
+            default:
+                break
+            }
+        }
+
+        private func touchPoint(_ recognizer: UILongPressGestureRecognizer) -> CGPoint {
+            guard let window = recognizer.view?.window else {
+                return recognizer.location(in: nil)
+            }
+            return window.convert(recognizer.location(in: window), to: nil)
+        }
+
+        private func hitID(at point: CGPoint, excluding: UUID? = nil) -> UUID? {
+            var best: (UUID, CGFloat)?
+            for (id, frame) in frames {
+                if id == excluding { continue }
+                guard frame.insetBy(dx: -6, dy: -6).contains(point) else { continue }
+                let distance = hypot(frame.midX - point.x, frame.midY - point.y)
+                if best == nil || distance < best!.1 {
+                    best = (id, distance)
+                }
+            }
+            return best?.0
+        }
+
+        private func containerView(from marker: UIView) -> UIView? {
+            var current: UIView? = marker
+            while let view = current, let parent = view.superview, !(parent is UIScrollView) {
+                current = parent
+            }
+            return current
+        }
+
+        private func disableAncestorScrolling(from view: UIView?) {
+            var current = view
+            while let node = current {
+                if let scroll = node as? UIScrollView, scroll.isScrollEnabled {
+                    scroll.isScrollEnabled = false
+                    disabledScrolls.append(scroll)
+                }
+                current = node.superview
+            }
+        }
+
+        private func restoreScrolling() {
+            disabledScrolls.forEach { $0.isScrollEnabled = true }
+            disabledScrolls.removeAll()
+        }
+
+        private func cancelCompetingRecognizers(except recognizer: UIGestureRecognizer, in view: UIView?) {
+            guard let root = view else { return }
+            func silence(_ node: UIView) {
+                node.gestureRecognizers?.forEach { other in
+                    guard other !== recognizer else { return }
+                    if other.state == .possible || other.state == .began || other.state == .changed {
+                        other.isEnabled = false
+                        other.isEnabled = true
+                    }
+                }
+                node.subviews.forEach(silence)
+            }
+            silence(root)
+            var current = root.superview
+            while let node = current {
+                node.gestureRecognizers?.forEach { other in
+                    guard other !== recognizer else { return }
+                    if other.state == .possible || other.state == .began || other.state == .changed {
+                        other.isEnabled = false
+                        other.isEnabled = true
+                    }
+                }
+                current = node.superview
+            }
         }
     }
 }
@@ -1887,7 +2052,8 @@ private struct GroupMembersAlbumView: View {
     @State private var showingRenameGroupAlert: Bool = false
     @State private var renamingMember: IdolMember? = nil
     @State private var renameText: String = ""
-    @State private var draggingMemberID: UUID? = nil
+    @State private var memberFrames: [UUID: CGRect] = [:]
+    @State private var liftedMemberID: UUID?
     @State private var isSelectingAlbums: Bool = false
     @State private var selectedMemberIDs: Set<UUID> = []
     @State private var pendingMemberDeletionIDs: Set<UUID>?
@@ -1928,6 +2094,7 @@ private struct GroupMembersAlbumView: View {
 
     var body: some View {
         ScrollView {
+            Group {
             if displayedMembers.isEmpty {
                 ContentUnavailableView {
                     Label(L10n.tr("尚無成員", "メンバーなし"), systemImage: "person.badge.plus")
@@ -1961,6 +2128,18 @@ private struct GroupMembersAlbumView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 28)
             }
+        }
+        .background {
+            AlbumLongPressReorder(
+                enabled: !isSelectingAlbums && !displayedMembers.isEmpty,
+                frames: memberFrames,
+                onArm: { liftedMemberID = $0 },
+                onMove: { dragged, target in
+                    reorderDisplayedMembers(dragged: dragged, target: target)
+                },
+                onEnd: { liftedMemberID = nil }
+            )
+        }
         }
         .scaleEffect(displayMode == .grid ? livePinchScale : 1, anchor: .top)
         .animation(ChekiMotion.layoutCommit, value: columnCount)
@@ -2170,70 +2349,80 @@ private struct GroupMembersAlbumView: View {
                 )
             }
         }
-        if isSelectingAlbums {
-            Button {
-                UISelectionFeedbackGenerator().selectionChanged()
-                if selectedMemberIDs.contains(member.id) {
-                    selectedMemberIDs.remove(member.id)
-                } else {
-                    selectedMemberIDs.insert(member.id)
+        Group {
+            if isSelectingAlbums {
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    if selectedMemberIDs.contains(member.id) {
+                        selectedMemberIDs.remove(member.id)
+                    } else {
+                        selectedMemberIDs.insert(member.id)
+                    }
+                } label: {
+                    card.overlay(alignment: isList ? .trailing : .bottomTrailing) {
+                        AlbumSelectionBadge(isSelected: selectedMemberIDs.contains(member.id))
+                            .padding(.trailing, isList ? 8 : 0)
+                    }
                 }
-            } label: {
-                card.overlay(alignment: isList ? .trailing : .bottomTrailing) {
-                    AlbumSelectionBadge(isSelected: selectedMemberIDs.contains(member.id))
-                        .padding(.trailing, isList ? 8 : 0)
-                }
-            }
-            .buttonStyle(.plain)
-        } else {
-            NavigationLink(value: member) { card }
                 .buttonStyle(.plain)
-                .onDrag {
-                    draggingMemberID = member.id
-                    return NSItemProvider(object: member.id.uuidString as NSString)
-                }
-                .onDrop(
-                    of: [UTType.text],
-                    delegate: MemberAlbumDropDelegate(
-                        targetMember: member,
-                        members: displayedMembers,
-                        draggingMemberID: $draggingMemberID,
-                        onReorder: { reordered in
-                            sortMethodRaw = AlbumSortMethod.custom.rawValue
-                            for (idx, item) in reordered.enumerated() {
-                                item.sortOrder = idx
+            } else {
+                NavigationLink(value: member) { card }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        AlbumAddMenuItems(
+                            onCamera: {
+                                actionTargetMember = member
+                                showingCameraScanner = true
+                            },
+                            onImport: {
+                                actionTargetMember = member
+                                showingAlbumPhotosPicker = true
                             }
-                            try? modelContext.save()
+                        )
+
+                        Divider()
+
+                        Button {
+                            renameText = member.stageName
+                            renamingMember = member
+                        } label: {
+                            Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
                         }
-                    )
-                )
-                .contextMenu {
-                    AlbumAddMenuItems(
-                        onCamera: {
-                            actionTargetMember = member
-                            showingCameraScanner = true
-                        },
-                        onImport: {
-                            actionTargetMember = member
-                            showingAlbumPhotosPicker = true
+
+                        Button(role: .destructive) {
+                            pendingMemberDeletionIDs = [member.id]
+                        } label: {
+                            Label(L10n.tr("刪除", "削除"), systemImage: "trash")
                         }
-                    )
-
-                    Divider()
-
-                    Button {
-                        renameText = member.stageName
-                        renamingMember = member
-                    } label: {
-                        Label(L10n.tr("成員名", "メンバー名"), systemImage: "pencil")
                     }
+            }
+        }
+        .scaleEffect(liftedMemberID == member.id ? 1.05 : 1)
+        .zIndex(liftedMemberID == member.id ? 1 : 0)
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .global)
+        } action: { frame in
+            memberFrames[member.id] = frame
+        }
+        .onDisappear {
+            memberFrames[member.id] = nil
+        }
+    }
 
-                    Button(role: .destructive) {
-                        pendingMemberDeletionIDs = [member.id]
-                    } label: {
-                        Label(L10n.tr("刪除", "削除"), systemImage: "trash")
-                    }
-                }
+    private func reorderDisplayedMembers(dragged: UUID, target: UUID) {
+        guard let from = displayedMembers.firstIndex(where: { $0.id == dragged }),
+              let to = displayedMembers.firstIndex(where: { $0.id == target }),
+              from != to else { return }
+        var updated = displayedMembers
+        let moved = updated.remove(at: from)
+        updated.insert(moved, at: to)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(ChekiMotion.toggle) {
+            sortMethodRaw = AlbumSortMethod.custom.rawValue
+            for (index, member) in updated.enumerated() {
+                member.sortOrder = index
+            }
+            try? modelContext.save()
         }
     }
 }
