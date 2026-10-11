@@ -457,7 +457,7 @@ struct BatchPairingView: View {
                         Menu {
                             if totalWarningCount > 0 {
                                 Button {
-                                    withAnimation(.snappy(duration: 0.25)) {
+                                    withAnimation(ChekiMotion.toggle) {
                                         resolveAllWarningsAutomatically()
                                     }
                                 } label: {
@@ -468,7 +468,7 @@ struct BatchPairingView: View {
                             if !allPhotos.isEmpty {
                                 Divider()
                                 Button(role: .destructive) {
-                                    withAnimation(.snappy(duration: 0.25)) {
+                                    withAnimation(ChekiMotion.toggle) {
                                         allPhotos.removeAll()
                                         slots.removeAll()
                                         photoMemberAssignment.removeAll()
@@ -535,7 +535,7 @@ struct BatchPairingView: View {
                 }
             }
             .onChange(of: pairingMode) { _, newMode in
-                withAnimation(.snappy(duration: 0.25)) {
+                withAnimation(ChekiMotion.toggle) {
                     applyPairingMode(newMode)
                 }
             }
@@ -606,7 +606,7 @@ struct BatchPairingView: View {
                     )
                 },
                 onClose: {
-                    withAnimation(.snappy(duration: 0.22)) {
+                    withAnimation(ChekiMotion.toggle) {
                         manualCropEditingPhotoID = nil
                     }
                 }
@@ -784,7 +784,7 @@ struct BatchPairingView: View {
             // 右側：保持 X 按鈕取消該成員
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(.snappy(duration: 0.2)) {
+                withAnimation(ChekiMotion.toggle) {
                     selectedTargetMembers.removeAll { $0.id == member.id }
                     defaultFallbackMember = selectedTargetMembers.first
                 }
@@ -1030,7 +1030,7 @@ struct BatchPairingView: View {
                         VStack(alignment: .trailing, spacing: 4) {
                             Button {
                                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                withAnimation(.snappy(duration: 0.24)) {
+                                withAnimation(ChekiMotion.toggle) {
                                     unpairSlot(id: slot.id)
                                 }
                             } label: {
@@ -1069,7 +1069,7 @@ struct BatchPairingView: View {
                         if slot.isDoubleFrontWarning {
                             Button {
                                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                withAnimation(.snappy(duration: 0.24)) {
+                                withAnimation(ChekiMotion.toggle) {
                                     unpairSlot(id: slot.id)
                                 }
                             } label: {
@@ -1084,7 +1084,7 @@ struct BatchPairingView: View {
                         } else if slot.isReversedOrderWarning {
                             Button {
                                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                withAnimation(.snappy(duration: 0.24)) {
+                                withAnimation(ChekiMotion.toggle) {
                                     swapSlotSides(id: slot.id)
                                 }
                             } label: {
@@ -1099,7 +1099,7 @@ struct BatchPairingView: View {
                         } else {
                             Button {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                withAnimation(.snappy(duration: 0.24)) {
+                                withAnimation(ChekiMotion.toggle) {
                                     swapSlotSides(id: slot.id)
                                 }
                             } label: {
@@ -1388,7 +1388,7 @@ struct BatchPairingView: View {
 
         if slot.isPaired {
             Button {
-                withAnimation(.snappy(duration: 0.22)) {
+                withAnimation(ChekiMotion.toggle) {
                     swapSlotSides(id: slot.id)
                 }
             } label: {
@@ -1396,7 +1396,7 @@ struct BatchPairingView: View {
             }
 
             Button {
-                withAnimation(.snappy(duration: 0.22)) {
+                withAnimation(ChekiMotion.toggle) {
                     unpairSlot(id: slot.id)
                 }
             } label: {
@@ -1415,7 +1415,7 @@ struct BatchPairingView: View {
 
         if slot.frontPhoto.croppedImageData != nil {
             Button {
-                withAnimation(.snappy(duration: 0.22)) {
+                withAnimation(ChekiMotion.toggle) {
                     togglePhotoRevertToOriginal(photoID: slot.frontPhoto.id)
                 }
             } label: {
@@ -1429,7 +1429,7 @@ struct BatchPairingView: View {
         Divider()
 
         Button(role: .destructive) {
-            withAnimation(.snappy(duration: 0.22)) {
+            withAnimation(ChekiMotion.toggle) {
                 removeSlot(id: slot.id)
             }
         } label: {
@@ -1472,7 +1472,7 @@ struct BatchPairingView: View {
         previewZoomScale = 1.0
         previewPinchScale = 1.0
         previewDragOffset = 0
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+        withAnimation(ChekiMotion.small) {
             previewingSide = side
             previewingSlotID = slotID
         }
@@ -1480,7 +1480,7 @@ struct BatchPairingView: View {
 
     private func dismissMagnifiedPreview() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+        withAnimation(ChekiMotion.small) {
             previewingSlotID = nil
             previewZoomScale = 1.0
             previewPinchScale = 1.0
@@ -1526,7 +1526,7 @@ struct BatchPairingView: View {
                                 HStack(spacing: 2) {
                                     Button {
                                         UISelectionFeedbackGenerator().selectionChanged()
-                                        withAnimation(.snappy(duration: 0.2)) {
+                                        withAnimation(ChekiMotion.toggle) {
                                             previewingSide = .front
                                             previewZoomScale = 1.0
                                         }
@@ -1547,7 +1547,7 @@ struct BatchPairingView: View {
 
                                     Button {
                                         UISelectionFeedbackGenerator().selectionChanged()
-                                        withAnimation(.snappy(duration: 0.2)) {
+                                        withAnimation(ChekiMotion.toggle) {
                                             previewingSide = .back
                                             previewZoomScale = 1.0
                                         }
@@ -1671,7 +1671,7 @@ struct BatchPairingView: View {
                                     .onEnded { value in
                                         let nextScale = max(1.0, min(3.8, previewZoomScale * value.magnification))
                                         previewPinchScale = 1.0
-                                        withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
+                                        withAnimation(ChekiMotion.small) {
                                             previewZoomScale = nextScale <= 1.05 ? 1.0 : nextScale
                                         }
                                     }
@@ -1690,7 +1690,7 @@ struct BatchPairingView: View {
                     HStack(spacing: 12) {
                         Button {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            withAnimation(.snappy(duration: 0.22)) {
+                            withAnimation(ChekiMotion.toggle) {
                                 manualCropEditingPhotoID = activePhoto.id
                             }
                         } label: {
@@ -1759,7 +1759,7 @@ struct BatchPairingView: View {
                         if value.translation.height > 55 || value.predictedEndTranslation.height > 120 {
                             dismissMagnifiedPreview()
                         } else {
-                            withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+                            withAnimation(ChekiMotion.small) {
                                 previewDragOffset = 0
                             }
                         }
@@ -1801,7 +1801,7 @@ struct BatchPairingView: View {
 
             Button(L10n.tr("修正", "修正")) {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                withAnimation(.snappy(duration: 0.25)) {
+                withAnimation(ChekiMotion.toggle) {
                     resolveAllWarningsAutomatically()
                 }
             }
@@ -1829,7 +1829,7 @@ struct BatchPairingView: View {
 
             Button(selectedSlotIDsForApply.count == slots.count ? "取消全選" : "全選") {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(.snappy(duration: 0.2)) {
+                withAnimation(ChekiMotion.toggle) {
                     if selectedSlotIDsForApply.count == slots.count {
                         selectedSlotIDsForApply.removeAll()
                     } else {
@@ -1863,7 +1863,7 @@ struct BatchPairingView: View {
                     .font(.caption)
                 Spacer()
                 Button("取消") {
-                    withAnimation(.snappy(duration: 0.2)) {
+                    withAnimation(ChekiMotion.toggle) {
                         selectedFirstSlotID = nil
                     }
                 }
@@ -1876,7 +1876,7 @@ struct BatchPairingView: View {
                 Spacer(minLength: 4)
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.snappy(duration: 0.2)) {
+                    withAnimation(ChekiMotion.toggle) {
                         hasSeenCoachMark = true
                     }
                 } label: {
@@ -1958,7 +1958,7 @@ struct BatchPairingView: View {
             if isSelectingPhotosToApply {
                 HStack(spacing: 8) {
                     Button {
-                        withAnimation(.snappy(duration: 0.2)) {
+                        withAnimation(ChekiMotion.toggle) {
                             isSelectingPhotosToApply = false
                             selectedSlotIDsForApply.removeAll()
                         }
@@ -2107,7 +2107,7 @@ struct BatchPairingView: View {
     private func applyTargetMembersToAllSlots() {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         defaultFallbackMember = selectedTargetMembers.first
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(ChekiMotion.toggle) {
             for idx in slots.indices {
                 slots[idx].assignedMembers = selectedTargetMembers
                 photoMemberAssignment[slots[idx].frontPhoto.id] = selectedTargetMembers
@@ -2123,7 +2123,7 @@ struct BatchPairingView: View {
     /// 點擊「選擇套用」：切換照片多選模式
     private func togglePhotoSelectionApplyMode() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(ChekiMotion.toggle) {
             isSelectingPhotosToApply.toggle()
             selectedFirstSlotID = nil
             if !isSelectingPhotosToApply {
@@ -2137,7 +2137,7 @@ struct BatchPairingView: View {
         guard !selectedSlotIDsForApply.isEmpty else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         defaultFallbackMember = selectedTargetMembers.first
-        withAnimation(.snappy(duration: 0.24)) {
+        withAnimation(ChekiMotion.toggle) {
             for idx in slots.indices where selectedSlotIDsForApply.contains(slots[idx].id) {
                 slots[idx].assignedMembers = selectedTargetMembers
                 photoMemberAssignment[slots[idx].frontPhoto.id] = selectedTargetMembers
@@ -2164,7 +2164,7 @@ struct BatchPairingView: View {
         // 1. 若處於「選擇套用（多選照片）」模式，點擊卡片即勾選 / 取消勾選該張拍立得
         if isSelectingPhotosToApply {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            withAnimation(.snappy(duration: 0.18)) {
+            withAnimation(ChekiMotion.toggle) {
                 if selectedSlotIDsForApply.contains(slot.id) {
                     selectedSlotIDsForApply.remove(slot.id)
                 } else {
@@ -2352,7 +2352,7 @@ struct BatchPairingView: View {
 
         if let firstID = selectedFirstSlotID {
             if firstID == tappedSlot.id {
-                withAnimation(.snappy(duration: 0.2)) {
+                withAnimation(ChekiMotion.toggle) {
                     selectedFirstSlotID = nil
                 }
                 return
@@ -2376,7 +2376,7 @@ struct BatchPairingView: View {
                 assignedMembers: members
             )
 
-            withAnimation(.snappy(duration: 0.25)) {
+            withAnimation(ChekiMotion.toggle) {
                 let minIdx = min(firstIndex, secondIndex)
                 let maxIdx = max(firstIndex, secondIndex)
                 slots.remove(at: maxIdx)
@@ -2385,7 +2385,7 @@ struct BatchPairingView: View {
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } else {
-            withAnimation(.snappy(duration: 0.2)) {
+            withAnimation(ChekiMotion.toggle) {
                 selectedFirstSlotID = tappedSlot.id
             }
         }
@@ -2437,7 +2437,7 @@ struct BatchPairingView: View {
         resolvedFormat: FilmFormat,
         rotatedOriginalImage: UIImage?
     ) {
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(ChekiMotion.toggle) {
             if let idx = allPhotos.firstIndex(where: { $0.id == photoID }) {
                 if let rotatedOrig = rotatedOriginalImage,
                    let rotatedData = rotatedOrig.jpegData(compressionQuality: 0.92) {
@@ -2672,7 +2672,7 @@ struct BatchPairingView: View {
                 }
             }
 
-            withAnimation(.snappy(duration: 0.22)) {
+            withAnimation(ChekiMotion.toggle) {
                 updatePhotoBoundaryResult(
                     id: photoID,
                     croppedData: croppedData,
@@ -2719,7 +2719,7 @@ struct BatchPairingView: View {
                     specName: cropRes.filmSpecification?.format.rawValue,
                     outputSize: cropRes.outputSize
                 )
-                withAnimation(.snappy(duration: 0.2)) {
+                withAnimation(ChekiMotion.toggle) {
                     updatePhotoBoundaryResult(
                         id: photo.id,
                         croppedData: jpeg,
@@ -2741,7 +2741,7 @@ struct BatchPairingView: View {
         let backID = slots[slotIdx].backPhoto?.id
         let targetIDs = [frontID, backID].compactMap { $0 }
 
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(ChekiMotion.toggle) {
             slots[slotIdx].frontPhoto.resolvedFilmFormat = concrete
             slots[slotIdx].frontPhoto.hasManuallyModifiedFormat = true
             if slots[slotIdx].backPhoto != nil {
@@ -2783,7 +2783,7 @@ struct BatchPairingView: View {
             ) {
                 let uiImg = UIImage(cgImage: cropRes.cgImage)
                 let jpeg = uiImg.jpegData(compressionQuality: 0.92)
-                withAnimation(.snappy(duration: 0.2)) {
+                withAnimation(ChekiMotion.toggle) {
                     updatePhotoBoundaryResult(
                         id: photoID,
                         croppedData: jpeg,
@@ -2801,7 +2801,7 @@ struct BatchPairingView: View {
     private func updateAllSlotsFilmFormat(_ format: FilmFormat) async {
         let concrete = format.concreteFormat
         selectedFilmFormat = concrete
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(ChekiMotion.toggle) {
             for i in allPhotos.indices {
                 allPhotos[i].resolvedFilmFormat = concrete
                 allPhotos[i].hasManuallyModifiedFormat = true
@@ -2824,7 +2824,7 @@ struct BatchPairingView: View {
         let frontID = slots[slotIdx].frontPhoto.id
         let backID = slots[slotIdx].backPhoto?.id
 
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(ChekiMotion.toggle) {
             slots[slotIdx].frontPhoto.detectedOCRDate = date
             slots[slotIdx].frontPhoto.hasManuallyModifiedDate = true
             if slots[slotIdx].backPhoto != nil {
@@ -2844,7 +2844,7 @@ struct BatchPairingView: View {
 
     @MainActor
     private func updateAllSlotsOCRDate(_ date: Date?) {
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(ChekiMotion.toggle) {
             for i in allPhotos.indices {
                 allPhotos[i].detectedOCRDate = date
                 allPhotos[i].hasManuallyModifiedDate = true
@@ -3609,7 +3609,7 @@ private struct StagingPhotoQuadCropEditorView: View {
 
             if effectiveZoom > 1.02 {
                 Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                    withAnimation(ChekiMotion.small) {
                         resetZoomAndPan()
                     }
                 } label: {
@@ -3695,7 +3695,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                     .contentShape(Rectangle())
                     .gesture(canvasPanAndPinchGesture(baseRect: baseRect, viewportSize: viewportSize))
                     .onTapGesture(count: 2) {
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                        withAnimation(ChekiMotion.small) {
                             if effectiveZoom > 1.05 {
                                 resetZoomAndPan()
                             } else {
@@ -3958,7 +3958,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                     rotateSourceImage90DegreesCounterClockwise()
                 }
                 cropToolCapsule(systemName: "arrow.up.left.and.arrow.down.right", title: L10n.tr("展開", "展開"), identifier: "chrome.crop.expand") {
-                    withAnimation(.snappy(duration: 0.22)) {
+                    withAnimation(ChekiMotion.toggle) {
                         normalizedCorners = [
                             CGPoint(x: 0.04, y: 0.04),
                             CGPoint(x: 0.96, y: 0.04),
@@ -4004,7 +4004,7 @@ private struct StagingPhotoQuadCropEditorView: View {
     private func formatPillButton(for format: FilmFormat) -> some View {
         let isSelected = (selectedFormat == format)
         return Button {
-            withAnimation(.snappy(duration: 0.22)) {
+            withAnimation(ChekiMotion.toggle) {
                 selectedFormat = format
             }
             UISelectionFeedbackGenerator().selectionChanged()
@@ -4039,7 +4039,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                 zoomScale = max(1.0, min(4.5, zoomScale * value.magnification))
                 activePinchScale = 1.0
                 if zoomScale <= 1.02 {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    withAnimation(ChekiMotion.small) {
                         zoomScale = 1.0
                         panOffset = .zero
                     }
@@ -4114,7 +4114,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                 imageSize: imgSize,
                 ratio: defaultInsetRatio
             )
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+            withAnimation(ChekiMotion.small) {
                 normalizedCorners = adjusted.map { pt in
                     CGPoint(
                         x: min(max(pt.x / max(1, imgSize.width), 0.01), 0.99),

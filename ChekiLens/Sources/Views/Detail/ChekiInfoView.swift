@@ -38,7 +38,7 @@ struct ChekiInfoView: View {
                             // 日期（點擊展開/收合內嵌月曆直接修正，格式：yyyy年M月d日 {星期}）
                             Button {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                withAnimation(.snappy(duration: 0.22)) {
+                                withAnimation(ChekiMotion.toggle) {
                                     isEditingDate.toggle()
                                     if isEditingDate {
                                         isEditingTime = false
@@ -85,7 +85,7 @@ struct ChekiInfoView: View {
                             // 時間（點擊展開/收合時間滾輪直接修正）
                             Button {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                withAnimation(.snappy(duration: 0.22)) {
+                                withAnimation(ChekiMotion.toggle) {
                                     isEditingTime.toggle()
                                     if isEditingTime {
                                         isEditingDate = false

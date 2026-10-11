@@ -209,7 +209,7 @@ struct LibraryView: View {
                             .padding(.horizontal, columnCount >= 5 ? 8 : 14)
                             .padding(.top, 82)
                             .padding(.bottom, isSelectionMode ? 96 : 32)
-                            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: columnCount)
+                            .animation(ChekiMotion.layoutCommit, value: columnCount)
                         }
                         .simultaneousGesture(pinchZoomGesture)
                         .onChange(of: chromeState.activeZoomItemID) { _, newID in
@@ -437,7 +437,7 @@ struct LibraryView: View {
                     Section(L10n.tr("顯示密度", "表示列数")) {
                         ForEach(Self.supportedColumnCounts, id: \.self) { count in
                             Button {
-                                withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                                withAnimation(ChekiMotion.layoutCommit) {
                                     columnCount = count
                                 }
                             } label: {
@@ -513,7 +513,7 @@ struct LibraryView: View {
             if !displayedItems.isEmpty {
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.snappy(duration: 0.22)) {
+                    withAnimation(ChekiMotion.toggle) {
                         isSelectionMode.toggle()
                         if !isSelectionMode {
                             selectedItemIDs.removeAll()
@@ -570,7 +570,7 @@ struct LibraryView: View {
                 let newCount = Self.supportedColumnCounts[targetIndex]
                 if newCount != columnCount {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                    withAnimation(ChekiMotion.layoutCommit) {
                         columnCount = newCount
                     }
                 }
@@ -597,7 +597,7 @@ struct LibraryView: View {
                         .padding(columnCount >= 5 ? 4 : 8)
                 }
                 .scaleEffect(isSelected ? 0.95 : 1.0)
-                .animation(.snappy(duration: 0.15), value: isSelected)
+                .animation(ChekiMotion.toggle, value: isSelected)
                 .onTapGesture {
                     UISelectionFeedbackGenerator().selectionChanged()
                     if isSelected {
@@ -1146,7 +1146,7 @@ struct AlbumsRootView: View {
             }
 
             // 頂部「團體 | 成員」原地切換（點擊「成員」直接在此頁面展開所有成員相冊）
-            Picker("相冊檢視階層", selection: $hierarchyMode.animation(.snappy(duration: 0.22))) {
+            Picker("相冊檢視階層", selection: $hierarchyMode.animation(ChekiMotion.toggle)) {
                 ForEach(AlbumHierarchyMode.allCases) { mode in
                     Text(mode.displayName).tag(mode)
                 }
@@ -1595,7 +1595,7 @@ private struct GroupAlbumDropDelegate: DropDelegate {
         let moved = updated.remove(at: fromIndex)
         updated.insert(moved, at: toIndex)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(ChekiMotion.toggle) {
             onReorder(updated)
         }
     }
@@ -1627,7 +1627,7 @@ private struct MemberAlbumDropDelegate: DropDelegate {
         let moved = updated.remove(at: fromIndex)
         updated.insert(moved, at: toIndex)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(ChekiMotion.toggle) {
             onReorder(updated)
         }
     }
@@ -2066,7 +2066,7 @@ struct AlbumHeroDetailView: View {
                             .padding(.horizontal, columnCount >= 5 ? 6 : 10)
                             .padding(.top, 2)
                             .scaleEffect(livePinchScale, anchor: .top)
-                            .animation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15), value: columnCount)
+                            .animation(ChekiMotion.layoutCommit, value: columnCount)
 
                             if displayedItems.isEmpty {
                                 ContentUnavailableView {
@@ -2163,7 +2163,7 @@ struct AlbumHeroDetailView: View {
                         Menu {
                             ForEach(Self.supportedColumnCounts, id: \.self) { count in
                                 Button {
-                                    withAnimation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15)) {
+                                    withAnimation(ChekiMotion.layoutCommit) {
                                         columnCount = count
                                     }
                                 } label: {
@@ -2228,7 +2228,7 @@ struct AlbumHeroDetailView: View {
                 if !displayedItems.isEmpty {
                     Button {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        withAnimation(.snappy(duration: 0.22)) {
+                        withAnimation(ChekiMotion.toggle) {
                             isSelectionMode.toggle()
                             if !isSelectionMode {
                                 selectedItemIDs.removeAll()
@@ -2434,7 +2434,7 @@ struct AlbumHeroDetailView: View {
                 if newCount != columnCount {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
-                withAnimation(.spring(response: 0.50, dampingFraction: 0.86, blendDuration: 0.15)) {
+                withAnimation(ChekiMotion.layoutCommit) {
                     columnCount = newCount
                     livePinchScale = 1.0
                 }
@@ -2873,7 +2873,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
             HStack(spacing: 8) {
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.snappy(duration: 0.18)) {
+                    withAnimation(ChekiMotion.toggle) {
                         filterUncategorizedOnly.toggle()
                     }
                 } label: {
@@ -2937,7 +2937,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
 
                 if filterUncategorizedOnly || !filterMemberIDs.isEmpty {
                     Button {
-                        withAnimation(.snappy(duration: 0.18)) {
+                        withAnimation(ChekiMotion.toggle) {
                             filterUncategorizedOnly = false
                             filterMemberIDs.removeAll()
                         }
@@ -2959,7 +2959,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
     private var albumDrilldownHeaderBar: some View {
         HStack {
             Button {
-                withAnimation(.snappy(duration: 0.2)) {
+                withAnimation(ChekiMotion.toggle) {
                     browseAlbumScope = nil
                 }
             } label: {
@@ -3016,7 +3016,7 @@ private struct InAppAlbumPhotoPickerSheet: View {
                                     .padding(6)
                             }
                             .scaleEffect(isSelected ? 0.96 : 1.0)
-                            .animation(.snappy(duration: 0.14), value: isSelected)
+                            .animation(ChekiMotion.toggle, value: isSelected)
                             .onTapGesture {
                                 UISelectionFeedbackGenerator().selectionChanged()
                                 if isSelected {
@@ -3649,7 +3649,7 @@ private struct ApplePhotosSelectionBottomBar: View {
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.primary)
                 .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.16), value: selectedCount)
+                .animation(ChekiMotion.toggle, value: selectedCount)
                 .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
 
             Spacer()

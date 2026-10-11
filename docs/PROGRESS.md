@@ -10,9 +10,9 @@
 - **最後更新時間**：2026-10-11
 - **當前所屬階段**：Phase 6.6 — UI／UX 一致性重整 (iOS 26 UI Consistency Pass)
 - **當前分支**：`main`
-- **當前進行中任務**：已完成 **Task 6.6.5**。單張檢視返回與更多、底部分享與刪除，以及選取列分享與刪除，直向皆為 44 pt 玻璃圓，橫向不再縮小。iPhone 12 mini：返回與更多同一水平線，分享與刪除同一水平線。
-- **最新穩定 Git Commit**：feat(UI): 完成 Task 6.6.5 單張檢視與選取列統一 44pt
-- **下一動執行指示**：執行 **Task 6.6.6**（建立 `ChekiMotion` 並取代散寫動畫參數）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md`。
+- **當前進行中任務**：已完成 **Task 6.6.6**。動畫參數收斂到 `ChekiMotion`（`toggle`／`small`／`layoutCommit`）。減少動態效果時改為 0.15 秒淡入淡出。畫面內不再散寫 `spring`／`snappy` 數字。
+- **最新穩定 Git Commit**：feat(UI): 完成 Task 6.6.6 動畫 token ChekiMotion
+- **下一動執行指示**：執行 **Task 6.6.7**（抽出 `GridPinchZoom`，全部頁改為跟手縮放）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md`。
 
 ---
 
@@ -347,7 +347,7 @@
 - [x] **Task 6.6.3**: 批次工作台 ↔ 單張預覽 ↔ 裁切編輯頁的頂部與底部 chrome 對齊：關閉鈕與底部圓鈕／膠囊改為 44 pt 液態玻璃，裁切頁底部改為同高玻璃膠囊（對應 A3、A4、A5。iPhone 12 mini frame：預覽關閉、裁切、旋轉 44×44，日期膠囊同高且 midY 誤差 ≤ 1 pt；裁切關閉 44×44、底部旋轉高 44）
 - [x] **Task 6.6.4**: 相機畫面狀態色與頂部 chrome：閃光燈／補光燈開啟為黃色、九宮格與進階控制啟用狀態不再只靠透明度、頂部圖示統一 44 pt 玻璃（對應 A6。iPhone 12 mini：閃光燈、九宮格、關閉皆 44×44、同一水平線；關閉為白、自動為黃）
 - [x] **Task 6.6.5**: 單張檢視返回鈕與底部工具列、選取模式底部列統一為 44 pt（移除橫向 30 pt 與 48 pt 例外）（對應 A7、A8。iPhone 12 mini：返回與更多、底部分享與刪除、選取列分享與刪除皆 44×44 且左右同一水平線）
-- [ ] **Task 6.6.6**: 建立 `ChekiMotion` 動畫 token 並取代各畫面散寫的 spring／snappy 參數、支援「減少動態效果」（對應 A11）
+- [x] **Task 6.6.6**: 建立 `ChekiMotion` 動畫 token 並取代各畫面散寫的 spring／snappy 參數、支援「減少動態效果」（對應 A11。`spring`／`snappy` 數字只留在 `ChekiMotion.swift`；減少動態效果時為 `.easeInOut(0.15)`。iPhone 12 mini 全部頁仍可開啟，右上圓鈕維持 36×36）
 - [ ] **Task 6.6.7**: 抽出 `GridPinchZoom`（以成員頁 `AlbumHeroDetailView.pinchZoomGesture` 為基準），「全部」頁改為跟手縮放、放開才定位，成員頁改由共用元件驅動（對應 A9）
 - [ ] **Task 6.6.8**: 「相冊」頁（團體／成員封面磚）新增雙指縮放並沿用 `GridPinchZoom`，欄數偏好以 `@AppStorage` 保存並與漢堡選單同步（對應 A10）
 - [ ] **Task 6.6.9 (驗收)**: 依規範文件 §11 逐項驗收（繁中／日文、淺色／深色、iPhone 12 mini／大螢幕、跨畫面按鈕無跳動），並更新 §9 全部標示完成

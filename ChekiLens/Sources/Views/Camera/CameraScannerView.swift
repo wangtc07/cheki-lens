@@ -877,7 +877,7 @@ struct CameraScannerView: View {
             .accessibilityIdentifier("chrome.camera.flash")
 
             Button {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                withAnimation(ChekiMotion.small) {
                     showSecondaryControlsDrawer.toggle()
                 }
             } label: {
@@ -903,7 +903,7 @@ struct CameraScannerView: View {
 
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                withAnimation(ChekiMotion.small) {
                     showSecondaryControlsDrawer.toggle()
                 }
             } label: {
@@ -1219,7 +1219,7 @@ struct CameraScannerView: View {
                 let isSelected = abs(camera.zoomFactor - preset) < 0.1
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                    withAnimation(ChekiMotion.small) {
                         camera.applyZoom(preset)
                     }
                 } label: {
@@ -1255,7 +1255,7 @@ struct CameraScannerView: View {
                         resetPhotoScanState()
                         pendingFrontCropTask?.cancel()
                         pendingFrontCropTask = nil
-                        withAnimation(.snappy(duration: 0.22)) {
+                        withAnimation(ChekiMotion.toggle) {
                             captureMode = mode
                             pendingFrontImageData = nil
                             pendingOriginalFrontImageData = nil
@@ -1381,7 +1381,7 @@ struct CameraScannerView: View {
                         }
                     } else {
                         let nextMode: ChekiCaptureMode = (captureMode == .single) ? .frontAndBack : .single
-                        withAnimation(.snappy(duration: 0.22)) {
+                        withAnimation(ChekiMotion.toggle) {
                             captureMode = nextMode
                         }
                         camera.setTorch(enabled: nextMode == .dualGlare)
@@ -1630,7 +1630,7 @@ struct CameraScannerView: View {
             )
         }
 
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+        withAnimation(ChekiMotion.small) {
             isPhotoScanSessionActive = true
             statusBannerMessage = L10n.tr(
                 "已鎖定邊框 · 對準左上 1 · 0/4",
@@ -1670,7 +1670,7 @@ struct CameraScannerView: View {
 
         photoScanCapturedImages.append(packet.image)
         photoScanCapturedQuads.append(lockedQuad)
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+        withAnimation(ChekiMotion.small) {
             photoScanCornerCompleted[index] = true
         }
         isProcessingCapture = false

@@ -52,7 +52,7 @@ struct AlbumSortDisplayMenus: View {
         Menu {
             ForEach(AlbumSortMethod.allCases) { method in
                 Button {
-                    withAnimation(.snappy(duration: 0.22)) { sortMethodRaw = method.rawValue }
+                    withAnimation(ChekiMotion.toggle) { sortMethodRaw = method.rawValue }
                 } label: {
                     if sortMethod == method {
                         Label(method.displayName, systemImage: "checkmark")
@@ -68,7 +68,7 @@ struct AlbumSortDisplayMenus: View {
         Menu {
             ForEach(AlbumDisplayMode.allCases) { mode in
                 Button {
-                    withAnimation(.snappy(duration: 0.22)) { displayModeRaw = mode.rawValue }
+                    withAnimation(ChekiMotion.toggle) { displayModeRaw = mode.rawValue }
                 } label: {
                     Label(mode.displayName, systemImage: displayMode == mode ? "checkmark" : mode.iconName)
                 }

@@ -201,8 +201,8 @@ struct OnboardingView: View {
                     )
                     .rotationEffect(.degrees(isPerspectiveCorrected ? 0 : -7))
                     .scaleEffect(isPerspectiveCorrected ? 1.0 : 0.94)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.78), value: isFlippedToBack)
-                    .animation(.spring(response: 0.45, dampingFraction: 0.75), value: isPerspectiveCorrected)
+                    .animation(ChekiMotion.layoutCommit, value: isFlippedToBack)
+                    .animation(ChekiMotion.layoutCommit, value: isPerspectiveCorrected)
                     .onTapGesture {
                         isFlippedToBack.toggle()
                     }

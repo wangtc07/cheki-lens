@@ -194,7 +194,7 @@
 | A8 | 選取模式底部列圓鈕 48 pt，與其他 chrome 44 pt 不同 | 分享與刪除改為 `ChromeMetrics.circle`。iPhone 12 mini 實測皆 44×44 且同一水平線 | ✅ Task 6.6.5 |
 | A9 | 全部頁縮放：門檻觸發即時切欄，非跟手 | `LibraryView.swift` ~541–573 | 6.6.7 |
 | A10 | 相冊頁（團體／成員封面磚）不支援縮放 | `LibraryView.swift` `AlbumsRootView` ~837 起 | 6.6.8 |
-| A11 | 動畫參數散寫（`0.3/0.82`、`0.32/0.82`、`0.50/0.86`、`0.22` 等） | 全部 Views | 6.6.6 |
+| A11 | 動畫參數散寫（`0.3/0.82`、`0.32/0.82`、`0.50/0.86`、`0.22` 等） | 收斂至 `ChekiMotion.toggle`／`small`／`layoutCommit`。減少動態效果時改 `.easeInOut(0.15)`。稽核後 `spring`／`snappy` 只出現在 `ChekiMotion.swift` | ✅ Task 6.6.6 |
 
 ---
 

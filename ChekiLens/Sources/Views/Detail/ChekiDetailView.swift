@@ -313,7 +313,7 @@ struct ChekiDetailView: View {
                 NavigationChromeState.shared.registerDetail(detailViewInstanceID)
             }
             if isAnimatingOpenFromGrid {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
+                withAnimation(ChekiMotion.small) {
                     isAnimatingOpenFromGrid = false
                 }
             }
@@ -1193,7 +1193,7 @@ struct ChekiDetailView: View {
             }
 
             Button {
-                withAnimation(.snappy(duration: 0.22)) {
+                withAnimation(ChekiMotion.toggle) {
                     isWhiteBalancePickerActive = false
                 }
             } label: {
@@ -1328,7 +1328,7 @@ struct ChekiDetailView: View {
             }
             .onChange(of: currentItemID) { _, newID in
                 guard let newID else { return }
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                withAnimation(ChekiMotion.small) {
                     proxy.scrollTo(newID, anchor: .center)
                 }
             }
@@ -1572,7 +1572,7 @@ struct ChekiDetailView: View {
                     if dy > 45 || predictedDy > 120 {
                         triggerAnimatedDismissToGrid()
                     } else {
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        withAnimation(ChekiMotion.small) {
                             isDraggingDownToDismiss = false
                             dismissDragOffset = .zero
                         }
@@ -1626,7 +1626,7 @@ struct ChekiDetailView: View {
         NavigationChromeState.shared.activeZoomItemID = activeID
 
         if gridAnchor(for: activeID) != nil {
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+            withAnimation(ChekiMotion.small) {
                 isDraggingDownToDismiss = false
                 isAnimatingDismissToGrid = true
                 dismissDragOffset = .zero
@@ -1710,7 +1710,7 @@ struct ChekiDetailView: View {
     private func toggleWhiteBalancePickerMode() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         hasSeenDetailCoachMark = true
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(ChekiMotion.toggle) {
             isWhiteBalancePickerActive.toggle()
             if isWhiteBalancePickerActive {
                 isChromeHidden = false
@@ -1762,7 +1762,7 @@ struct ChekiDetailView: View {
             return
         }
 
-        withAnimation(.snappy(duration: 0.18)) {
+        withAnimation(ChekiMotion.toggle) {
             whiteBalanceTapNormalizedPoint = normalizedPoint
         }
 
@@ -1786,7 +1786,7 @@ struct ChekiDetailView: View {
                 "色溫 \(tempSign)\(outcome.deltaTemperatureKelvin)K · 色調 \(tintSign)\(outcome.deltaTint)",
                 "色温度 \(tempSign)\(outcome.deltaTemperatureKelvin)K · 色合い \(tintSign)\(outcome.deltaTint)"
             )
-            withAnimation(.snappy(duration: 0.2)) {
+            withAnimation(ChekiMotion.toggle) {
                 whiteBalanceSummaryText = summary
             }
 
@@ -1842,7 +1842,7 @@ struct ChekiDetailView: View {
             }
         }
 
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(ChekiMotion.toggle) {
             whiteBalanceTapNormalizedPoint = nil
             whiteBalanceSummaryText = nil
         }
@@ -2243,7 +2243,7 @@ struct ChekiDetailView: View {
                     deletedItemIDs.insert(targetID)
                     if let nextID {
                         NavigationChromeState.shared.activeZoomItemID = nextID
-                        withAnimation(.snappy(duration: 0.25)) {
+                        withAnimation(ChekiMotion.toggle) {
                             currentItemID = nextID
                             isShowingBack = false
                             flipProgress = 0.0
@@ -2500,7 +2500,7 @@ private struct ChekiQuadCropEditorView: View {
             // 縮放倍率重置標籤（當雙指縮放時顯示）
             if abs(effectiveZoom - 1.0) > 0.03 {
                 Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                    withAnimation(ChekiMotion.small) {
                         resetZoomAndPan()
                     }
                 } label: {
@@ -2596,7 +2596,7 @@ private struct ChekiQuadCropEditorView: View {
                         .contentShape(Rectangle())
                         .gesture(canvasPanAndPinchGesture(baseRect: baseRect, viewportSize: viewportSize))
                         .onTapGesture(count: 2) {
-                            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                            withAnimation(ChekiMotion.small) {
                                 if abs(effectiveZoom - 1.0) > 0.05 {
                                     resetZoomAndPan()
                                 } else {
@@ -2886,7 +2886,7 @@ private struct ChekiQuadCropEditorView: View {
                     ForEach(FilmFormat.allCases, id: \.self) { format in
                         let isSelected = (selectedFormat == format)
                         Button {
-                            withAnimation(.snappy(duration: 0.22)) {
+                            withAnimation(ChekiMotion.toggle) {
                                 selectedFormat = format
                             }
                             UISelectionFeedbackGenerator().selectionChanged()
@@ -2942,7 +2942,7 @@ private struct ChekiQuadCropEditorView: View {
                 }
 
                 Button {
-                    withAnimation(.snappy(duration: 0.22)) {
+                    withAnimation(ChekiMotion.toggle) {
                         normalizedCorners = [
                             CGPoint(x: 0.04, y: 0.04),
                             CGPoint(x: 0.96, y: 0.04),
@@ -3006,7 +3006,7 @@ private struct ChekiQuadCropEditorView: View {
                 zoomScale = max(0.65, min(4.5, zoomScale * value.magnification))
                 activePinchScale = 1.0
                 if abs(zoomScale - 1.0) <= 0.03 {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    withAnimation(ChekiMotion.small) {
                         zoomScale = 1.0
                         panOffset = .zero
                     }
@@ -3124,7 +3124,7 @@ private struct ChekiQuadCropEditorView: View {
                 imageSize: imgSize,
                 ratio: defaultInsetRatio
             )
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+            withAnimation(ChekiMotion.small) {
                 normalizedCorners = adjusted.map { pt in
                     CGPoint(
                         x: min(max(pt.x / max(1, imgSize.width), -0.45), 1.45),
@@ -3152,7 +3152,7 @@ private struct ChekiQuadCropEditorView: View {
                 imageSize: imgSize,
                 ratio: defaultInsetRatio
             )
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+            withAnimation(ChekiMotion.small) {
                 normalizedCorners = adjusted.map { pt in
                     CGPoint(
                         x: min(max(pt.x / max(1, imgSize.width), -0.45), 1.45),
@@ -3623,7 +3623,7 @@ struct InAppBacksidePickerSheet: View {
             VStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 10) {
                     if availableScopes.count > 1 {
-                        Picker("篩選範圍", selection: $filterScope.animation(.snappy(duration: 0.2))) {
+                        Picker("篩選範圍", selection: $filterScope.animation(ChekiMotion.toggle)) {
                             ForEach(availableScopes) { scope in
                                 if scope == .sameAlbum, let name = targetItem.idolMember?.stageName {
                                     Text("\(scope.displayName) · \(name)").tag(scope)
@@ -3696,7 +3696,7 @@ struct InAppBacksidePickerSheet: View {
         let isSelected = (selectedCandidateID == candidate.id)
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            withAnimation(.snappy(duration: 0.18)) {
+            withAnimation(ChekiMotion.toggle) {
                 if selectedCandidateID == candidate.id {
                     onSelectItem(candidate, mergeAndRemoveSource)
                     dismiss()
