@@ -347,4 +347,39 @@ final class ChekiLensUITests: XCTestCase {
         )
         saveAuditScreenshot(app, name: "task_6_6_8_after")
     }
+
+    /// Task 6.6.9：日文淺色與繁中深色下，全部頁右上圓鈕仍為 36 pt 且同一水平線。
+    @MainActor
+    func testAcceptanceLibraryChromeInJapaneseAndDark() throws {
+        let japanese = XCUIApplication()
+        japanese.launchArguments += [
+            "-hasCompletedOnboarding", "YES",
+            "-appLanguageMode", "ja",
+            "-appAppearanceMode", "light",
+            "-AppleLanguages", "(ja)"
+        ]
+        japanese.launch()
+        let jaCamera = japanese.buttons["chrome.library.camera"]
+        let jaFilter = japanese.buttons["chrome.library.filter"]
+        XCTAssertTrue(jaCamera.waitForExistence(timeout: 12))
+        XCTAssertTrue(jaFilter.waitForExistence(timeout: 4))
+        assertCircleFramesMatch(jaCamera, jaFilter, expectedSide: 36)
+        XCTAssertTrue(japanese.buttons["すべて"].waitForExistence(timeout: 4), "日文分頁應為すべて")
+        saveAuditScreenshot(japanese, name: "task_6_6_9_ja")
+        japanese.terminate()
+
+        let dark = XCUIApplication()
+        dark.launchArguments += [
+            "-hasCompletedOnboarding", "YES",
+            "-appLanguageMode", "zh-Hant",
+            "-appAppearanceMode", "dark"
+        ]
+        dark.launch()
+        let darkCamera = dark.buttons["chrome.library.camera"]
+        let darkFilter = dark.buttons["chrome.library.filter"]
+        XCTAssertTrue(darkCamera.waitForExistence(timeout: 12))
+        XCTAssertTrue(darkFilter.waitForExistence(timeout: 4))
+        assertCircleFramesMatch(darkCamera, darkFilter, expectedSide: 36)
+        saveAuditScreenshot(dark, name: "task_6_6_9_dark")
+    }
 }

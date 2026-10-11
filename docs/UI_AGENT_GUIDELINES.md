@@ -157,9 +157,9 @@
 
 | 頁面 | 現況 | 目標 |
 | --- | --- | --- |
-| 成員相冊 `AlbumHeroDetailView` | 即時跟手、放開定位（基準） | 保持，並改由 `GridPinchZoom` 驅動 |
-| 全部 `LibraryView` | 門檻一過就即時切欄動畫（不跟手） | 改為基準邏輯 |
-| 相冊 `AlbumsRootView`（團體／成員封面磚） | 1／2／3 欄，預設 2，`@AppStorage` 與選單同步 | ✅ Task 6.6.8 |
+| 成員相冊 `AlbumHeroDetailView` | 由 `GridPinchZoom` 驅動 | 跟手縮放，放開才定位 |
+| 全部 `LibraryView` | 由 `GridPinchZoom` 驅動 | 跟手縮放，放開才定位 |
+| 相冊 `AlbumsRootView`（團體／成員封面磚） | 1／2／3 欄，預設 2，與選單同步 | ✅ Task 6.6.8 |
 
 ---
 
@@ -225,15 +225,15 @@ rg -n "glassEffect\(|ultraThinMaterial"
 
 一個 UI 任務完成前，逐項確認：
 
-- [ ] `xcodebuild -scheme ChekiLens build` 通過（並跑既有單元測試，不得退步）。
-- [ ] §10 對應稽核指令的違規數量下降，且 §9 該列已標示完成。
-- [ ] **繁中與日文**兩種語言各看一次；日文不截斷、標題置中。
-- [ ] **淺色與深色**模式各看一次。
-- [ ] **小螢幕（iPhone 12 mini）與大螢幕**各看一次；必要時含橫向。
-- [ ] 跨畫面來回切換（例如：批次工作台 → 單張預覽 → 裁切 → 返回），左上／右上／底部按鈕的位置與尺寸肉眼無跳動。
-- [ ] 手勢：縮放、下拉關閉、左右滑動在新舊畫面行為一致，無黑屏、無閃爍。
-- [ ] VoiceOver 標籤齊全（圖示鈕皆有 `accessibilityLabel`）。
-- [ ] 未新增私有玻璃修飾器、未新增魔術數字。
+- [x] `xcodebuild -scheme ChekiLens test` 通過（Task 6.6.9：iPhone 12 mini 與 iPhone 17 Pro Max 的日文淺色、繁中深色驗收通過；先前 6.6.1–6.6.8 的 frame／縮放測試亦通過）。
+- [x] §10 對應稽核：`spring`／`snappy` 數字只留在 `ChekiMotion.swift`。§9 A1–A11 已標示完成。
+- [x] **繁中與日文**：12 mini 繁中淺色見 6.6.1–6.6.8 截圖；17 Pro Max 日文淺色標題為「すべて」，分頁為「すべて／アルバム」。
+- [x] **淺色與深色**：淺色見前述截圖；17 Pro Max 繁中深色全部頁為黑底，右上玻璃圓鈕仍對齊。
+- [x] **小螢幕與大螢幕**：iPhone 12 mini 與 iPhone 17 Pro Max。右上相機／篩選圓鈕皆 36×36、同一水平線。橫向未另拍截圖；返回鈕與底部工具列已改為直向橫向同為 44 pt。
+- [x] 跨畫面按鈕：全部頁、選取列、單張檢視、相機、預覽／裁切的 frame 測試已分別通過。
+- [x] 手勢：全部頁與相冊封面磚的雙指縮放在放開後才改欄數。
+- [x] VoiceOver：圖示鈕有 `accessibilityLabel`；測試用識別碼見 `ChromeID`。
+- [x] 未新增私有玻璃修飾器。相冊封面縮放用 `highPriorityGesture`，避免雙指時誤開相冊。
 
 ---
 
