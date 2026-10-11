@@ -934,8 +934,8 @@ struct AlbumsRootView: View {
     @State private var menuLiftedMemberID: UUID?
     @State private var dragLiftedGroupID: UUID?
     @State private var dragLiftedMemberID: UUID?
-    @State private var groupDragTranslation: CGSize = .zero
-    @State private var memberDragTranslation: CGSize = .zero
+    @State private var groupFloat: AlbumDragFloat?
+    @State private var memberFloat: AlbumDragFloat?
     @State private var uncategorizedMenuLifted = false
     @State private var blockAlbumOpen = false
     private var chromeState = NavigationChromeState.shared
@@ -1315,41 +1315,51 @@ struct AlbumsRootView: View {
                 AlbumLongPressReorder(
                     enabled: !isSelectingAlbums,
                     registry: mode == .groups ? groupRegistry : memberRegistry,
-                    onArm: { id in
+                    onArm: { id, frame in
                         blockAlbumOpen = true
-                        withAnimation(ChekiMotion.small) {
+                        let preview = mode == .groups ? groupDragFloat(id: id, frame: frame) : memberDragFloat(id: id, frame: frame)
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
                             if mode == .groups {
                                 dragLiftedGroupID = id
                                 menuLiftedGroupID = nil
+                                groupFloat = preview
                             } else {
                                 dragLiftedMemberID = id
                                 menuLiftedMemberID = nil
+                                memberFloat = preview
                             }
                         }
                     },
                     onTrack: { translation in
                         trackAlbumDrag(translation, groups: mode == .groups)
                     },
-                    onEnd: { hover in
+                    onHover: { target, frame in
                         let dragged = mode == .groups ? dragLiftedGroupID : dragLiftedMemberID
+                        guard let dragged else { return }
+                        if mode == .groups {
+                            groupFloat?.destination = CGPoint(x: frame.minX, y: frame.minY)
+                        } else {
+                            memberFloat?.destination = CGPoint(x: frame.minX, y: frame.minY)
+                        }
                         withAnimation(ChekiMotion.small) {
-                            if let dragged, let hover {
-                                if mode == .groups {
-                                    reorderGroups(dragged: dragged, target: hover)
-                                } else {
-                                    reorderMembers(dragged: dragged, target: hover)
-                                }
+                            if mode == .groups {
+                                reorderGroups(dragged: dragged, target: target)
+                            } else {
+                                reorderMembers(dragged: dragged, target: target)
                             }
-                            dragLiftedGroupID = nil
-                            dragLiftedMemberID = nil
-                            groupDragTranslation = .zero
-                            memberDragTranslation = .zero
                         }
-                        DispatchQueue.main.async {
-                            blockAlbumOpen = false
-                        }
+                    },
+                    onEnd: { _ in
+                        settleAlbumDrag(groups: mode == .groups)
                     }
                 )
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let floating = mode == .groups ? groupFloat : memberFloat {
+                AlbumDragFloatCard(model: floating)
             }
         }
         .scrollPosition(mode == .groups ? $groupScrollPosition : $memberScrollPosition)
@@ -1476,13 +1486,17 @@ struct AlbumsRootView: View {
             }
         }
         .albumCardLift(
-            lifted: menuLiftedGroupID == group.id || dragLiftedGroupID == group.id,
-            translation: dragLiftedGroupID == group.id ? groupDragTranslation : .zero
+            menu: menuLiftedGroupID == group.id,
+            dragging: dragLiftedGroupID == group.id
         )
         .overlay {
-            AlbumCardAnchor(id: group.id, registry: groupRegistry)
+            AlbumCardAnchor(
+                id: group.id,
+                registry: groupRegistry,
+                isFront: menuLiftedGroupID == group.id
+            )
         }
-        .zIndex(menuLiftedGroupID == group.id || dragLiftedGroupID == group.id ? 2 : 0)
+        .zIndex(menuLiftedGroupID == group.id ? 100 : 0)
     }
 
     // MARK: - 成員相冊網格 / 清單（無視團體階層，直接在原本頁面展開所有成員相冊）
@@ -1590,13 +1604,17 @@ struct AlbumsRootView: View {
             }
         }
         .albumCardLift(
-            lifted: menuLiftedMemberID == member.id || dragLiftedMemberID == member.id,
-            translation: dragLiftedMemberID == member.id ? memberDragTranslation : .zero
+            menu: menuLiftedMemberID == member.id,
+            dragging: dragLiftedMemberID == member.id
         )
         .overlay {
-            AlbumCardAnchor(id: member.id, registry: memberRegistry)
+            AlbumCardAnchor(
+                id: member.id,
+                registry: memberRegistry,
+                isFront: menuLiftedMemberID == member.id
+            )
         }
-        .zIndex(menuLiftedMemberID == member.id || dragLiftedMemberID == member.id ? 2 : 0)
+        .zIndex(menuLiftedMemberID == member.id ? 100 : 0)
     }
 
     @ViewBuilder
@@ -1637,9 +1655,9 @@ struct AlbumsRootView: View {
                     }
                 }
             )
-            .albumCardLift(lifted: uncategorizedMenuLifted, translation: .zero)
+            .albumCardLift(menu: uncategorizedMenuLifted, dragging: false)
             .opacity(isSelectingAlbums ? 0.4 : 1)
-            .zIndex(uncategorizedMenuLifted ? 2 : 0)
+            .zIndex(uncategorizedMenuLifted ? 100 : 0)
     }
 
     @ViewBuilder
@@ -1735,17 +1753,87 @@ struct AlbumsRootView: View {
     }
 
     private func trackAlbumDrag(_ translation: CGSize, groups: Bool) {
-        let scale = max(displayMode == .grid ? livePinchScale : 1, 0.01)
-        let scaled = CGSize(width: translation.width / scale, height: translation.height / scale)
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             if groups {
-                groupDragTranslation = scaled
+                groupFloat?.translation = translation
             } else {
-                memberDragTranslation = scaled
+                memberFloat?.translation = translation
             }
         }
+    }
+
+    private func settleAlbumDrag(groups: Bool) {
+        let float = groups ? groupFloat : memberFloat
+        guard let float else {
+            clearAlbumDrag(groups: groups)
+            return
+        }
+        let translation = CGSize(
+            width: float.destination.x - float.origin.x,
+            height: float.destination.y - float.origin.y
+        )
+        withAnimation(ChekiMotion.small, completionCriteria: .logicallyComplete) {
+            if groups {
+                groupFloat?.translation = translation
+                groupFloat?.scale = 1
+                groupFloat?.opacity = 1
+            } else {
+                memberFloat?.translation = translation
+                memberFloat?.scale = 1
+                memberFloat?.opacity = 1
+            }
+        } completion: {
+            clearAlbumDrag(groups: groups)
+        }
+    }
+
+    private func clearAlbumDrag(groups: Bool) {
+        if groups {
+            dragLiftedGroupID = nil
+            groupFloat = nil
+        } else {
+            dragLiftedMemberID = nil
+            memberFloat = nil
+        }
+        DispatchQueue.main.async {
+            blockAlbumOpen = false
+        }
+    }
+
+    private func groupDragFloat(id: UUID, frame: CGRect) -> AlbumDragFloat? {
+        guard let group = sortedGroups.first(where: { $0.id == id }) else { return nil }
+        let origin = CGPoint(x: frame.minX, y: frame.minY)
+        return AlbumDragFloat(
+            title: group.name,
+            covers: Self.groupCoverImages(for: group, allItems: validChekiItems),
+            isList: displayMode != .grid,
+            showsDragHandle: sortMethod == .custom && displayMode != .grid,
+            origin: origin,
+            size: frame.size,
+            translation: .zero,
+            scale: AlbumCardLift.scale,
+            opacity: AlbumCardLift.opacity,
+            destination: origin
+        )
+    }
+
+    private func memberDragFloat(id: UUID, frame: CGRect) -> AlbumDragFloat? {
+        guard let member = allExpandedMembers.first(where: { $0.id == id }) else { return nil }
+        let origin = CGPoint(x: frame.minX, y: frame.minY)
+        return AlbumDragFloat(
+            title: member.albumTitle,
+            covers: Self.memberCoverImages(for: member, allItems: validChekiItems),
+            isList: displayMode != .grid,
+            showsDragHandle: sortMethod == .custom && displayMode != .grid,
+            origin: origin,
+            size: frame.size,
+            translation: .zero,
+            scale: AlbumCardLift.scale,
+            opacity: AlbumCardLift.opacity,
+            destination: origin
+        )
     }
 
     private func reorderMembers(dragged: UUID, target: UUID) {
@@ -1978,6 +2066,7 @@ final class AlbumCardRegistry {
 private struct AlbumCardAnchor: UIViewRepresentable {
     let id: UUID
     let registry: AlbumCardRegistry
+    var isFront: Bool = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator(id: id, registry: registry)
@@ -1995,6 +2084,8 @@ private struct AlbumCardAnchor: UIViewRepresentable {
     }
 
     final class AnchorView: UIView {
+        var isFront = false
+
         override func didMoveToSuperview() {
             super.didMoveToSuperview()
             autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -2002,11 +2093,34 @@ private struct AlbumCardAnchor: UIViewRepresentable {
                 frame = superview.bounds
             }
         }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            guard isFront else { return }
+            bringHostToFront()
+        }
+
+        func bringHostToFront() {
+            var node: UIView? = self
+            var steps = 0
+            while let current = node, steps < 12 {
+                if current is UIScrollView { break }
+                if let parent = current.superview, parent.subviews.last !== current {
+                    parent.bringSubviewToFront(current)
+                }
+                node = current.superview
+                steps += 1
+            }
+        }
     }
 
     func updateUIView(_ uiView: AnchorView, context: Context) {
         context.coordinator.id = id
         context.coordinator.registry = registry
+        uiView.isFront = isFront
+        if isFront {
+            uiView.bringHostToFront()
+        }
         registry.register(id, view: uiView)
     }
 
@@ -2028,8 +2142,9 @@ private struct AlbumCardAnchor: UIViewRepresentable {
 private struct AlbumLongPressReorder: UIViewRepresentable {
     var enabled: Bool
     var registry: AlbumCardRegistry
-    var onArm: (UUID) -> Void
+    var onArm: (UUID, CGRect) -> Void
     var onTrack: (CGSize) -> Void
+    var onHover: (UUID, CGRect) -> Void
     var onEnd: (UUID?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -2047,6 +2162,7 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
         context.coordinator.registry = registry
         context.coordinator.onArm = onArm
         context.coordinator.onTrack = onTrack
+        context.coordinator.onHover = onHover
         context.coordinator.onEnd = onEnd
         uiView.coordinator = context.coordinator
         uiView.installIfNeeded()
@@ -2136,8 +2252,9 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var enabled = true
         var registry = AlbumCardRegistry()
-        var onArm: (UUID) -> Void = { _ in }
+        var onArm: (UUID, CGRect) -> Void = { _, _ in }
         var onTrack: (CGSize) -> Void = { _ in }
+        var onHover: (UUID, CGRect) -> Void = { _, _ in }
         var onEnd: (UUID?) -> Void = { _ in }
 
         private static var recognizerKey: UInt8 = 0
@@ -2191,7 +2308,8 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
                 lockScrolling(from: view)
                 silenceCompeting(except: recognizer, in: view)
                 dismissContextMenus(in: view)
-                onArm(draggedID)
+                let frame = registry.frames(in: view)[draggedID] ?? .zero
+                onArm(draggedID, frame)
                 onTrack(.zero)
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             case .changed:
@@ -2201,9 +2319,13 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
                     height: point.y - touch.armedOrigin.y
                 )
                 onTrack(translation)
+                let frames = registry.frames(in: view)
                 let target = registry.hit(point, in: view, excluding: draggedID)
                 if target != lastTarget {
                     lastTarget = target
+                    if let target, let frame = frames[target] {
+                        onHover(target, frame)
+                    }
                 }
             case .ended, .cancelled, .failed:
                 let hover = lastTarget
@@ -2293,21 +2415,69 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
     }
 }
 
+private struct AlbumDragFloat: Equatable {
+    var title: String
+    var covers: [Data]
+    var isList: Bool
+    var showsDragHandle: Bool
+    var origin: CGPoint
+    var size: CGSize
+    var translation: CGSize
+    var scale: CGFloat
+    var opacity: Double
+    var destination: CGPoint
+}
+
+private struct AlbumDragFloatCard: View {
+    var model: AlbumDragFloat
+
+    var body: some View {
+        let growthX = model.size.width * (model.scale - 1) / 2
+        let growthY = model.size.height * (model.scale - 1) / 2
+        Group {
+            if model.isList {
+                ApplePhotoAlbumListRow(
+                    primaryTitle: model.title,
+                    secondaryTitle: nil,
+                    coverImagesData: model.covers,
+                    showsDragHandle: model.showsDragHandle
+                )
+            } else {
+                ApplePhotoAlbumTile(
+                    primaryTitle: model.title,
+                    secondaryTitle: nil,
+                    coverImagesData: model.covers
+                )
+            }
+        }
+        .frame(width: model.size.width, height: model.size.height)
+        .scaleEffect(model.scale)
+        .opacity(model.opacity)
+        .shadow(color: .black.opacity(0.28), radius: 16, y: 8)
+        .offset(
+            x: model.origin.x + model.translation.width + growthX,
+            y: model.origin.y + model.translation.height + growthY
+        )
+        .allowsHitTesting(false)
+    }
+}
+
 private enum AlbumCardLift {
-    /// 選單與拖動時，卡片相對原位往上浮的距離。
-    static let floatY: CGFloat = -12
+    /// 往鏡頭方向浮起，不是畫面上移。
+    static let scale: CGFloat = 1.06
     static let opacity: Double = 0.75
 }
 
 private extension View {
-    /// 長按選單或拖動時：稍微上浮、半透明。拖動位移由 `translation` 帶入，放開時呼叫端把它動畫回零。
-    func albumCardLift(lifted: Bool, translation: CGSize) -> some View {
-        shadow(color: Color.black.opacity(lifted ? 0.28 : 0), radius: lifted ? 16 : 0, y: lifted ? 10 : 0)
-            .opacity(lifted ? AlbumCardLift.opacity : 1)
-            .offset(
-                x: lifted ? translation.width : 0,
-                y: lifted ? translation.height + AlbumCardLift.floatY : 0
+    /// 選單時沿 Z 軸浮起並半透明。拖動中的格子本體先藏起來，改由畫面最上層的跟隨卡片顯示。
+    func albumCardLift(menu: Bool, dragging: Bool) -> some View {
+        scaleEffect(menu && !dragging ? AlbumCardLift.scale : 1)
+            .shadow(
+                color: Color.black.opacity(menu && !dragging ? 0.28 : 0),
+                radius: menu && !dragging ? 16 : 0,
+                y: menu && !dragging ? 8 : 0
             )
+            .opacity(dragging ? 0 : (menu ? AlbumCardLift.opacity : 1))
     }
 
     /// 長按選單掛在蓋住卡片的透明層。卡片不是選單來源，所以不會被藏起來，也不會被放大成預覽。
@@ -2583,7 +2753,7 @@ private struct GroupMembersAlbumView: View {
     @State private var cardRegistry = AlbumCardRegistry()
     @State private var menuLiftedMemberID: UUID?
     @State private var dragLiftedMemberID: UUID?
-    @State private var memberDragTranslation: CGSize = .zero
+    @State private var memberFloat: AlbumDragFloat?
     @State private var blockAlbumOpen = false
     @State private var isSelectingAlbums: Bool = false
     @State private var selectedMemberIDs: Set<UUID> = []
@@ -2682,31 +2852,36 @@ private struct GroupMembersAlbumView: View {
             AlbumLongPressReorder(
                 enabled: !isSelectingAlbums && !displayedMembers.isEmpty,
                 registry: cardRegistry,
-                onArm: { id in
+                onArm: { id, frame in
                     blockAlbumOpen = true
-                    withAnimation(ChekiMotion.small) {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
                         dragLiftedMemberID = id
                         menuLiftedMemberID = nil
+                        memberFloat = memberDragFloat(id: id, frame: frame)
                     }
                 },
                 onTrack: { translation in
                     trackMemberDrag(translation)
                 },
-                onEnd: { hover in
-                    let dragged = dragLiftedMemberID
+                onHover: { target, frame in
+                    guard let dragged = dragLiftedMemberID else { return }
+                    memberFloat?.destination = CGPoint(x: frame.minX, y: frame.minY)
                     withAnimation(ChekiMotion.small) {
-                        if let dragged, let hover {
-                            reorderDisplayedMembers(dragged: dragged, target: hover)
-                        }
-                        dragLiftedMemberID = nil
-                        memberDragTranslation = .zero
+                        reorderDisplayedMembers(dragged: dragged, target: target)
                     }
-                    DispatchQueue.main.async {
-                        blockAlbumOpen = false
-                    }
+                },
+                onEnd: { _ in
+                    settleMemberDrag()
                 }
             )
         }
+        }
+        .overlay(alignment: .topLeading) {
+            if let memberFloat {
+                AlbumDragFloatCard(model: memberFloat)
+            }
         }
         .scaleEffect(displayMode == .grid ? livePinchScale : 1, anchor: .top)
         .animation(ChekiMotion.layoutCommit, value: columnCount)
@@ -2955,13 +3130,17 @@ private struct GroupMembersAlbumView: View {
             }
         }
         .albumCardLift(
-            lifted: menuLiftedMemberID == member.id || dragLiftedMemberID == member.id,
-            translation: dragLiftedMemberID == member.id ? memberDragTranslation : .zero
+            menu: menuLiftedMemberID == member.id,
+            dragging: dragLiftedMemberID == member.id
         )
         .overlay {
-            AlbumCardAnchor(id: member.id, registry: cardRegistry)
+            AlbumCardAnchor(
+                id: member.id,
+                registry: cardRegistry,
+                isFront: menuLiftedMemberID == member.id
+            )
         }
-        .zIndex(menuLiftedMemberID == member.id || dragLiftedMemberID == member.id ? 2 : 0)
+        .zIndex(menuLiftedMemberID == member.id ? 100 : 0)
     }
 
     private func reorderDisplayedMembers(dragged: UUID, target: UUID) {
@@ -2980,13 +3159,54 @@ private struct GroupMembersAlbumView: View {
     }
 
     private func trackMemberDrag(_ translation: CGSize) {
-        let scale = max(displayMode == .grid ? livePinchScale : 1, 0.01)
-        let scaled = CGSize(width: translation.width / scale, height: translation.height / scale)
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            memberDragTranslation = scaled
+            memberFloat?.translation = translation
         }
+    }
+
+    private func settleMemberDrag() {
+        guard let float = memberFloat else {
+            clearMemberDrag()
+            return
+        }
+        let translation = CGSize(
+            width: float.destination.x - float.origin.x,
+            height: float.destination.y - float.origin.y
+        )
+        withAnimation(ChekiMotion.small, completionCriteria: .logicallyComplete) {
+            memberFloat?.translation = translation
+            memberFloat?.scale = 1
+            memberFloat?.opacity = 1
+        } completion: {
+            clearMemberDrag()
+        }
+    }
+
+    private func clearMemberDrag() {
+        dragLiftedMemberID = nil
+        memberFloat = nil
+        DispatchQueue.main.async {
+            blockAlbumOpen = false
+        }
+    }
+
+    private func memberDragFloat(id: UUID, frame: CGRect) -> AlbumDragFloat? {
+        guard let member = displayedMembers.first(where: { $0.id == id }) else { return nil }
+        let origin = CGPoint(x: frame.minX, y: frame.minY)
+        return AlbumDragFloat(
+            title: member.albumTitle,
+            covers: AlbumsRootView.memberCoverImages(for: member, allItems: allItems),
+            isList: displayMode != .grid,
+            showsDragHandle: sortMethod == .custom && displayMode != .grid,
+            origin: origin,
+            size: frame.size,
+            translation: .zero,
+            scale: AlbumCardLift.scale,
+            opacity: AlbumCardLift.opacity,
+            destination: origin
+        )
     }
 }
 
