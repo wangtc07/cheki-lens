@@ -10,8 +10,8 @@
 - **最後更新時間**：2026-10-11
 - **當前所屬階段**：Phase 6.6 — UI／UX 一致性重整 (iOS 26 UI Consistency Pass)
 - **當前分支**：`main`
-- **當前進行中任務**：已完成相冊滑動多選。團體頁、成員頁、團體內成員頁在「選擇」時，與全部頁相同：點一下切換，橫向或斜向滑動做範圍選取。準則補在 `docs/UI_AGENT_GUIDELINES.md` §6.1（A12）。先前沒做，是因為 §1 只寫「相同手勢」並指向 §6，而 §6 只有動畫、§7 只規定縮放，§9 沒有這項。
-- **最新穩定 Git Commit**：fix(albums): 相簿選擇可滑動多選
+- **當前進行中任務**：已修正相冊長按排序與滑動多選在實機上沒有作用。程式本來就在專案裡；長按會被捲動取消，選取則用 SwiftUI global 座標去對 UIKit 觸控，兩種都打不中卡片。現在改為讀卡片 UIView 的即時位置，長按成立後先鎖住捲動。
+- **最新穩定 Git Commit**：fix(albums): 實機長按排序與滑動多選打中卡片
 - **下一動執行指示**：執行 **Task 6.3**（App 圖示、啟動畫面與 App Store 截圖）。開工前先讀 `docs/PROGRESS.md`。
 
 ---
@@ -338,7 +338,7 @@
 
 ### 階段 6.6：UI／UX 一致性重整 (Phase 6.6: iOS 26 UI Consistency Pass)
 
-*規範來源：`docs/UI_AGENT_GUIDELINES.md`（所有 UI 任務動手前必讀；偏差清單見該文件 §9，編號 A1～A12）*
+*規範來源：`docs/UI_AGENT_GUIDELINES.md`（所有 UI 任務動手前必讀；偏差清單見該文件 §9，編號 A1～A13）*
 *原則：遵循 Apple HIG／iOS 26 Liquid Glass，但不強制全透明——需要辨識狀態處使用語意色；跨畫面按鈕尺寸／位置一致；縮放手勢統一為「跟手縮放，放開才定位」。*
 
 - [x] **Task 6.6.0**: 全面 UI 稽核並建立 UI 修正代理人規範文件（`docs/UI_AGENT_GUIDELINES.md`；並於 `AGENTS.md`、`.cursorrules`、`CLAUDE.md` 加入指標）

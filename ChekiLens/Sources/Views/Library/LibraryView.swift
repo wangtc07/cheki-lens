@@ -862,10 +862,10 @@ private struct AlbumSelectionBadge: View {
     }
 }
 
-/// 相冊封面的滑動多選。格狀與清單都用已量到的畫面座標命中，手勢規則與全部頁相同。
+/// 相冊封面的滑動多選。命中用卡片 UIView 的即時位置，與觸控同一個座標系。
 private struct AlbumDragSelectOverlay: View {
     let itemIDs: [UUID]
-    let frames: [UUID: CGRect]
+    let registry: AlbumCardRegistry
     @Binding var selectedItemIDs: Set<UUID>
 
     var body: some View {
@@ -875,10 +875,12 @@ private struct AlbumDragSelectOverlay: View {
                 columnCount: 1,
                 spacing: 0,
                 cellAspectRatio: 1,
-                globalFrames: frames,
-                usesFrames: true,
+                frameProvider: { view in
+                    registry.frames(in: view)
+                },
                 selectedItemIDs: $selectedItemIDs
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
@@ -925,8 +927,8 @@ struct AlbumsRootView: View {
     @State private var renamingGroup: IdolGroup? = nil
     @State private var renamingMember: IdolMember? = nil
     @State private var renameText: String = ""
-    @State private var groupFrames: [UUID: CGRect] = [:]
-    @State private var memberFrames: [UUID: CGRect] = [:]
+    @State private var groupRegistry = AlbumCardRegistry()
+    @State private var memberRegistry = AlbumCardRegistry()
     @State private var liftedGroupID: UUID?
     @State private var liftedMemberID: UUID?
     private var chromeState = NavigationChromeState.shared
@@ -1305,7 +1307,7 @@ struct AlbumsRootView: View {
             .background {
                 AlbumLongPressReorder(
                     enabled: !isSelectingAlbums,
-                    frames: mode == .groups ? groupFrames : memberFrames,
+                    registry: mode == .groups ? groupRegistry : memberRegistry,
                     onArm: { id in
                         if mode == .groups {
                             liftedGroupID = id
@@ -1379,7 +1381,7 @@ struct AlbumsRootView: View {
                 if isSelectingAlbums {
                     AlbumDragSelectOverlay(
                         itemIDs: sortedGroups.map(\.id),
-                        frames: groupFrames,
+                        registry: groupRegistry,
                         selectedItemIDs: $selectedGroupIDs
                     )
                 }
@@ -1399,7 +1401,7 @@ struct AlbumsRootView: View {
                 if isSelectingAlbums {
                     AlbumDragSelectOverlay(
                         itemIDs: sortedGroups.map(\.id),
-                        frames: groupFrames,
+                        registry: groupRegistry,
                         selectedItemIDs: $selectedGroupIDs
                     )
                 }
@@ -1453,13 +1455,8 @@ struct AlbumsRootView: View {
         }
         .scaleEffect(liftedGroupID == group.id ? 1.05 : 1)
         .zIndex(liftedGroupID == group.id ? 1 : 0)
-        .onGeometryChange(for: CGRect.self) { proxy in
-            proxy.frame(in: .global)
-        } action: { frame in
-            groupFrames[group.id] = frame
-        }
-        .onDisappear {
-            groupFrames[group.id] = nil
+        .overlay {
+            AlbumCardAnchor(id: group.id, registry: groupRegistry)
         }
     }
 
@@ -1496,7 +1493,7 @@ struct AlbumsRootView: View {
                 if isSelectingAlbums {
                     AlbumDragSelectOverlay(
                         itemIDs: allExpandedMembers.map(\.id),
-                        frames: memberFrames,
+                        registry: memberRegistry,
                         selectedItemIDs: $selectedMemberIDs
                     )
                 }
@@ -1516,7 +1513,7 @@ struct AlbumsRootView: View {
                 if isSelectingAlbums {
                     AlbumDragSelectOverlay(
                         itemIDs: allExpandedMembers.map(\.id),
-                        frames: memberFrames,
+                        registry: memberRegistry,
                         selectedItemIDs: $selectedMemberIDs
                     )
                 }
@@ -1570,13 +1567,8 @@ struct AlbumsRootView: View {
         }
         .scaleEffect(liftedMemberID == member.id ? 1.05 : 1)
         .zIndex(liftedMemberID == member.id ? 1 : 0)
-        .onGeometryChange(for: CGRect.self) { proxy in
-            proxy.frame(in: .global)
-        } action: { frame in
-            memberFrames[member.id] = frame
-        }
-        .onDisappear {
-            memberFrames[member.id] = nil
+        .overlay {
+            AlbumCardAnchor(id: member.id, registry: memberRegistry)
         }
     }
 
@@ -1882,9 +1874,104 @@ struct ApplePhotoAlbumListRow: View {
     }
 }
 
+/// 卡片本體的 UIView。命中時把這個 view 的 bounds 轉到觸控所在的 view，避免 SwiftUI global 與 UIKit 座標不一致。
+final class AlbumCardRegistry {
+    private final class Box {
+        weak var view: UIView?
+    }
+
+    private var boxes: [UUID: Box] = [:]
+
+    func register(_ id: UUID, view: UIView) {
+        let box = boxes[id] ?? Box()
+        box.view = view
+        boxes[id] = box
+    }
+
+    func unregister(_ id: UUID, view: UIView) {
+        if boxes[id]?.view === view {
+            boxes[id] = nil
+        }
+    }
+
+    func frames(in coordinateView: UIView) -> [UUID: CGRect] {
+        var result: [UUID: CGRect] = [:]
+        for (id, box) in boxes {
+            guard let anchor = box.view, anchor.window != nil else { continue }
+            let frame = coordinateView.convert(anchor.bounds, from: anchor)
+            guard frame.width > 1, frame.height > 1 else { continue }
+            result[id] = frame
+        }
+        return result
+    }
+
+    func hit(_ point: CGPoint, in coordinateView: UIView, excluding: UUID? = nil) -> UUID? {
+        var best: (UUID, CGFloat)?
+        for (id, frame) in frames(in: coordinateView) {
+            if id == excluding { continue }
+            guard frame.insetBy(dx: -8, dy: -8).contains(point) else { continue }
+            let distance = hypot(frame.midX - point.x, frame.midY - point.y)
+            if best == nil || distance < best!.1 {
+                best = (id, distance)
+            }
+        }
+        return best?.0
+    }
+}
+
+private struct AlbumCardAnchor: UIViewRepresentable {
+    let id: UUID
+    let registry: AlbumCardRegistry
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(id: id, registry: registry)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: AnchorView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+    }
+
+    func makeUIView(context: Context) -> AnchorView {
+        let view = AnchorView()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        return view
+    }
+
+    final class AnchorView: UIView {
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            if let superview, superview.bounds.width > 1 {
+                frame = superview.bounds
+            }
+        }
+    }
+
+    func updateUIView(_ uiView: AnchorView, context: Context) {
+        context.coordinator.id = id
+        context.coordinator.registry = registry
+        registry.register(id, view: uiView)
+    }
+
+    static func dismantleUIView(_ uiView: AnchorView, coordinator: Coordinator) {
+        coordinator.registry.unregister(coordinator.id, view: uiView)
+    }
+
+    final class Coordinator {
+        var id: UUID
+        var registry: AlbumCardRegistry
+
+        init(id: UUID, registry: AlbumCardRegistry) {
+            self.id = id
+            self.registry = registry
+        }
+    }
+}
+
 private struct AlbumLongPressReorder: UIViewRepresentable {
     var enabled: Bool
-    var frames: [UUID: CGRect]
+    var registry: AlbumCardRegistry
     var onArm: (UUID) -> Void
     var onMove: (UUID, UUID) -> Void
     var onEnd: () -> Void
@@ -1901,7 +1988,7 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
 
     func updateUIView(_ uiView: InstallerView, context: Context) {
         context.coordinator.enabled = enabled
-        context.coordinator.frames = frames
+        context.coordinator.registry = registry
         context.coordinator.onArm = onArm
         context.coordinator.onMove = onMove
         context.coordinator.onEnd = onEnd
@@ -1922,9 +2009,24 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
         }
     }
 
+    /// 捲動與選單不能把已成立的長按取消掉。
+    final class ReorderPress: UILongPressGestureRecognizer {
+        override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool {
+            false
+        }
+
+        override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
+            if preventedGestureRecognizer is UIPanGestureRecognizer,
+               preventedGestureRecognizer.view is UIScrollView {
+                return false
+            }
+            return true
+        }
+    }
+
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var enabled = true
-        var frames: [UUID: CGRect] = [:]
+        var registry = AlbumCardRegistry()
         var onArm: (UUID) -> Void = { _ in }
         var onMove: (UUID, UUID) -> Void = { _, _ in }
         var onEnd: () -> Void = {}
@@ -1934,18 +2036,30 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
         private var draggedID: UUID?
         private var armed = false
         private var lastTarget: UUID?
-        private var disabledScrolls: [UIScrollView] = []
+        private var suspendedScrolls: [(scroll: UIScrollView, enabled: Bool, canCancel: Bool)] = []
 
         func install(from marker: UIView) {
-            guard let container = containerView(from: marker) else { return }
-            if objc_getAssociatedObject(container, &Self.recognizerKey) != nil { return }
-            let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(handle(_:)))
-            recognizer.minimumPressDuration = 0.35
+            guard let scroll = scrollView(from: marker) else { return }
+            if let existing = objc_getAssociatedObject(scroll, &Self.recognizerKey) as? ReorderPress {
+                existing.removeTarget(nil, action: nil)
+                existing.addTarget(self, action: #selector(handle(_:)))
+                existing.delegate = self
+                existing.isEnabled = enabled
+                return
+            }
+            let recognizer = ReorderPress(target: self, action: #selector(handle(_:)))
+            recognizer.minimumPressDuration = 0.3
+            recognizer.allowableMovement = 28
             recognizer.cancelsTouchesInView = false
             recognizer.delaysTouchesBegan = false
             recognizer.delegate = self
-            container.addGestureRecognizer(recognizer)
-            objc_setAssociatedObject(container, &Self.recognizerKey, recognizer, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            recognizer.isEnabled = enabled
+            scroll.addGestureRecognizer(recognizer)
+            objc_setAssociatedObject(scroll, &Self.recognizerKey, recognizer, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            enabled
         }
 
         func gestureRecognizer(
@@ -1956,28 +2070,33 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
         }
 
         @objc private func handle(_ recognizer: UILongPressGestureRecognizer) {
-            let point = touchPoint(recognizer)
+            guard let view = recognizer.view else { return }
+            let point = recognizer.location(in: view)
             switch recognizer.state {
             case .began:
                 startPoint = point
-                draggedID = hitID(at: point)
+                draggedID = registry.hit(point, in: view)
                 armed = false
                 lastTarget = nil
+                if draggedID != nil {
+                    lockScrolling(from: view)
+                }
             case .changed:
                 guard enabled, let draggedID else { return }
                 let distance = hypot(point.x - startPoint.x, point.y - startPoint.y)
                 if !armed {
-                    guard distance > 12 else { return }
+                    guard distance > 8 else { return }
                     armed = true
-                    cancelCompetingRecognizers(except: recognizer, in: recognizer.view)
-                    disableAncestorScrolling(from: recognizer.view)
+                    lockScrolling(from: view)
+                    cancelCompetingRecognizers(except: recognizer, in: view)
                     onArm(draggedID)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 }
+                let frames = registry.frames(in: view)
                 if let lastTarget, let frame = frames[lastTarget], !frame.contains(point) {
                     self.lastTarget = nil
                 }
-                if let target = hitID(at: point, excluding: draggedID), target != lastTarget {
+                if let target = registry.hit(point, in: view, excluding: draggedID), target != lastTarget {
                     lastTarget = target
                     onMove(draggedID, target)
                 }
@@ -1994,48 +2113,38 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
             }
         }
 
-        private func touchPoint(_ recognizer: UILongPressGestureRecognizer) -> CGPoint {
-            guard let window = recognizer.view?.window else {
-                return recognizer.location(in: nil)
-            }
-            return window.convert(recognizer.location(in: window), to: nil)
-        }
-
-        private func hitID(at point: CGPoint, excluding: UUID? = nil) -> UUID? {
-            var best: (UUID, CGFloat)?
-            for (id, frame) in frames {
-                if id == excluding { continue }
-                guard frame.insetBy(dx: -6, dy: -6).contains(point) else { continue }
-                let distance = hypot(frame.midX - point.x, frame.midY - point.y)
-                if best == nil || distance < best!.1 {
-                    best = (id, distance)
-                }
-            }
-            return best?.0
-        }
-
-        private func containerView(from marker: UIView) -> UIView? {
+        private func scrollView(from marker: UIView) -> UIScrollView? {
             var current: UIView? = marker
-            while let view = current, let parent = view.superview, !(parent is UIScrollView) {
-                current = parent
+            while let view = current {
+                if let scroll = view as? UIScrollView { return scroll }
+                current = view.superview
             }
-            return current
+            return nil
         }
 
-        private func disableAncestorScrolling(from view: UIView?) {
+        private func lockScrolling(from view: UIView?) {
             var current = view
             while let node = current {
-                if let scroll = node as? UIScrollView, scroll.isScrollEnabled {
+                if let scroll = node as? UIScrollView,
+                   !suspendedScrolls.contains(where: { $0.scroll === scroll }) {
+                    suspendedScrolls.append((
+                        scroll,
+                        scroll.isScrollEnabled,
+                        scroll.canCancelContentTouches
+                    ))
                     scroll.isScrollEnabled = false
-                    disabledScrolls.append(scroll)
+                    scroll.canCancelContentTouches = false
                 }
                 current = node.superview
             }
         }
 
         private func restoreScrolling() {
-            disabledScrolls.forEach { $0.isScrollEnabled = true }
-            disabledScrolls.removeAll()
+            for item in suspendedScrolls {
+                item.scroll.isScrollEnabled = item.enabled
+                item.scroll.canCancelContentTouches = item.canCancel
+            }
+            suspendedScrolls.removeAll()
         }
 
         private func cancelCompetingRecognizers(except recognizer: UIGestureRecognizer, in view: UIView?) {
@@ -2043,6 +2152,7 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
             func silence(_ node: UIView) {
                 node.gestureRecognizers?.forEach { other in
                     guard other !== recognizer else { return }
+                    if other is UIPanGestureRecognizer, other.view is UIScrollView { return }
                     if other.state == .possible || other.state == .began || other.state == .changed {
                         other.isEnabled = false
                         other.isEnabled = true
@@ -2055,6 +2165,7 @@ private struct AlbumLongPressReorder: UIViewRepresentable {
             while let node = current {
                 node.gestureRecognizers?.forEach { other in
                     guard other !== recognizer else { return }
+                    if other is UIPanGestureRecognizer, other.view is UIScrollView { return }
                     if other.state == .possible || other.state == .began || other.state == .changed {
                         other.isEnabled = false
                         other.isEnabled = true
@@ -2093,7 +2204,7 @@ private struct GroupMembersAlbumView: View {
     @State private var showingRenameGroupAlert: Bool = false
     @State private var renamingMember: IdolMember? = nil
     @State private var renameText: String = ""
-    @State private var memberFrames: [UUID: CGRect] = [:]
+    @State private var cardRegistry = AlbumCardRegistry()
     @State private var liftedMemberID: UUID?
     @State private var isSelectingAlbums: Bool = false
     @State private var selectedMemberIDs: Set<UUID> = []
@@ -2163,7 +2274,7 @@ private struct GroupMembersAlbumView: View {
                     if isSelectingAlbums {
                         AlbumDragSelectOverlay(
                             itemIDs: displayedMembers.map(\.id),
-                            frames: memberFrames,
+                            registry: cardRegistry,
                             selectedItemIDs: $selectedMemberIDs
                         )
                     }
@@ -2181,7 +2292,7 @@ private struct GroupMembersAlbumView: View {
                     if isSelectingAlbums {
                         AlbumDragSelectOverlay(
                             itemIDs: displayedMembers.map(\.id),
-                            frames: memberFrames,
+                            registry: cardRegistry,
                             selectedItemIDs: $selectedMemberIDs
                         )
                     }
@@ -2191,7 +2302,7 @@ private struct GroupMembersAlbumView: View {
         .background {
             AlbumLongPressReorder(
                 enabled: !isSelectingAlbums && !displayedMembers.isEmpty,
-                frames: memberFrames,
+                registry: cardRegistry,
                 onArm: { liftedMemberID = $0 },
                 onMove: { dragged, target in
                     reorderDisplayedMembers(dragged: dragged, target: target)
@@ -2449,13 +2560,8 @@ private struct GroupMembersAlbumView: View {
         }
         .scaleEffect(liftedMemberID == member.id ? 1.05 : 1)
         .zIndex(liftedMemberID == member.id ? 1 : 0)
-        .onGeometryChange(for: CGRect.self) { proxy in
-            proxy.frame(in: .global)
-        } action: { frame in
-            memberFrames[member.id] = frame
-        }
-        .onDisappear {
-            memberFrames[member.id] = nil
+        .overlay {
+            AlbumCardAnchor(id: member.id, registry: cardRegistry)
         }
     }
 
@@ -4213,7 +4319,7 @@ private struct ApplePhotosSelectionBottomBar: View {
     }
 }
 
-/// 仿照 Apple 原生相簿的拖選多選覆蓋層。照片格用欄數與長寬比命中；相冊封面傳 `globalFrames`。
+/// 仿照 Apple 原生相簿的拖選多選覆蓋層。照片格用欄數與長寬比命中；相冊封面用 `frameProvider` 讀卡片的即時位置。
 /// - 單指點擊：切換該格的選取
 /// - 單指橫向或斜向滑動：從起點格到目前格做範圍選取或取消
 /// - 單指垂直滑動：不攔截，交給外層 `ScrollView`
@@ -4222,8 +4328,7 @@ private struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
     let columnCount: Int
     let spacing: CGFloat
     let cellAspectRatio: CGFloat
-    var globalFrames: [ID: CGRect] = [:]
-    var usesFrames: Bool = false
+    var frameProvider: ((UIView) -> [ID: CGRect])? = nil
     @Binding var selectedItemIDs: Set<ID>
 
     func makeCoordinator() -> Coordinator {
@@ -4254,15 +4359,28 @@ private struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
         return view
     }
 
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? uiView.bounds.width, height: proposal.height ?? uiView.bounds.height)
+    }
+
     func updateUIView(_ uiView: UIView, context: Context) {
         let coordinator = context.coordinator
         coordinator.itemIDs = itemIDs.map(AnyHashable.init)
-        coordinator.frames = Dictionary(uniqueKeysWithValues: globalFrames.map { (AnyHashable($0.key), $0.value) })
-        coordinator.usesFrames = usesFrames
         coordinator.columnCount = columnCount
         coordinator.spacing = spacing
         coordinator.cellAspectRatio = cellAspectRatio
         coordinator.selected = Set(selectedItemIDs.map(AnyHashable.init))
+        if let frameProvider {
+            coordinator.frameProvider = { view in
+                var frames: [AnyHashable: CGRect] = [:]
+                for (id, frame) in frameProvider(view) {
+                    frames[AnyHashable(id)] = frame
+                }
+                return frames
+            }
+        } else {
+            coordinator.frameProvider = nil
+        }
         coordinator.onChange = { updated in
             var next = Set<ID>()
             next.reserveCapacity(updated.count)
@@ -4280,8 +4398,7 @@ private struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var itemIDs: [AnyHashable] = []
-        var frames: [AnyHashable: CGRect] = [:]
-        var usesFrames = false
+        var frameProvider: ((UIView) -> [AnyHashable: CGRect])?
         var columnCount = 1
         var spacing: CGFloat = 0
         var cellAspectRatio: CGFloat = 1
@@ -4295,7 +4412,7 @@ private struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
         private let feedbackGenerator = UISelectionFeedbackGenerator()
 
         private func itemIndex(at point: CGPoint, in view: UIView, clampToBounds: Bool) -> Int? {
-            if usesFrames {
+            if frameProvider != nil {
                 return frameIndex(at: point, in: view, clampToBounds: clampToBounds)
             }
             return geometricIndex(at: point, in: view.bounds.size, clampToBounds: clampToBounds)
@@ -4330,10 +4447,9 @@ private struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
         }
 
         private func frameIndex(at point: CGPoint, in view: UIView, clampToBounds: Bool) -> Int? {
-            guard !itemIDs.isEmpty else { return nil }
-            let global = globalPoint(point, in: view)
+            guard !itemIDs.isEmpty, let frames = frameProvider?(view) else { return nil }
             for (index, id) in itemIDs.enumerated() {
-                if let frame = frames[id], frame.contains(global) {
+                if let frame = frames[id], frame.contains(point) {
                     return index
                 }
             }
@@ -4341,21 +4457,14 @@ private struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
             var best: (index: Int, distance: CGFloat)?
             for (index, id) in itemIDs.enumerated() {
                 guard let frame = frames[id] else { continue }
-                let dx = max(frame.minX - global.x, 0, global.x - frame.maxX)
-                let dy = max(frame.minY - global.y, 0, global.y - frame.maxY)
+                let dx = max(frame.minX - point.x, 0, point.x - frame.maxX)
+                let dy = max(frame.minY - point.y, 0, point.y - frame.maxY)
                 let distance = dx * dx + dy * dy
                 if best == nil || distance < best!.distance {
                     best = (index, distance)
                 }
             }
             return best?.index
-        }
-
-        private func globalPoint(_ point: CGPoint, in view: UIView) -> CGPoint {
-            guard let window = view.window else {
-                return view.convert(point, to: nil)
-            }
-            return window.convert(view.convert(point, to: window), to: nil)
         }
 
         private func publish(_ updated: Set<AnyHashable>) {
