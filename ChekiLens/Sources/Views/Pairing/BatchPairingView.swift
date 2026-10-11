@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import PhotosUI
 import Vision
+import ImageIO
 import UIKit
 
 // MARK: - CameraSessionPhoto
@@ -100,6 +101,11 @@ struct StagingChekiPhoto: Identifiable, Equatable {
     var shutterDate: Date = Date()
     /// 旋轉或替換影像後遞增，讓卡片即使 JPEG 大小相近也會重繪。
     var contentRevision: Int = 0
+
+    /// 已有可顯示的原圖（含快速預覽）。空白占位圖的尺寸為 0。
+    var hasVisibleImage: Bool {
+        uiImage.size.width > 1 && uiImage.size.height > 1
+    }
 
     /// 工作台卡片優先顯示已裁切預覽圖；若已選擇復原原圖或尚在背景偵測中則顯示原圖
     var displayUIImage: UIImage {
@@ -1912,10 +1918,15 @@ struct BatchPairingView: View {
 
     @ViewBuilder
     private func stagingPhotoContent(_ photo: StagingChekiPhoto) -> some View {
-        if photo.isImageReady {
+        if photo.hasVisibleImage {
             Image(uiImage: photo.displayUIImage)
                 .resizable()
                 .scaledToFill()
+                .overlay {
+                    if !photo.isImageReady {
+                        photoPreparingOverlay
+                    }
+                }
         } else {
             photoLoadingFace
         }
@@ -1923,16 +1934,39 @@ struct BatchPairingView: View {
 
     @ViewBuilder
     private func magnifiedPhotoContent(_ photo: StagingChekiPhoto) -> some View {
-        if photo.isImageReady {
+        if photo.hasVisibleImage {
             Image(uiImage: photo.displayUIImage)
                 .resizable()
                 .interpolation(.high)
                 .scaledToFit()
+                .overlay {
+                    if !photo.isImageReady {
+                        photoPreparingOverlay
+                    }
+                }
         } else {
             photoLoadingFace
                 .frame(maxWidth: .infinity)
                 .frame(height: 360)
         }
+    }
+
+    /// 原圖已可見時蓋上的半透明讀取層。底下的照片保持看得到。
+    private var photoPreparingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.32)
+            VStack(spacing: 6) {
+                ProgressView()
+                    .tint(.white)
+                Text(L10n.tr("讀取中", "読み込み中"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .padding(4)
+        }
+        .accessibilityLabel(L10n.tr("讀取中", "読み込み中"))
     }
 
     private var photoLoadingFace: some View {
@@ -2613,7 +2647,7 @@ struct BatchPairingView: View {
     }
 
     /// 把本次拍攝的快門照片送進與相簿讀入相同的配對工作台（正反面分類、裁切、日期、成員）。
-    /// 占位卡片在頁面出現時就在，JPEG 轉圖放在背景，圖片區先顯示讀取中。
+    /// 先顯示原圖並蓋半透明讀取層，完整轉圖完成後再拿掉。
     @MainActor
     private func appendSessionPhotos(_ photos: [CameraSessionPhoto]) async {
         let existingIDs = Set(allPhotos.map(\.id))
@@ -2703,20 +2737,24 @@ struct BatchPairingView: View {
         guard !pending.isEmpty else { return }
 
         let payloads = pending.map { (id: $0.id, data: $0.imageData) }
-        let decoded = await Task.detached(priority: .userInitiated) { () -> [UUID: UIImage] in
-            var images: [UUID: UIImage] = [:]
-            for payload in payloads {
-                if let image = UIImage(data: payload.data)?.normalizedImage {
-                    images[payload.id] = image
-                }
+        for payload in payloads {
+            let data = payload.data
+            let preview = await Task.detached(priority: .userInitiated) {
+                Self.previewImage(from: data)
+            }.value
+            if let preview {
+                installPreviewImage(id: payload.id, image: preview)
             }
-            return images
-        }.value
+        }
 
         var readyIDs: [UUID] = []
         var failedIDs = Set<UUID>()
         for payload in payloads {
-            if let image = decoded[payload.id] {
+            let data = payload.data
+            let image = await Task.detached(priority: .userInitiated) {
+                UIImage(data: data)?.normalizedImage
+            }.value
+            if let image {
                 installDecodedSessionImage(id: payload.id, image: image)
                 readyIDs.append(payload.id)
             } else {
@@ -2732,6 +2770,38 @@ struct BatchPairingView: View {
         }
         guard !readyIDs.isEmpty else { return }
         await analyzePhotoSides(for: readyIDs)
+    }
+
+    /// 用 ImageIO 縮圖立刻顯示原圖，不必等整張 12MP JPEG 轉正。
+    nonisolated private static func previewImage(from data: Data, maxPixel: Int = 1400) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else { return nil }
+        let options = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+            kCGImageSourceShouldCacheImmediately: true
+        ] as CFDictionary
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
+    private func installPreviewImage(id: UUID, image: UIImage) {
+        if let idx = allPhotos.firstIndex(where: { $0.id == id }), !allPhotos[idx].isImageReady {
+            allPhotos[idx].uiImage = image
+            allPhotos[idx].contentRevision += 1
+        }
+        for i in slots.indices {
+            if slots[i].frontPhoto.id == id, !slots[i].frontPhoto.isImageReady {
+                slots[i].frontPhoto.uiImage = image
+                slots[i].frontPhoto.contentRevision += 1
+            }
+            if var back = slots[i].backPhoto, back.id == id, !back.isImageReady {
+                back.uiImage = image
+                back.contentRevision += 1
+                slots[i].backPhoto = back
+            }
+        }
     }
 
     private func installDecodedSessionImage(id: UUID, image: UIImage) {
