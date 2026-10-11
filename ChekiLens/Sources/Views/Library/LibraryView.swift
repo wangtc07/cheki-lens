@@ -105,10 +105,10 @@ struct LibraryView: View {
     @State private var sortAscending: Bool = false
     @State private var filterDualSideOnly: Bool = false
 
-    // 雙指縮放欄數狀態（支援 1, 2, 3, 5 欄；預設 3 欄如圖 1，縮小可切換至 5 欄如圖 2）
-    private static let supportedColumnCounts = [1, 2, 3, 5]
+    // 雙指縮放欄數狀態（支援 1, 2, 3, 5 欄；預設 3 欄，縮小可切換至 5 欄）
     @State private var columnCount: Int = 3
     @State private var pinchBaselineColumnCount: Int? = nil
+    @State private var livePinchScale: CGFloat = 1
 
     init() {}
 
@@ -209,9 +209,12 @@ struct LibraryView: View {
                             .padding(.horizontal, columnCount >= 5 ? 8 : 14)
                             .padding(.top, 82)
                             .padding(.bottom, isSelectionMode ? 96 : 32)
+                            .scaleEffect(livePinchScale, anchor: .top)
                             .animation(ChekiMotion.layoutCommit, value: columnCount)
                         }
                         .simultaneousGesture(pinchZoomGesture)
+                        .accessibilityIdentifier(ChromeID.libraryGrid)
+                        .accessibilityValue("\(columnCount)")
                         .onChange(of: chromeState.activeZoomItemID) { _, newID in
                             guard let newID,
                                   chromeState.activeDetailRoute?.sourceScopeID == "library-all",
@@ -435,7 +438,7 @@ struct LibraryView: View {
 
                 Menu {
                     Section(L10n.tr("顯示密度", "表示列数")) {
-                        ForEach(Self.supportedColumnCounts, id: \.self) { count in
+                        ForEach(GridPinchZoom.columnCounts, id: \.self) { count in
                             Button {
                                 withAnimation(ChekiMotion.layoutCommit) {
                                     columnCount = count
@@ -543,41 +546,11 @@ struct LibraryView: View {
     // MARK: - Pinch-to-Zoom Gesture (雙指縮放切換 1 / 2 / 3 / 5 欄)
 
     private var pinchZoomGesture: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                if pinchBaselineColumnCount == nil {
-                    pinchBaselineColumnCount = columnCount
-                }
-                guard let baseCount = pinchBaselineColumnCount,
-                      let baseIndex = Self.supportedColumnCounts.firstIndex(of: baseCount) else { return }
-
-                let magnification = value.magnification
-                var targetIndex = baseIndex
-
-                // 雙指張開放大 -> 減少欄數（圖片變大）
-                if magnification > 1.65 {
-                    targetIndex = max(0, baseIndex - 2)
-                } else if magnification > 1.22 {
-                    targetIndex = max(0, baseIndex - 1)
-                }
-                // 雙指捏合縮小 -> 增加欄數（圖片變小，如 3 欄 -> 5 欄）
-                else if magnification < 0.60 {
-                    targetIndex = min(Self.supportedColumnCounts.count - 1, baseIndex + 2)
-                } else if magnification < 0.82 {
-                    targetIndex = min(Self.supportedColumnCounts.count - 1, baseIndex + 1)
-                }
-
-                let newCount = Self.supportedColumnCounts[targetIndex]
-                if newCount != columnCount {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(ChekiMotion.layoutCommit) {
-                        columnCount = newCount
-                    }
-                }
-            }
-            .onEnded { _ in
-                pinchBaselineColumnCount = nil
-            }
+        GridPinchZoom.gesture(
+            columnCount: $columnCount,
+            liveScale: $livePinchScale,
+            baseline: $pinchBaselineColumnCount
+        )
     }
 
     // MARK: - Photo Cell (仿照圖 1 / 圖 2：保留相片比例與圓角，無下方文字框)
@@ -1947,7 +1920,6 @@ struct AlbumHeroDetailView: View {
     @State private var sortAscending: Bool = false
     @State private var filterDualSideOnly: Bool = false
 
-    private static let supportedColumnCounts = [1, 2, 3, 5]
     @State private var columnCount: Int = 5
     @State private var pinchBaselineColumnCount: Int? = nil
     @State private var livePinchScale: CGFloat = 1.0
@@ -2161,7 +2133,7 @@ struct AlbumHeroDetailView: View {
                         }
 
                         Menu {
-                            ForEach(Self.supportedColumnCounts, id: \.self) { count in
+                            ForEach(GridPinchZoom.columnCounts, id: \.self) { count in
                                 Button {
                                     withAnimation(ChekiMotion.layoutCommit) {
                                         columnCount = count
@@ -2393,52 +2365,12 @@ struct AlbumHeroDetailView: View {
         )
     }
 
-    /// 雙指縮放手勢：縮放期間主圖下方網格即時跟隨雙指縮放，雙指放開時才確認切換欄數並以更順暢緩慢的彈簧動畫過渡
     private var pinchZoomGesture: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                if pinchBaselineColumnCount == nil {
-                    pinchBaselineColumnCount = columnCount
-                }
-                let rawMag = value.magnification
-                let dampedScale: CGFloat
-                if rawMag >= 1.0 {
-                    dampedScale = 1.0 + min(rawMag - 1.0, 1.2) * 0.32
-                } else {
-                    dampedScale = 1.0 - min(1.0 - rawMag, 0.55) * 0.32
-                }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    livePinchScale = dampedScale
-                }
-            }
-            .onEnded { value in
-                defer { pinchBaselineColumnCount = nil }
-                let baseCount = pinchBaselineColumnCount ?? columnCount
-                let baseIndex = Self.supportedColumnCounts.firstIndex(of: baseCount) ?? (Self.supportedColumnCounts.count - 1)
-                let magnification = value.magnification
-                var targetIndex = baseIndex
-
-                if magnification > 1.58 {
-                    targetIndex = max(0, baseIndex - 2)
-                } else if magnification > 1.15 {
-                    targetIndex = max(0, baseIndex - 1)
-                } else if magnification < 0.62 {
-                    targetIndex = min(Self.supportedColumnCounts.count - 1, baseIndex + 2)
-                } else if magnification < 0.86 {
-                    targetIndex = min(Self.supportedColumnCounts.count - 1, baseIndex + 1)
-                }
-
-                let newCount = Self.supportedColumnCounts[targetIndex]
-                if newCount != columnCount {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                }
-                withAnimation(ChekiMotion.layoutCommit) {
-                    columnCount = newCount
-                    livePinchScale = 1.0
-                }
-            }
+        GridPinchZoom.gesture(
+            columnCount: $columnCount,
+            liveScale: $livePinchScale,
+            baseline: $pinchBaselineColumnCount
+        )
     }
 
     private var heroHeaderView: some View {

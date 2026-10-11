@@ -42,8 +42,8 @@
 | `ChromeCapsuleButton` | 膠囊鈕（日期、規格、確認等） | 高度 `ChromeMetrics.circle`，圓角＝高度／2 |
 | `CloseToolbarButton` | 取消／關閉，永遠是 `xmark` 圖示 | 見 §5 |
 | `ConfirmToolbarButton` | 完成／確認，永遠是 `checkmark` 圖示 | 見 §5 |
-| `ChekiMotion` | 動畫常數 | 見 §6 |
-| `GridPinchZoom` | 格狀縮放手勢＋即時跟手狀態 | 見 §7 |
+| `ChekiMotion` | 動畫常數 | 見 §6。已建立於 `ChekiMotion.swift` |
+| `GridPinchZoom` | 格狀縮放手勢＋即時跟手狀態 | 見 §7。已建立於 `GridPinchZoom.swift`，全部頁與成員頁已接上 |
 
 ### 2.2 現況：待合併的重複實作（登記於 §9）
 
@@ -192,7 +192,7 @@
 | A6 | 相機：閃光燈關／開僅以 `white.opacity(0.55)` vs `white` 區分，看不出已開啟；九宮格同樣只改透明度；頂部圖示 34 pt、非玻璃 | 關閉為白、自動／開啟為黃；九宮格與曝光已調整為黃。iPhone 12 mini 實測閃光燈、九宮格、關閉皆 44×44 且同一水平線 | ✅ Task 6.6.4 |
 | A7 | 單張檢視返回鈕 36/30 pt（橫向縮小）、與工作台／相冊不同 | 返回與更多改為 44 pt，橫向不再縮小。iPhone 12 mini 實測返回與更多皆 44×44 且同一水平線；底部分享與刪除同為 44×44 | ✅ Task 6.6.5 |
 | A8 | 選取模式底部列圓鈕 48 pt，與其他 chrome 44 pt 不同 | 分享與刪除改為 `ChromeMetrics.circle`。iPhone 12 mini 實測皆 44×44 且同一水平線 | ✅ Task 6.6.5 |
-| A9 | 全部頁縮放：門檻觸發即時切欄，非跟手 | `LibraryView.swift` ~541–573 | 6.6.7 |
+| A9 | 全部頁縮放：門檻觸發即時切欄，非跟手 | 全部頁與成員頁皆由 `GridPinchZoom` 驅動：跟手 `scaleEffect`，放開才以 `layoutCommit` 切欄。iPhone 12 mini 實測預設 3 欄，放大放開後為 1 欄 | ✅ Task 6.6.7 |
 | A10 | 相冊頁（團體／成員封面磚）不支援縮放 | `LibraryView.swift` `AlbumsRootView` ~837 起 | 6.6.8 |
 | A11 | 動畫參數散寫（`0.3/0.82`、`0.32/0.82`、`0.50/0.86`、`0.22` 等） | 收斂至 `ChekiMotion.toggle`／`small`／`layoutCommit`。減少動態效果時改 `.easeInOut(0.15)`。稽核後 `spring`／`snappy` 只出現在 `ChekiMotion.swift` | ✅ Task 6.6.6 |
 

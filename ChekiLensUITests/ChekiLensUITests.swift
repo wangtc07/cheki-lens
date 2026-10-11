@@ -275,4 +275,24 @@ final class ChekiLensUITests: XCTestCase {
 
         XCTAssertTrue(select.waitForExistence(timeout: 30), "歸檔後典藏庫仍沒有照片")
     }
+
+    /// Task 6.6.7：全部頁雙指放開後才改欄數。預設 3 欄，放大後變少。
+    @MainActor
+    func testLibraryPinchCommitsColumnCountOnRelease() throws {
+        let app = launchLibraryApp()
+        let grid = app.descendants(matching: .any)["chrome.library.grid"]
+        XCTAssertTrue(grid.waitForExistence(timeout: 12), "找不到全部頁格狀。\(app.debugDescription)")
+        XCTAssertEqual(grid.value as? String, "3", "預設應為 3 欄，實際 \(String(describing: grid.value))")
+        saveAuditScreenshot(app, name: "task_6_6_7_before")
+
+        grid.pinch(withScale: 2.4, velocity: 1.5)
+        let fewer = NSPredicate(format: "value == '1' OR value == '2'")
+        let committed = XCTNSPredicateExpectation(predicate: fewer, object: grid)
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [committed], timeout: 4),
+            .completed,
+            "放開後欄數應減少，實際 \(String(describing: grid.value))"
+        )
+        saveAuditScreenshot(app, name: "task_6_6_7_after")
+    }
 }
