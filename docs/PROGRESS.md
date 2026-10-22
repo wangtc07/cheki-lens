@@ -10,9 +10,9 @@
 - **最後更新時間**：2026-10-22
 - **當前所屬階段**：Phase 6.7 — 系統相簿初始批次導入 (System Album Batch Import)
 - **當前分支**：`main`
-- **當前進行中任務**：已完成 **Task 6.7.2**（`SystemAlbumSelectionSheet` 系統資料夾與相簿階層式挑選介面，包含每本相簿獨立「邊緣偵測」開關與全選控制）。
-- **最新穩定 Git Commit**：feat(import): 完成 Task 6.7.2 系統資料夾與相簿階層式挑選介面及獨立邊緣偵測開關
-- **下一動執行指示**：執行 **Task 6.7.3**（實作 `StagingImportShelfView` 工作台團體與成員卡片展示、卡片內相片讀入進度、支援關閉邊緣偵測時保留原圖並執行長寬比判定與 OCR、以及批次圈選成員歸類團體）。開工前先讀 `docs/PROGRESS.md` 與 `docs/UI_AGENT_GUIDELINES.md`。
+- **當前進行中任務**：已完成 **Task 6.7.3**（`StagingImportShelfView` 工作台團體與成員卡片展示、卡片內相片讀入進度、支援關閉邊緣偵測時保留原圖並執行長寬比判定與 OCR、以及批次圈選成員歸類團體）。
+- **最新穩定 Git Commit**：feat(import): 完成 Task 6.7.3 工作台團體與成員卡片展示、背景讀入進度與批次歸類團體
+- **下一動執行指示**：執行 **Task 6.7.4**（整合 `BatchPairingView` 供成員卡片點入深層編輯：點入讀入完成的成員卡片檢視所有照片預覽、手動拖曳配對背面、剔除雜圖與調整規格／日期）。開工前先讀 `docs/PROGRESS.md` 與 `docs/UI_AGENT_GUIDELINES.md`。
 
 ---
 
@@ -359,7 +359,7 @@
 
 - [x] **Task 6.7.1**: 實作 `SystemAlbumExplorerService`（取得 iOS 系統資料夾與相簿階層樹狀結構、讀取相簿縮圖與原圖封包、重複 Asset 檢驗、同名正規化比對、以及關閉邊緣偵測時的長寬比規格推斷；6 項單元測試全數通過）
 - [x] **Task 6.7.2**: 實作 `SystemAlbumSelectionSheet`（步驟 1：資料夾與相簿階層式挑選介面、三態資料夾全選／部分選取狀態機 `SystemAlbumSelectionState`、包含每本相簿／資料夾／全域獨立「邊緣偵測」開關與搜尋過濾；6 項單元測試全數通過）
-- [ ] **Task 6.7.3**: 實作 `StagingImportShelfView`（步驟 2：工作台團體與成員卡片展示、卡片內相片讀入進度、支援關閉邊緣偵測時保留原圖並執行長寬比判定與 OCR、以及批次圈選成員歸類團體）
+- [x] **Task 6.7.3**: 實作 `StagingImportShelfView`（步驟 2：工作台團體與成員卡片展示、卡片內相片讀入進度狀態機 `StagingCardLoadPhase`、支援關閉邊緣偵測時保留原圖並執行長寬比判定與 OCR 之 `StagingAlbumPhotoProcessor`、以及批次圈選成員歸類團體與重新命名；5 項單元測試全數通過）
 - [ ] **Task 6.7.4**: 整合 `BatchPairingView` 供成員卡片點入深層編輯（步驟 3：點入讀入完成的成員卡片檢視所有照片預覽、手動拖曳配對背面、剔除雜圖與調整規格／日期）
 - [ ] **Task 6.7.5**: 實作 `AlbumImportCommitEngine`（步驟 4：最終確認正式匯入，自動合併既有同名團體與成員、略過已匯入的重複相片 Asset ID、寫入 SwiftData 並顯示結果摘要）
 - [ ] **Task 6.7.6**: 掛載全處進入點（Onboarding 第 3 頁完成後引導提示、相簿庫空狀態按鈕、相簿頁與設定頁常駐匯入入口）
