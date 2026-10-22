@@ -903,6 +903,54 @@ private struct AlbumDragSelectOverlay: View {
     }
 }
 
+@available(iOS 18.0, *)
+private struct AlbumScrollTrackingModifier: ViewModifier {
+    let mode: AlbumHierarchyMode
+    @Binding var groupsSegmentHidden: Bool
+    @Binding var membersSegmentHidden: Bool
+    @State private var groupScrollPosition = ScrollPosition(edge: .top)
+    @State private var memberScrollPosition = ScrollPosition(edge: .top)
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition(mode == .groups ? $groupScrollPosition : $memberScrollPosition)
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top
+            } action: { _, offset in
+                let hidden = offset > 40
+                let shown = offset <= 2
+                guard hidden || shown else { return }
+                switch mode {
+                case .groups where groupsSegmentHidden != hidden:
+                    groupsSegmentHidden = hidden
+                case .members where membersSegmentHidden != hidden:
+                    membersSegmentHidden = hidden
+                default:
+                    break
+                }
+            }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    fileprivate func trackAlbumScroll(
+        mode: AlbumHierarchyMode,
+        groupsSegmentHidden: Binding<Bool>,
+        membersSegmentHidden: Binding<Bool>
+    ) -> some View {
+        if #available(iOS 18.0, *) {
+            modifier(AlbumScrollTrackingModifier(
+                mode: mode,
+                groupsSegmentHidden: groupsSegmentHidden,
+                membersSegmentHidden: membersSegmentHidden
+            ))
+        } else {
+            self
+        }
+    }
+}
+
 // MARK: - 2. AlbumsRootView (底部左側 Tab 2：「相冊」— 仿照 Apple 原生相簿設計)
 
 /// Apple 原生相簿風格的「相冊」視圖
@@ -930,8 +978,6 @@ struct AlbumsRootView: View {
     @State private var pendingDeletion: AlbumPendingDeletion?
     @State private var groupsSegmentHidden: Bool = false
     @State private var membersSegmentHidden: Bool = false
-    @State private var groupScrollPosition = ScrollPosition(edge: .top)
-    @State private var memberScrollPosition = ScrollPosition(edge: .top)
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingSystemAlbumBatchImport: Bool = false
@@ -1391,22 +1437,11 @@ struct AlbumsRootView: View {
                 AlbumDragFloatCard(model: floating)
             }
         }
-        .scrollPosition(mode == .groups ? $groupScrollPosition : $memberScrollPosition)
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            geometry.contentOffset.y + geometry.contentInsets.top
-        } action: { _, offset in
-            let hidden = offset > 40
-            let shown = offset <= 2
-            guard hidden || shown else { return }
-            switch mode {
-            case .groups where groupsSegmentHidden != hidden:
-                groupsSegmentHidden = hidden
-            case .members where membersSegmentHidden != hidden:
-                membersSegmentHidden = hidden
-            default:
-                break
-            }
-        }
+        .trackAlbumScroll(
+            mode: mode,
+            groupsSegmentHidden: $groupsSegmentHidden,
+            membersSegmentHidden: $membersSegmentHidden
+        )
         .gridPinchGesture(enabled: displayMode == .grid && !isSelectingAlbums, pinchZoomGesture)
     }
 

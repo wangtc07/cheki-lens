@@ -7,11 +7,11 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-- **最後更新時間**：2026-10-22
-- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.2 全數完成）
+- **最後更新時間**：2026-10-23
+- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.2 完成，已支援 iPadOS 17.7 / iOS 17.0+ 部署）
 - **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：已完成 **Task 7.2.2**（升級 `ModelContainerProvider.swift`，支援依據 Pro 與偏好動態切換本機 Store 與 CloudKit Store、失敗優雅降級保護，以及跨 Store 資料合併遷移引擎 `migrateData`；Phase 7 累計 22 項單元測試全數通過）。
-- **最新穩定 Git Commit**：feat(store): 完成 Task 7.2.2 升級 ModelContainerProvider 動態雙模式切換與跨 Store 遷移引擎
+- **當前進行中任務**：完成 iPadOS 17.7 (iOS 17.0+) 部署與雙版本相容適配（`IPHONEOS_DEPLOYMENT_TARGET = 17.0`、`ContentView` `Tab` 與 `tabItem` 降級適配、`LibraryView` `ScrollPosition` 條件修飾器；累計 73 項單元測試全數通過）。
+- **最新穩定 Git Commit**：feat(compat): 支援 iPadOS/iOS 17.0+ 部署與 TabView/Scroll 雙版本相容
 - **下一動執行指示**：執行 **Task 7.3.1**（實作 `ChekiImageCacheManager.swift`，支援輕量縮圖生成、本機快取目錄存儲、LRU 空間管理與一鍵清除暫存快取）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
@@ -377,6 +377,7 @@
 #### 階段 7.2：雙模式 ModelContainer 與動態切換引擎
 - [x] **Task 7.2.1**: 封裝 `CloudKitSyncManager.swift`，管理 iCloud 帳號狀態監測 (`CKContainer.accountStatus`)、純 Swift Concurrency 監聽、同步狀態機（閒置/同步中/成功/錯誤）與最後同步時間戳記（3 項單元測試全數通過）。
 - [x] **Task 7.2.2**: 升級 `ModelContainerProvider.swift`，支援根據 Pro 資格與使用者開關動態切換本機 Store (`.none`) 與 CloudKit Store (`.automatic`)、失敗優雅降級保護，並實作既有本機 SQLite 資料自動遷移合併至 CloudKit 容器（2 項單元測試全數通過）。
+- [x] **Task 7.2.3**: 支援 iPadOS 17.7 與 iOS 17.0+ 部署相容（調整 Deployment Target 至 17.0，為 `ContentView` 與 `LibraryView` 引入 `#available(iOS 18.0, *)` 雙版本條件分支，全量單元測試 73 項全數通過）。
 
 #### 階段 7.3：雙軌圖片管理與隨選快取管線
 - [ ] **Task 7.3.1**: 實作 `ChekiImageCacheManager.swift`（支援輕量縮圖生成、本機快取目錄存儲、LRU 空間管理與一鍵清除暫存快取）。
