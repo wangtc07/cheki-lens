@@ -710,6 +710,7 @@ struct StagingImportShelfView: View {
     @State private var inputMemberName: String = ""
     @State private var targetOldGroupName: String = ""
     @State private var targetCardIDForAction: String = ""
+    @State private var inspectingCard: StagingMemberAlbumCard? = nil
 
     private let columns = [
         GridItem(.flexible(), spacing: 14),
@@ -809,6 +810,16 @@ struct StagingImportShelfView: View {
                     inputMemberName = ""
                     targetCardIDForAction = ""
                 }
+            }
+            .fullScreenCover(item: $inspectingCard) { card in
+                BatchPairingView(
+                    initialPreloadedSlots: card.slots,
+                    stagingHeaderTitle: card.memberName,
+                    stagingGroupTitle: card.groupName,
+                    onCompleteStagingEdit: { updatedSlots in
+                        state.updateCardSlots(card.id, slots: updatedSlots)
+                    }
+                )
             }
         }
         .task {
@@ -939,6 +950,7 @@ struct StagingImportShelfView: View {
                         },
                         onTapCard: {
                             if card.isReadyForInspection {
+                                inspectingCard = card
                                 onInspectCard?(card)
                             }
                         },

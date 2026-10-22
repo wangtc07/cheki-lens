@@ -277,6 +277,10 @@ struct BatchPairingView: View {
     let initialPickerItems: [PhotosPickerItem]
     let initialSessionPhotos: [CameraSessionPhoto]
     let defaultMember: IdolMember?
+    let initialPreloadedSlots: [ChekiPairingSlot]
+    let stagingHeaderTitle: String?
+    let stagingGroupTitle: String?
+    let onCompleteStagingEdit: (([ChekiPairingSlot]) -> Void)?
 
     @State private var pairingMode: BatchPairingMode = .autoPair
     @State private var allPhotos: [StagingChekiPhoto] = []
@@ -331,15 +335,30 @@ struct BatchPairingView: View {
     init(
         initialPickerItems: [PhotosPickerItem] = [],
         initialSessionPhotos: [CameraSessionPhoto] = [],
-        defaultMember: IdolMember? = nil
+        defaultMember: IdolMember? = nil,
+        initialPreloadedSlots: [ChekiPairingSlot] = [],
+        initialPairingMode: BatchPairingMode? = nil,
+        stagingHeaderTitle: String? = nil,
+        stagingGroupTitle: String? = nil,
+        onCompleteStagingEdit: (([ChekiPairingSlot]) -> Void)? = nil
     ) {
         self.initialPickerItems = initialPickerItems
         self.initialSessionPhotos = initialSessionPhotos
         self.defaultMember = defaultMember
+        self.initialPreloadedSlots = initialPreloadedSlots
+        self.stagingHeaderTitle = stagingHeaderTitle
+        self.stagingGroupTitle = stagingGroupTitle
+        self.onCompleteStagingEdit = onCompleteStagingEdit
+
         let members = defaultMember.map { [$0] } ?? []
         _defaultFallbackMember = State(initialValue: defaultMember)
         _selectedTargetMembers = State(initialValue: members)
-        if !initialSessionPhotos.isEmpty {
+
+        if !initialPreloadedSlots.isEmpty || onCompleteStagingEdit != nil {
+            _pairingMode = State(initialValue: initialPairingMode ?? .manualPair)
+            _slots = State(initialValue: initialPreloadedSlots)
+            _allPhotos = State(initialValue: StagingSlotDeckReducer.extractOrderedPhotos(from: initialPreloadedSlots))
+        } else if !initialSessionPhotos.isEmpty {
             let seeded = Self.sessionPlaceholderPhotos(initialSessionPhotos, members: members)
             _allPhotos = State(initialValue: seeded.photos)
             _photoMemberAssignment = State(initialValue: seeded.assignments)
@@ -461,7 +480,11 @@ struct BatchPairingView: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(L10n.tr("批次匯入", "一括取り込み"))
+            .navigationTitle(
+                (onCompleteStagingEdit != nil && stagingHeaderTitle != nil)
+                    ? stagingHeaderTitle!
+                    : L10n.tr("批次匯入", "一括取り込み")
+            )
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -473,53 +496,60 @@ struct BatchPairingView: View {
 
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
-                        PhotosPicker(
-                            selection: $additionalPickerItems,
-                            maxSelectionCount: nil,
-                            matching: .images,
-                            preferredItemEncoding: .automatic,
-                            photoLibrary: .shared()
-                        ) {
-                            Image(systemName: "plus")
-                        }
-                        .disabled(isProcessingBatch)
-                        .accessibilityLabel(L10n.tr("相簿", "アルバム"))
-
-                        Menu {
-                            if totalWarningCount > 0 {
-                                Button {
-                                    withAnimation(ChekiMotion.toggle) {
-                                        resolveAllWarningsAutomatically()
-                                    }
-                                } label: {
-                                    Label(L10n.tr("修正全部警示", "すべての警告を修正"), systemImage: "wand.and.stars")
-                                }
+                        if let onCompleteStagingEdit {
+                            ConfirmToolbarButton(accessibilityIdentifier: "chrome.pairing.stagingConfirm") {
+                                onCompleteStagingEdit(slots)
+                                dismiss()
                             }
-
-                            if !allPhotos.isEmpty {
-                                Divider()
-                                Button(role: .destructive) {
-                                    withAnimation(ChekiMotion.toggle) {
-                                        allPhotos.removeAll()
-                                        slots.removeAll()
-                                        photoMemberAssignment.removeAll()
-                                        selectedFirstSlotID = nil
-                                        isSelectingPhotosToApply = false
-                                        selectedSlotIDsForApply.removeAll()
-                                    }
-                                } label: {
-                                    Label(L10n.tr("清空", "クリア"), systemImage: "trash")
-                                }
+                        } else {
+                            PhotosPicker(
+                                selection: $additionalPickerItems,
+                                maxSelectionCount: nil,
+                                matching: .images,
+                                preferredItemEncoding: .automatic,
+                                photoLibrary: .shared()
+                            ) {
+                                Image(systemName: "plus")
                             }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
+                            .disabled(isProcessingBatch)
+                            .accessibilityLabel(L10n.tr("相簿", "アルバム"))
+
+                            Menu {
+                                if totalWarningCount > 0 {
+                                    Button {
+                                        withAnimation(ChekiMotion.toggle) {
+                                            resolveAllWarningsAutomatically()
+                                        }
+                                    } label: {
+                                        Label(L10n.tr("修正全部警示", "すべての警告を修正"), systemImage: "wand.and.stars")
+                                    }
+                                }
+
+                                if !allPhotos.isEmpty {
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        withAnimation(ChekiMotion.toggle) {
+                                            allPhotos.removeAll()
+                                            slots.removeAll()
+                                            photoMemberAssignment.removeAll()
+                                            selectedFirstSlotID = nil
+                                            isSelectingPhotosToApply = false
+                                            selectedSlotIDsForApply.removeAll()
+                                        }
+                                    } label: {
+                                        Label(L10n.tr("清空", "クリア"), systemImage: "trash")
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                            }
+                            .disabled(isProcessingBatch || allPhotos.isEmpty)
                         }
-                        .disabled(isProcessingBatch || allPhotos.isEmpty)
                     }
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if !slots.isEmpty {
+                if !slots.isEmpty || onCompleteStagingEdit != nil {
                     bottomActionToolbar
                 }
             }
@@ -550,6 +580,9 @@ struct BatchPairingView: View {
                     hasInitialized = true
                     defaultFallbackMember = defaultMember
                     selectedTargetMembers = defaultMember.map { [$0] } ?? []
+                }
+                if onCompleteStagingEdit != nil || !initialPreloadedSlots.isEmpty {
+                    return
                 }
                 if !initialSessionPhotos.isEmpty {
                     await appendSessionPhotos(initialSessionPhotos)
@@ -657,8 +690,12 @@ struct BatchPairingView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    // 1. 多人歸檔成員設定卡（多層選擇 Multiple Select + 全部套用 / 選擇套用）
-                    multiMemberAndFormatHeaderCard
+                    // 1. 多人歸檔成員設定卡（或暫存匯入成員摘要卡）
+                    if onCompleteStagingEdit != nil {
+                        compactStagingSummaryHeaderCard
+                    } else {
+                        multiMemberAndFormatHeaderCard
+                    }
 
                     // 2. Vision 防呆警示橫幅（若有雙正面或正反顛倒）
                     if totalWarningCount > 0 {
@@ -720,6 +757,36 @@ struct BatchPairingView: View {
     }
 
     // MARK: - 2. 多層多選歸檔成員設定卡 (Hierarchical Multiple-Select + Apply All / Select to Apply)
+
+    private var compactStagingSummaryHeaderCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.blue)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stagingHeaderTitle ?? L10n.tr("成員相簿", "メンバーアルバム"))
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+
+                    if let group = stagingGroupTitle, !group.isEmpty {
+                        Text(group)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+            }
+
+            Text(L10n.tr("拖曳或點選相片可配對正反面，亦可點擊右上角調整規格與日期", "ドラッグまたはタップで表裏ペアリング。右上タップでサイズと日付を変更可能"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
 
     private var multiMemberAndFormatHeaderCard: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -953,8 +1020,9 @@ struct BatchPairingView: View {
                 slotContextMenu(for: slot)
             }
 
-            // 下方：每張（或每組）拍立得獨立的「多層多選歸檔成員膠囊」
-            perSlotMemberSelectorPill(for: slot)
+            if onCompleteStagingEdit == nil {
+                perSlotMemberSelectorPill(for: slot)
+            }
         }
     }
 
@@ -1236,6 +1304,20 @@ struct BatchPairingView: View {
                     .padding(.bottom, 7)
                 }
             }
+        }
+        .draggable(slot.id.uuidString)
+        .dropDestination(for: String.self) { items, _ in
+            guard let item = items.first, let draggedUUID = UUID(uuidString: item) else {
+                return false
+            }
+            withAnimation(ChekiMotion.toggle) {
+                slots = StagingSlotDeckReducer.pairSlots(
+                    frontSlotID: slot.id,
+                    backSlotID: draggedUUID,
+                    in: slots
+                )
+            }
+            return true
         }
     }
 
@@ -2001,17 +2083,23 @@ struct BatchPairingView: View {
     private var emptyWorkbenchView: some View {
         ContentUnavailableView {
             Label(L10n.tr("尚無照片", "写真なし"), systemImage: "photo.on.rectangle.angled")
-        } actions: {
-            PhotosPicker(
-                selection: $additionalPickerItems,
-                maxSelectionCount: nil,
-                matching: .images,
-                preferredItemEncoding: .automatic,
-                photoLibrary: .shared()
-            ) {
-                Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
+        } description: {
+            if onCompleteStagingEdit != nil {
+                Text(L10n.tr("此成員相簿中的相片已被清空", "このメンバーアルバムの写真はすべて削除されました"))
             }
-            .buttonStyle(.borderedProminent)
+        } actions: {
+            if onCompleteStagingEdit == nil {
+                PhotosPicker(
+                    selection: $additionalPickerItems,
+                    maxSelectionCount: nil,
+                    matching: .images,
+                    preferredItemEncoding: .automatic,
+                    photoLibrary: .shared()
+                ) {
+                    Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
+                }
+                .buttonStyle(.borderedProminent)
+            }
         }
     }
 
@@ -2038,6 +2126,11 @@ struct BatchPairingView: View {
                     Label(L10n.tr("\(totalWarningCount) 項待確認", "\(totalWarningCount) 件要確認"), systemImage: "exclamationmark.triangle.fill")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
+                } else if let stagingHeaderTitle, onCompleteStagingEdit != nil {
+                    Text(stagingHeaderTitle)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 } else {
                     Text(assignedMembersSummary)
                         .font(.caption.weight(.medium))
@@ -2079,6 +2172,20 @@ struct BatchPairingView: View {
                     .buttonStyle(.plain)
                     .disabled(selectedSlotIDsForApply.isEmpty)
                 }
+            } else if let onCompleteStagingEdit {
+                Button {
+                    onCompleteStagingEdit(slots)
+                    dismiss()
+                } label: {
+                    Text(L10n.tr("完成編輯 · \(slots.count) 張", "編集完了 · \(slots.count) 枚"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8.5)
+                        .background(Color.blue, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("chrome.pairing.stagingBottomConfirm")
             } else {
                 Button {
                     Task { await executeBatchProcessing() }
@@ -2391,29 +2498,18 @@ struct BatchPairingView: View {
 
     /// 解除指定 Slot 的正反面綁定，拆回兩張獨立單面拍立得
     private func unpairSlot(id: UUID) {
-        guard let index = slots.firstIndex(where: { $0.id == id }),
-              let backPhoto = slots[index].backPhoto else { return }
-
         hasSeenCoachMark = true
-        let frontPhoto = slots[index].frontPhoto
-        let currentMembers = slots[index].assignedMembers
-        let backMembers = photoMemberAssignment[backPhoto.id] ?? currentMembers
-
-        let slotA = ChekiPairingSlot(id: UUID(), frontPhoto: frontPhoto, backPhoto: nil, assignedMembers: currentMembers)
-        let slotB = ChekiPairingSlot(id: UUID(), frontPhoto: backPhoto, backPhoto: nil, assignedMembers: backMembers)
-
-        slots.replaceSubrange(index...index, with: [slotA, slotB])
+        slots = StagingSlotDeckReducer.unpairSlot(
+            slotID: id,
+            in: slots,
+            photoMemberAssignment: photoMemberAssignment
+        )
     }
 
     /// 對調指定 Slot 的正反面順序
     private func swapSlotSides(id: UUID) {
-        guard let index = slots.firstIndex(where: { $0.id == id }),
-              let backPhoto = slots[index].backPhoto else { return }
-
         hasSeenCoachMark = true
-        let oldFront = slots[index].frontPhoto
-        slots[index].frontPhoto = backPhoto
-        slots[index].backPhoto = oldFront
+        slots = StagingSlotDeckReducer.swapSlotSides(slotID: id, in: slots)
     }
 
     /// 移除指定 Slot
@@ -2422,8 +2518,8 @@ struct BatchPairingView: View {
             selectedFirstSlotID = nil
         }
         selectedSlotIDsForApply.remove(id)
-        slots.removeAll { $0.id == id }
-        allPhotos = collectAllPhotosInOrder()
+        slots = StagingSlotDeckReducer.removeSlot(slotID: id, in: slots)
+        allPhotos = StagingSlotDeckReducer.extractOrderedPhotos(from: slots)
     }
 
     /// 手動點擊兩張單面相片的外框白色區域進行配對（第 1 下指定正面，第 2 下指定背面）
@@ -2445,29 +2541,12 @@ struct BatchPairingView: View {
                 return
             }
 
-            guard let firstIndex = slots.firstIndex(where: { $0.id == firstID }),
-                  let secondIndex = slots.firstIndex(where: { $0.id == tappedSlot.id }) else {
-                selectedFirstSlotID = nil
-                return
-            }
-
-            let frontPhoto = slots[firstIndex].frontPhoto
-            let backPhoto = slots[secondIndex].frontPhoto
-            let members = !slots[firstIndex].assignedMembers.isEmpty
-                ? slots[firstIndex].assignedMembers
-                : slots[secondIndex].assignedMembers
-            let combinedSlot = ChekiPairingSlot(
-                id: UUID(),
-                frontPhoto: frontPhoto,
-                backPhoto: backPhoto,
-                assignedMembers: members
-            )
-
             withAnimation(ChekiMotion.toggle) {
-                let minIdx = min(firstIndex, secondIndex)
-                let maxIdx = max(firstIndex, secondIndex)
-                slots.remove(at: maxIdx)
-                slots[minIdx] = combinedSlot
+                slots = StagingSlotDeckReducer.pairSlots(
+                    frontSlotID: firstID,
+                    backSlotID: tappedSlot.id,
+                    in: slots
+                )
                 selectedFirstSlotID = nil
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -2968,12 +3047,7 @@ struct BatchPairingView: View {
         let targetIDs = [frontID, backID].compactMap { $0 }
 
         withAnimation(ChekiMotion.toggle) {
-            slots[slotIdx].frontPhoto.resolvedFilmFormat = concrete
-            slots[slotIdx].frontPhoto.hasManuallyModifiedFormat = true
-            if slots[slotIdx].backPhoto != nil {
-                slots[slotIdx].backPhoto?.resolvedFilmFormat = concrete
-                slots[slotIdx].backPhoto?.hasManuallyModifiedFormat = true
-            }
+            slots = StagingSlotDeckReducer.updateSlotFormat(slotID: slotID, format: concrete, in: slots)
             for id in targetIDs {
                 if let idx = allPhotos.firstIndex(where: { $0.id == id }) {
                     allPhotos[idx].resolvedFilmFormat = concrete
@@ -3051,12 +3125,7 @@ struct BatchPairingView: View {
         let backID = slots[slotIdx].backPhoto?.id
 
         withAnimation(ChekiMotion.toggle) {
-            slots[slotIdx].frontPhoto.detectedOCRDate = date
-            slots[slotIdx].frontPhoto.hasManuallyModifiedDate = true
-            if slots[slotIdx].backPhoto != nil {
-                slots[slotIdx].backPhoto?.detectedOCRDate = date
-                slots[slotIdx].backPhoto?.hasManuallyModifiedDate = true
-            }
+            slots = StagingSlotDeckReducer.updateSlotDate(slotID: slotID, date: date, in: slots)
             if let fIdx = allPhotos.firstIndex(where: { $0.id == frontID }) {
                 allPhotos[fIdx].detectedOCRDate = date
                 allPhotos[fIdx].hasManuallyModifiedDate = true
