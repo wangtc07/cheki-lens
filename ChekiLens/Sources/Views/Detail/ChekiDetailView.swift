@@ -696,6 +696,8 @@ struct ChekiDetailView: View {
         let imgSize: CGSize
         if let activeData, let uiImg = ChekiDetailDecodedImageCache.image(for: activeData), uiImg.size.width > 0, uiImg.size.height > 0 {
             imgSize = uiImg.size
+        } else if let cached = ChekiCloudAssetService.shared.synchronousImage(for: pageItem, side: .front), cached.size.width > 0 {
+            imgSize = cached.size
         } else {
             imgSize = CGSize(width: 540, height: 860)
         }
@@ -731,6 +733,8 @@ struct ChekiDetailView: View {
             let imgSize: CGSize
             if let activeData, let uiImg = ChekiDetailDecodedImageCache.image(for: activeData), uiImg.size.width > 0, uiImg.size.height > 0 {
                 imgSize = uiImg.size
+            } else if let cached = ChekiCloudAssetService.shared.synchronousImage(for: pageItem, side: .front), cached.size.width > 0 {
+                imgSize = cached.size
             } else {
                 imgSize = CGSize(width: 540, height: 860)
             }
@@ -959,6 +963,154 @@ struct ChekiDetailView: View {
         )
     }
 
+// MARK: - ChekiDetailCardFaceRenderer (雙軌非同步載入器與漸進式過渡)
+
+private struct ChekiDetailCardFaceRenderer<
+    WBOverlay: View,
+    GesturesContent: View,
+    FlipOverlay: View,
+    PlaceholderContent: View
+>: View {
+    let item: ChekiItem
+    let side: ChekiCardSide
+    let isCurrent: Bool
+    let availableSize: CGSize
+    let overrideCardSize: CGSize?
+    let effectiveImageScale: CGFloat
+    let cardCornerRadius: CGFloat
+    let isLandscape: Bool
+    let isSquareCroppedForGrid: Bool
+
+    @ViewBuilder let whiteBalanceOverlay: (CGSize) -> WBOverlay
+    @ViewBuilder let applyGestures: (AnyView, CGSize) -> GesturesContent
+    @ViewBuilder let flipButton: () -> FlipOverlay
+    @ViewBuilder let placeholder: () -> PlaceholderContent
+
+    @State private var displayedImage: UIImage?
+    @State private var isCloudResolving: Bool = false
+
+    var body: some View {
+        Group {
+            if let image = displayedImage {
+                let imgSize = image.size.width > 0 && image.size.height > 0 ? image.size : CGSize(width: 540, height: 860)
+                let cardSize = overrideCardSize ?? fittedCardSize(for: imgSize, in: availableSize)
+
+                let content = Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .scaleEffect(effectiveImageScale)
+                    .frame(width: cardSize.width, height: cardSize.height)
+                    .overlay {
+                        ChekiWatermarkOverlayView(compact: isSquareCroppedForGrid)
+                            .allowsHitTesting(false)
+                    }
+                    .overlay {
+                        whiteBalanceOverlay(cardSize)
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if isCloudResolving {
+                            HStack(spacing: 4) {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .tint(.white)
+                                Text("iCloud")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3.5)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .shadow(color: .black.opacity(0.18), radius: 3, x: 0, y: 1)
+                            .padding(8)
+                            .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+
+                applyGestures(AnyView(content), cardSize)
+                    .overlay(alignment: .topTrailing) {
+                        flipButton()
+                    }
+            } else if isCloudResolving {
+                let cardSize = overrideCardSize ?? fittedCardSize(for: CGSize(width: 540, height: 860), in: availableSize)
+                let loadingContent = RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                    .fill(Color(white: 0.15))
+                    .frame(width: cardSize.width, height: cardSize.height)
+                    .overlay {
+                        VStack(spacing: 8) {
+                            ProgressView()
+                                .tint(.white)
+                            Text(L10n.tr("正在從 iCloud 載入...", "iCloudから読み込み中..."))
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    }
+
+                applyGestures(AnyView(loadingContent), cardSize)
+                    .overlay(alignment: .topTrailing) {
+                        flipButton()
+                    }
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: item.id) {
+            await loadCardImage()
+        }
+    }
+
+    private func fittedCardSize(for imageSize: CGSize, in available: CGSize) -> CGSize {
+        guard imageSize.width > 0, imageSize.height > 0 else {
+            return CGSize(width: min(available.width, 300), height: min(available.height, 460))
+        }
+        let scale = min(available.width / imageSize.width, available.height / imageSize.height)
+        return CGSize(
+            width: max(80, imageSize.width * scale),
+            height: max(80, imageSize.height * scale)
+        )
+    }
+
+    private func loadCardImage() async {
+        if let immediate = ChekiCloudAssetService.shared.synchronousImage(for: item, side: side) {
+            displayedImage = immediate
+        }
+
+        let needsResolve: Bool = {
+            switch side {
+            case .front: return item.frontImageData == nil
+            case .back: return item.backImageData == nil
+            case .originalFront: return item.originalFrontImageData == nil
+            case .originalBack: return item.originalBackImageData == nil
+            }
+        }()
+
+        guard needsResolve else { return }
+
+        if displayedImage == nil {
+            withAnimation(ChekiMotion.small) {
+                isCloudResolving = true
+            }
+        }
+
+        do {
+            if let resolved = try await ChekiCloudAssetService.shared.resolveImage(for: item, side: side) {
+                withAnimation(ChekiMotion.small) {
+                    displayedImage = resolved.image
+                    isCloudResolving = false
+                }
+            } else {
+                withAnimation(ChekiMotion.small) {
+                    isCloudResolving = false
+                }
+            }
+        } catch {
+            withAnimation(ChekiMotion.small) {
+                isCloudResolving = false
+            }
+        }
+    }
+}
+
     @ViewBuilder
     private func frontCardFace(
         for targetItem: ChekiItem,
@@ -971,57 +1123,59 @@ struct ChekiDetailView: View {
     ) -> some View {
         let baseInsetScale = CGFloat(1.0 - targetItem.borderInsetRatio * 1.4)
         let effectiveImageScale: CGFloat = isSquareCroppedForGrid ? 1.22 : baseInsetScale
-        if let data = targetItem.frontImageData,
-           let uiImage = ChekiDetailDecodedImageCache.image(for: data) {
-            let cardSize = overrideCardSize ?? fittedCardSize(for: uiImage.size, in: availableSize)
-            applyCardTapGestures(
-                to: Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFill()
-                    .scaleEffect(effectiveImageScale)
-                    .frame(width: cardSize.width, height: cardSize.height)
-                    .overlay {
-                        ChekiWatermarkOverlayView(compact: isSquareCroppedForGrid)
-                            .allowsHitTesting(false)
-                    }
-                    .overlay {
-                        whiteBalanceTargetMarkerOverlay(
-                            cardSize: cardSize,
-                            isCurrent: isCurrent,
-                            isBackside: false
-                        )
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)),
-                cardSize: cardSize,
-                insetScale: baseInsetScale,
-                isCurrent: isCurrent,
-                isBackside: false
-            )
-            .overlay(alignment: .topTrailing) {
+
+        ChekiDetailCardFaceRenderer(
+            item: targetItem,
+            side: .front,
+            isCurrent: isCurrent,
+            availableSize: availableSize,
+            overrideCardSize: overrideCardSize,
+            effectiveImageScale: effectiveImageScale,
+            cardCornerRadius: cardCornerRadius,
+            isLandscape: isLandscape,
+            isSquareCroppedForGrid: isSquareCroppedForGrid,
+            whiteBalanceOverlay: { cardSize in
+                whiteBalanceTargetMarkerOverlay(
+                    cardSize: cardSize,
+                    isCurrent: isCurrent,
+                    isBackside: false
+                )
+            },
+            applyGestures: { content, cardSize in
+                applyCardTapGestures(
+                    to: content,
+                    cardSize: cardSize,
+                    insetScale: baseInsetScale,
+                    isCurrent: isCurrent,
+                    isBackside: false
+                )
+            },
+            flipButton: {
                 cardTopRightFlipButton(
                     for: targetItem,
                     isCurrent: isCurrent,
                     isBackFace: false,
                     isLandscape: isLandscape
                 )
-            }
-        } else {
-            applyCardTapGestures(
-                to: placeholderCardFace(
-                    title: L10n.tr("無正面照片", "表面なし"),
-                    subtitle: "",
-                    availableSize: availableSize
+            },
+            placeholder: {
+                applyCardTapGestures(
+                    to: placeholderCardFace(
+                        title: L10n.tr("無正面照片", "表面なし"),
+                        subtitle: "",
+                        availableSize: availableSize
+                    )
                 )
-            )
-            .overlay(alignment: .topTrailing) {
-                cardTopRightFlipButton(
-                    for: targetItem,
-                    isCurrent: isCurrent,
-                    isBackFace: false,
-                    isLandscape: isLandscape
-                )
+                .overlay(alignment: .topTrailing) {
+                    cardTopRightFlipButton(
+                        for: targetItem,
+                        isCurrent: isCurrent,
+                        isBackFace: false,
+                        isLandscape: isLandscape
+                    )
+                }
             }
-        }
+        )
     }
 
     @ViewBuilder
@@ -1031,102 +1185,103 @@ struct ChekiDetailView: View {
         availableSize: CGSize,
         isLandscape: Bool
     ) -> some View {
-        if let backData = targetItem.backImageData,
-           let uiImage = ChekiDetailDecodedImageCache.image(for: backData) {
-            let cardSize = fittedCardSize(for: uiImage.size, in: availableSize)
-            applyCardTapGestures(
-                to: Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: cardSize.width, height: cardSize.height)
-                    .overlay {
-                        ChekiWatermarkOverlayView(compact: false)
-                            .allowsHitTesting(false)
-                    }
-                    .overlay {
-                        whiteBalanceTargetMarkerOverlay(
-                            cardSize: cardSize,
-                            isCurrent: isCurrent,
-                            isBackside: true
-                        )
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous)),
-                cardSize: cardSize,
-                insetScale: 1.0,
-                isCurrent: isCurrent,
-                isBackside: true
-            )
-            .overlay(alignment: .topTrailing) {
+        ChekiDetailCardFaceRenderer(
+            item: targetItem,
+            side: .back,
+            isCurrent: isCurrent,
+            availableSize: availableSize,
+            overrideCardSize: nil,
+            effectiveImageScale: 1.0,
+            cardCornerRadius: 10,
+            isLandscape: isLandscape,
+            isSquareCroppedForGrid: false,
+            whiteBalanceOverlay: { cardSize in
+                whiteBalanceTargetMarkerOverlay(
+                    cardSize: cardSize,
+                    isCurrent: isCurrent,
+                    isBackside: true
+                )
+            },
+            applyGestures: { content, cardSize in
+                applyCardTapGestures(
+                    to: content,
+                    cardSize: cardSize,
+                    insetScale: 1.0,
+                    isCurrent: isCurrent,
+                    isBackside: true
+                )
+            },
+            flipButton: {
                 cardTopRightFlipButton(
                     for: targetItem,
                     isCurrent: isCurrent,
                     isBackFace: true,
                     isLandscape: isLandscape
                 )
-            }
-        } else {
-            // 若此張拍立得尚無背面，提供原生引導卡直接從 App 內選取或從系統相簿補上背面，且支援雙擊卡片翻回正面
-            applyCardTapGestures(
-                to: VStack(spacing: 14) {
-                    Image(systemName: "rectangle.portrait.on.rectangle.portrait.angled")
-                        .font(.system(size: 36, weight: .light))
-                        .foregroundStyle(.white.opacity(0.75))
+            },
+            placeholder: {
+                applyCardTapGestures(
+                    to: VStack(spacing: 14) {
+                        Image(systemName: "rectangle.portrait.on.rectangle.portrait.angled")
+                            .font(.system(size: 36, weight: .light))
+                            .foregroundStyle(.white.opacity(0.75))
 
-                    VStack(spacing: 5) {
-                        Text(L10n.tr("尚無背面照片", "裏面なし"))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
+                        VStack(spacing: 5) {
+                            Text(L10n.tr("尚無背面照片", "裏面なし"))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
 
-                        Text(L10n.tr("雙擊卡片翻回正面", "ダブルタップで表面へ"))
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.68))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 16)
-                    }
-
-                    VStack(spacing: 8) {
-                        Button {
-                            showingInAppBacksidePicker = true
-                        } label: {
-                            Label(L10n.tr("App 內照片", "アプリ内の写真"), systemImage: "square.grid.2x2")
-                                .font(.caption.weight(.semibold))
-                                .frame(maxWidth: .infinity)
+                            Text(L10n.tr("雙擊卡片翻回正面", "ダブルタップで表面へ"))
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.68))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 16)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
 
-                        Button {
-                            isShowingBacksidePicker = true
-                        } label: {
-                            Label(L10n.tr("系統相簿", "写真アプリ"), systemImage: "photo.badge.plus")
-                                .font(.caption.weight(.medium))
-                                .frame(maxWidth: .infinity)
+                        VStack(spacing: 8) {
+                            Button {
+                                showingInAppBacksidePicker = true
+                            } label: {
+                                Label(L10n.tr("App 內照片", "アプリ内の写真"), systemImage: "square.grid.2x2")
+                                    .font(.caption.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+
+                            Button {
+                                isShowingBacksidePicker = true
+                            } label: {
+                                Label(L10n.tr("系統相簿", "写真アプリ"), systemImage: "photo.badge.plus")
+                                    .font(.caption.weight(.medium))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .tint(.white)
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .tint(.white)
+                        .padding(.horizontal, 20)
                     }
-                    .padding(.horizontal, 20)
+                    .frame(
+                        width: min(availableSize.width, min(availableSize.height * 0.65, 290)),
+                        height: min(availableSize.height, 440)
+                    )
+                    .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(.white.opacity(0.15), lineWidth: 1)
+                    )
+                )
+                .overlay(alignment: .topTrailing) {
+                    cardTopRightFlipButton(
+                        for: targetItem,
+                        isCurrent: isCurrent,
+                        isBackFace: true,
+                        isLandscape: isLandscape
+                    )
                 }
-                .frame(
-                    width: min(availableSize.width, min(availableSize.height * 0.65, 290)),
-                    height: min(availableSize.height, 440)
-                )
-                .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(.white.opacity(0.15), lineWidth: 1)
-                )
-            )
-            .overlay(alignment: .topTrailing) {
-                cardTopRightFlipButton(
-                    for: targetItem,
-                    isCurrent: isCurrent,
-                    isBackFace: true,
-                    isLandscape: isLandscape
-                )
             }
-        }
+        )
     }
 
     private func placeholderCardFace(title: String, subtitle: String, availableSize: CGSize) -> some View {
@@ -1283,8 +1438,7 @@ struct ChekiDetailView: View {
                             selectFilmstripItem(stripItem)
                         } label: {
                             ZStack(alignment: .bottomTrailing) {
-                                if let data = stripItem.frontImageData,
-                                   let uiImage = UIImage(data: data) {
+                                if let uiImage = ChekiImageCacheManager.shared.syncThumbnail(for: stripItem) ?? (stripItem.frontImageData.flatMap(UIImage.init)) {
                                     Image(uiImage: uiImage)
                                         .resizable()
                                         .scaledToFill()

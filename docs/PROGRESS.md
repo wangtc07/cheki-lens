@@ -8,11 +8,11 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-10-23
-- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.3 進行中）
+- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.3 全數完成）
 - **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：完成 **Task 7.3.2**（實作 `ChekiCloudAssetService.swift`，支援並行請求去重、軌道 1 零流量本機系統相簿直讀、軌道 2A/2B CloudKit 隨選下載與未開 iCloud 照片時自動寫入系統相簿；7 項單元測試全數通過，累計 86 項單元測試全數通過）。
-- **最新穩定 Git Commit**：feat(sync): 完成 Task 7.3.2 實作 ChekiCloudAssetService 雙軌資源解析與背景隨選管線
-- **下一動執行指示**：執行 **Task 7.3.3**（整合 `ChekiDetailView` 與相片加載元件，優先尋址本機系統相簿，Fallback 走 CloudKit 隨選快取，載入期間顯示平滑過渡動畫）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
+- **當前進行中任務**：完成 **Task 7.3.3**（整合 `ChekiDetailView` 雙軌非同步影像載入器 `ChekiDetailCardFaceRenderer`、底部底片條快取縮圖讀取與漸進式微過渡動畫；Phase 7 累計 86 項單元測試全數通過）。
+- **最新穩定 Git Commit**：feat(ui): 完成 Task 7.3.3 整合 ChekiDetailView 雙軌非同步載入器與漸進式過渡動畫
+- **下一動執行指示**：執行 **Task 7.4.1**（在 `ChekiItem` 實作已刪除拍立得 30 天自動過期硬刪除管線，並在圖庫查詢中支援軟刪除篩選）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
 
@@ -382,7 +382,7 @@
 #### 階段 7.3：雙軌圖片管理與隨選快取管線
 - [x] **Task 7.3.1**: 實作 `ChekiImageCacheManager.swift`（支援輕量縮圖生成、本機快取目錄存儲、LRU 空間管理與一鍵清除暫存快取；6 項單元測試全數通過，累計 79 項單元測試通過）。
 - [x] **Task 7.3.2**: 實作 `ChekiCloudAssetService.swift`（負責 CloudKit Asset 背景隨選下載；若本機啟用「相簿同步」但系統相簿未啟用 iCloud 照片時，於圖檔下載後自動寫入該裝置系統相簿；7 項單元測試全數通過，累計 86 項單元測試通過）。
-- [ ] **Task 7.3.3**: 整合 `ChekiDetailView` 與相片加載元件，優先尋址本機系統相簿，Fallback 走 CloudKit 隨選快取，載入期間顯示平滑過渡動畫。
+- [x] **Task 7.3.3**: 整合 `ChekiDetailView` 與相片加載元件，優先尋址本機系統相簿，Fallback 走 CloudKit 隨選快取，載入期間顯示平滑過渡動畫（全量單元測試 86 項全數通過）。
 
 #### 階段 7.4：嚴格鏡像刪除、30 天「最近刪除」相冊與復原機制
 - [ ] **Task 7.4.1**: 在 `ChekiItem` 引入 `deletedAt: Date?` 軟刪除欄位，並實作一般圖庫自動過濾、已刪除拍立得 30 天自動過期硬刪除管線。
