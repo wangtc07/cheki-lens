@@ -8,11 +8,11 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-10-22
-- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.1 全數完成）
-- **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：已完成 **Task 7.1.2**（實作 `PHCloudIdentifier` 轉換工具與相片跨裝置尋址模組 `PhotoCloudIdentifierMapper.swift`，包含空白防禦、批次雙向查表與測試 Mock 封裝；Phase 7.1 累計 17 項單元測試全數通過）。
-- **最新穩定 Git Commit**：feat(photos): 完成 Task 7.1.2 實作 PHCloudIdentifier 雙向映射器與跨裝置尋址模組
-- **下一動執行指示**：執行 **Task 7.2.1**（封裝 `CloudKitSyncManager.swift`，管理 iCloud 帳號狀態監測 `CKContainer.accountStatus`、同步狀態機與最後同步時間戳記）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
+- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)
+- **當前分支**：`feat/multi-device-sync-phase7.2`
+- **當前進行中任務**：已完成 **Task 7.2.1**（封裝 `CloudKitSyncManager.swift`，管理 iCloud 帳號狀態監測 `CKContainer.accountStatus`、純 Swift Concurrency 監聽、同步狀態機與最後同步時間戳記；3 項單元測試全數通過）。
+- **最新穩定 Git Commit**：feat(sync): 完成 Task 7.2.1 封裝 CloudKitSyncManager 狀態機與帳號監控服務
+- **下一動執行指示**：執行 **Task 7.2.2**（升級 `ModelContainerProvider.swift`，支援根據 Pro 資格與使用者開關動態切換本機 Store 與 CloudKit Store，並實作既有本機 SQLite 資料自動遷移合併至 CloudKit 容器）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
 
@@ -375,7 +375,7 @@
 - [x] **Task 7.1.2**: 實作 `PHCloudIdentifier` 轉換工具與相片跨裝置尋址模組 (`PhotoCloudIdentifierMapper.swift`)，包含批次雙向查表、空白防禦與 `MockPhotoCloudIdentifierMapper` 測試實作（4 項單元測試全數通過）。
 
 #### 階段 7.2：雙模式 ModelContainer 與動態切換引擎
-- [ ] **Task 7.2.1**: 封裝 `CloudKitSyncManager.swift`，管理 iCloud 帳號狀態監測 (`CKContainer.accountStatus`)、同步狀態機（閒置/同步中/成功/錯誤）與最後同步時間戳記。
+- [x] **Task 7.2.1**: 封裝 `CloudKitSyncManager.swift`，管理 iCloud 帳號狀態監測 (`CKContainer.accountStatus`)、純 Swift Concurrency 監聽、同步狀態機（閒置/同步中/成功/錯誤）與最後同步時間戳記（3 項單元測試全數通過）。
 - [ ] **Task 7.2.2**: 升級 `ModelContainerProvider.swift`，支援根據 Pro 資格與使用者開關動態切換本機 Store (`.none`) 與 CloudKit Store (`.automatic`)，並實作既有本機 SQLite 資料自動遷移合併至 CloudKit 容器。
 
 #### 階段 7.3：雙軌圖片管理與隨選快取管線
