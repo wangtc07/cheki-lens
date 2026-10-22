@@ -8,11 +8,11 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-10-23
-- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.4 進行中）
+- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.4 全數完成）
 - **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：完成 **Task 7.4.3**（實作 `ChekiMirrorDeletionManager` 雲端遠端刪除監聽器、嚴格鏡像同步刪除本地相簿 `PHAsset`、遠端復原自動補正重新同步，並在 `ContentView` 掛載通知監聽；新增 5 項單元測試，全量累計 104 項單元測試通過）。
-- **最新穩定 Git Commit**：feat(sync): 完成 Task 7.4.3 實作雲端遠端鏡像刪除與復原監聽器
-- **下一動執行指示**：執行 **Task 7.4.4**（撰寫多裝置並行修改、軟刪除同步與復原合併之單元測試，包含雙向編輯、離線更新與 LWW 合併）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
+- **當前進行中任務**：完成 **Task 7.4.4**（實作 `ChekiItem` 與 `ChekiMemo` LWW (Last-Write-Wins) 衝突解決機制、整合 `ModelContainerProvider` 跨 Store 遷移合併，撰寫雙向編輯、離線更新、軟刪除與復原並行同步單元測試；新增 7 項單元測試，Phase 7 累計 111 項單元測試全數通過）。
+- **最新穩定 Git Commit**：feat(test): 完成 Task 7.4.4 多裝置並行修改與 LWW 合併單元測試
+- **下一動執行指示**：執行 **Task 7.5.1**（在 `SettingsView` 新增「iCloud 多裝置同步」獨立圓角卡片群組，包含帳號狀態指示燈、Pro 狀態、同步 Toggle、最後同步時間、立即同步按鈕、快取大小與清除快取）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
 
@@ -388,7 +388,7 @@
 - [x] **Task 7.4.1**: 在 `ChekiItem` 引入 `deletedAt: Date?` 軟刪除欄位與 Predicate，實作 `ChekiTrashManager` 30 天自動過期硬刪除管線、App 啟動/喚醒自動清除、快取清理與圖庫軟刪除過濾（9 項單元測試全數通過，累計 95 項單元測試通過）。
 - [x] **Task 7.4.2**: 實作 App 內「最近刪除」相冊 UI（`RecentlyDeletedView.swift`，比照 Apple 相簿工具相冊，支援剩餘天數倒數「還有 29 天」、單張復原/永久刪除、選取模式滑動多選、批次復原與批次立即永久刪除，4 項單元測試全數通過，累計 99 項單元測試通過）。
 - [x] **Task 7.4.3**: 實作雲端遠端刪除監聽器（`ChekiMirrorDeletionManager.swift`，當遠端刪除且本機開啟「同步刪除系統相簿」時非同步刪除對應的 `PHAsset`；若遠端復原亦自動還原至系統相簿，5 項單元測試全數通過，累計 104 項單元測試通過）。
-- [ ] **Task 7.4.4**: 撰寫多裝置並行修改、軟刪除同步與復原合併之單元測試（包含雙向編輯、離線更新與 LWW 合併）。
+- [x] **Task 7.4.4**: 撰寫多裝置並行修改、軟刪除同步與復原合併之單元測試（包含雙向編輯、離線更新與 LWW 合併，7 項單元測試全數通過，Phase 7 累計 111 項單元測試全數通過）。
 
 #### 階段 7.5：UI 介面與設定控制面板
 - [ ] **Task 7.5.1**: 在 `SettingsView` 新增「iCloud 多裝置同步」獨立圓角卡片群組（帳號狀態指示燈、Pro 狀態、同步 Toggle、最後同步時間、立即同步按鈕、快取大小與清除按鈕）。

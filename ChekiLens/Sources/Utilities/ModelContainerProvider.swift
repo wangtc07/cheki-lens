@@ -143,57 +143,73 @@ public enum ModelContainerProvider {
         }
 
         let sourceItems = try sourceContext.fetch(FetchDescriptor<ChekiItem>())
-        let existingTargetItemIDs = Set((try targetContext.fetch(FetchDescriptor<ChekiItem>())).map(\.id))
+        let existingTargetItems = try targetContext.fetch(FetchDescriptor<ChekiItem>())
+        let targetItemsByID = Dictionary(uniqueKeysWithValues: existingTargetItems.map { ($0.id, $0) })
 
         var migratedChekis = 0
-        for item in sourceItems where !existingTargetItemIDs.contains(item.id) {
-            let newItem = ChekiItem(
-                id: item.id,
-                frontImageData: item.frontImageData,
-                backImageData: item.backImageData,
-                originalFrontImageData: item.originalFrontImageData,
-                originalBackImageData: item.originalBackImageData,
-                thumbnailData: item.thumbnailData,
-                capturedAt: item.capturedAt,
-                ocrDate: item.ocrDate,
-                originalCapturedAt: item.originalCapturedAt,
-                isJudgedDateManuallySet: item.isJudgedDateManuallySet,
-                isDateWrittenToAlbum: item.isDateWrittenToAlbum,
-                deletedAt: item.deletedAt,
-                lastModifiedAt: item.lastModifiedAt,
-                filmFormat: item.filmFormat,
-                detectedAspectRatio: item.detectedAspectRatio,
-                borderInsetRatio: item.borderInsetRatio,
-                perspectivePointsJSON: item.perspectivePointsJSON,
-                backPerspectivePointsJSON: item.backPerspectivePointsJSON,
-                detectionMethod: item.detectionMethod,
-                processingState: item.processingState,
-                isSyncedToPhotoLibrary: item.isSyncedToPhotoLibrary,
-                frontAssetIdentifier: item.frontAssetIdentifier,
-                backAssetIdentifier: item.backAssetIdentifier,
-                cloudIdentifier: item.cloudIdentifier,
-                backCloudIdentifier: item.backCloudIdentifier
-            )
-            targetContext.insert(newItem)
-            migratedChekis += 1
+        for item in sourceItems {
+            if let existing = targetItemsByID[item.id] {
+                // 已存在項目：以 LWW (Last-Write-Wins) 規則合併衝突
+                if existing.mergeLWW(with: item) {
+                    migratedChekis += 1
+                }
+            } else {
+                let newItem = ChekiItem(
+                    id: item.id,
+                    frontImageData: item.frontImageData,
+                    backImageData: item.backImageData,
+                    originalFrontImageData: item.originalFrontImageData,
+                    originalBackImageData: item.originalBackImageData,
+                    thumbnailData: item.thumbnailData,
+                    capturedAt: item.capturedAt,
+                    ocrDate: item.ocrDate,
+                    originalCapturedAt: item.originalCapturedAt,
+                    isJudgedDateManuallySet: item.isJudgedDateManuallySet,
+                    isDateWrittenToAlbum: item.isDateWrittenToAlbum,
+                    deletedAt: item.deletedAt,
+                    lastModifiedAt: item.lastModifiedAt,
+                    filmFormat: item.filmFormat,
+                    detectedAspectRatio: item.detectedAspectRatio,
+                    borderInsetRatio: item.borderInsetRatio,
+                    perspectivePointsJSON: item.perspectivePointsJSON,
+                    backPerspectivePointsJSON: item.backPerspectivePointsJSON,
+                    detectionMethod: item.detectionMethod,
+                    processingState: item.processingState,
+                    isSyncedToPhotoLibrary: item.isSyncedToPhotoLibrary,
+                    frontAssetIdentifier: item.frontAssetIdentifier,
+                    backAssetIdentifier: item.backAssetIdentifier,
+                    cloudIdentifier: item.cloudIdentifier,
+                    backCloudIdentifier: item.backCloudIdentifier
+                )
+                targetContext.insert(newItem)
+                migratedChekis += 1
+            }
         }
 
         let sourceMemos = try sourceContext.fetch(FetchDescriptor<ChekiMemo>())
-        let existingTargetMemoIDs = Set((try targetContext.fetch(FetchDescriptor<ChekiMemo>())).map(\.id))
+        let existingTargetMemos = try targetContext.fetch(FetchDescriptor<ChekiMemo>())
+        let targetMemosByID = Dictionary(uniqueKeysWithValues: existingTargetMemos.map { ($0.id, $0) })
 
         var migratedMemos = 0
-        for memo in sourceMemos where !existingTargetMemoIDs.contains(memo.id) {
-            let newMemo = ChekiMemo(
-                id: memo.id,
-                eventName: memo.eventName,
-                noteText: memo.noteText,
-                hashtags: memo.hashtags,
-                createdAt: memo.createdAt,
-                updatedAt: memo.updatedAt,
-                lastModifiedAt: memo.lastModifiedAt
-            )
-            targetContext.insert(newMemo)
-            migratedMemos += 1
+        for memo in sourceMemos {
+            if let existing = targetMemosByID[memo.id] {
+                // 已存在備忘：以 LWW 規則合併衝突
+                if existing.mergeLWW(with: memo) {
+                    migratedMemos += 1
+                }
+            } else {
+                let newMemo = ChekiMemo(
+                    id: memo.id,
+                    eventName: memo.eventName,
+                    noteText: memo.noteText,
+                    hashtags: memo.hashtags,
+                    createdAt: memo.createdAt,
+                    updatedAt: memo.updatedAt,
+                    lastModifiedAt: memo.lastModifiedAt
+                )
+                targetContext.insert(newMemo)
+                migratedMemos += 1
+            }
         }
 
         try targetContext.save()

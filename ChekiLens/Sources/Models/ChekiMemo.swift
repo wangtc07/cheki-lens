@@ -82,6 +82,22 @@ extension ChekiMemo {
         if let eventName { self.eventName = eventName }
         if let noteText { self.noteText = noteText }
         if let hashtags { self.hashtags = hashtags }
-        self.updatedAt = Date()
+        let now = Date()
+        self.updatedAt = now
+        self.lastModifiedAt = now
+    }
+
+    /// 以 Last-Write-Wins (LWW) 規則合併另一版本備忘錄
+    @discardableResult
+    func mergeLWW(with incoming: ChekiMemo) -> Bool {
+        guard incoming.lastModifiedAt > self.lastModifiedAt else {
+            return false
+        }
+        self.eventName = incoming.eventName
+        self.noteText = incoming.noteText
+        self.hashtags = incoming.hashtags
+        self.updatedAt = incoming.updatedAt
+        self.lastModifiedAt = incoming.lastModifiedAt
+        return true
     }
 }

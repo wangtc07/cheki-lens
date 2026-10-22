@@ -325,6 +325,45 @@ extension ChekiItem {
         #Predicate<ChekiItem> { $0.deletedAt != nil }
     }
 
+    /// 以 Last-Write-Wins (LWW) 規則合併另一個版本的屬性
+    /// 若 `incoming.lastModifiedAt > self.lastModifiedAt`，則以 `incoming` 之屬性覆寫本機屬性並回傳 true
+    @discardableResult
+    func mergeLWW(with incoming: ChekiItem) -> Bool {
+        guard incoming.lastModifiedAt > self.lastModifiedAt else {
+            return false
+        }
+
+        self.deletedAt = incoming.deletedAt
+        self.lastModifiedAt = incoming.lastModifiedAt
+        self.capturedAt = incoming.capturedAt
+        self.ocrDate = incoming.ocrDate
+        self.originalCapturedAt = incoming.originalCapturedAt
+        self.isJudgedDateManuallySet = incoming.isJudgedDateManuallySet
+        self.isDateWrittenToAlbum = incoming.isDateWrittenToAlbum
+        self.filmFormat = incoming.filmFormat
+        self.detectedAspectRatio = incoming.detectedAspectRatio
+        self.borderInsetRatio = incoming.borderInsetRatio
+        self.perspectivePointsJSON = incoming.perspectivePointsJSON
+        self.backPerspectivePointsJSON = incoming.backPerspectivePointsJSON
+        self.detectionMethod = incoming.detectionMethod
+        self.processingStateRaw = incoming.processingStateRaw
+        self.cloudIdentifier = incoming.cloudIdentifier
+        self.backCloudIdentifier = incoming.backCloudIdentifier
+        self.assignedMemberIDsJSON = incoming.assignedMemberIDsJSON
+
+        if let incomingFront = incoming.frontImageData {
+            self.frontImageData = incomingFront
+        }
+        if let incomingBack = incoming.backImageData {
+            self.backImageData = incomingBack
+        }
+        if let incomingThumb = incoming.thumbnailData {
+            self.thumbnailData = incomingThumb
+        }
+
+        return true
+    }
+
     /// 已指派的所有成員 UUID 陣列（去重且保序，並包含主 `idolMember`）
     var assignedMemberIDs: [UUID] {
         var ids: [UUID] = []
