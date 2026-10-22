@@ -7,12 +7,12 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-- **最後更新時間**：2026-10-12
-- **當前所屬階段**：Phase 6.6 — UI／UX 一致性重整 (iOS 26 UI Consistency Pass)
+- **最後更新時間**：2026-10-22
+- **當前所屬階段**：Phase 6.7 — 系統相簿初始批次導入 (System Album Batch Import)
 - **當前分支**：`main`
-- **當前進行中任務**：相簿拖動時其他相簿會讓位。被拖的卡片沿 Z 軸浮起、半透明，並一直畫在最上層，跟隨手指，放開才落進空格。
-- **最新穩定 Git Commit**：fix(albums): 拖動時其他相簿讓位且卡片保持最上層
-- **下一動執行指示**：執行 **Task 6.3**（App 圖示、啟動畫面與 App Store 截圖）。開工前先讀 `docs/PROGRESS.md`。
+- **當前進行中任務**：已完成 **Task 6.7.1**（`SystemAlbumExplorerService` 系統相簿階層探勘、重複 Asset 檢驗與規格推斷核心）。
+- **最新穩定 Git Commit**：feat(import): 完成 Task 6.7.1 系統相簿階層探勘、重複合併檢驗與規格推斷核心
+- **下一動執行指示**：執行 **Task 6.7.2**（實作 `SystemAlbumSelectionSheet` 系統資料夾與相簿階層式挑選介面，包含每本相簿獨立「邊緣偵測」開關與全選控制）。開工前先讀 `docs/PROGRESS.md` 與 `docs/UI_AGENT_GUIDELINES.md`。
 
 ---
 
@@ -355,4 +355,15 @@
 
 ---
 
-- [ ] **Task 6.3**: 建立 App 圖示、啟動畫面與 App Store 截圖產生流程（暫排在 Phase 6.6 之後）
+### 階段 6.7：系統相簿初始批次導入 (Phase 6.7: System Album Batch Import)
+
+- [x] **Task 6.7.1**: 實作 `SystemAlbumExplorerService`（取得 iOS 系統資料夾與相簿階層樹狀結構、讀取相簿縮圖與原圖封包、重複 Asset 檢驗、同名正規化比對、以及關閉邊緣偵測時的長寬比規格推斷；6 項單元測試全數通過）
+- [ ] **Task 6.7.2**: 實作 `SystemAlbumSelectionSheet`（步驟 1：資料夾與相簿階層式挑選介面，包含每本相簿獨立「邊緣偵測」開關與全選控制）
+- [ ] **Task 6.7.3**: 實作 `StagingImportShelfView`（步驟 2：工作台團體與成員卡片展示、卡片內相片讀入進度、支援關閉邊緣偵測時保留原圖並執行長寬比判定與 OCR、以及批次圈選成員歸類團體）
+- [ ] **Task 6.7.4**: 整合 `BatchPairingView` 供成員卡片點入深層編輯（步驟 3：點入讀入完成的成員卡片檢視所有照片預覽、手動拖曳配對背面、剔除雜圖與調整規格／日期）
+- [ ] **Task 6.7.5**: 實作 `AlbumImportCommitEngine`（步驟 4：最終確認正式匯入，自動合併既有同名團體與成員、略過已匯入的重複相片 Asset ID、寫入 SwiftData 並顯示結果摘要）
+- [ ] **Task 6.7.6**: 掛載全處進入點（Onboarding 第 3 頁完成後引導提示、相簿庫空狀態按鈕、相簿頁與設定頁常駐匯入入口）
+
+---
+
+- [ ] **Task 6.3**: 建立 App 圖示、啟動畫面與 App Store 截圖產生流程（暫排在 Phase 6.7 之後）
