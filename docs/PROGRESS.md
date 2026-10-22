@@ -8,11 +8,11 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-10-23
-- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.2 完成，已支援 iPadOS 17.7 / iOS 17.0+ 部署）
+- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.3 進行中）
 - **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：完成 iPadOS 17.7 (iOS 17.0+) 部署與雙版本相容適配（`IPHONEOS_DEPLOYMENT_TARGET = 17.0`、`ContentView` `Tab` 與 `tabItem` 降級適配、`LibraryView` `ScrollPosition` 條件修飾器；累計 73 項單元測試全數通過）。
-- **最新穩定 Git Commit**：feat(compat): 支援 iPadOS/iOS 17.0+ 部署與 TabView/Scroll 雙版本相容
-- **下一動執行指示**：執行 **Task 7.3.1**（實作 `ChekiImageCacheManager.swift`，支援輕量縮圖生成、本機快取目錄存儲、LRU 空間管理與一鍵清除暫存快取）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
+- **當前進行中任務**：完成 **Task 7.3.1**（實作 `ChekiImageCacheManager.swift`，支援輕量縮圖生成、雙層快取、LRU 空間淘汰與一鍵清除暫存快取，重構 `LibraryView` 移除舊有單層快取；累計 79 項單元測試全數通過）。
+- **最新穩定 Git Commit**：feat(cache): 完成 Task 7.3.1 實作 ChekiImageCacheManager 雙層快取與 LRU 管理
+- **下一動執行指示**：執行 **Task 7.3.2**（實作 `ChekiCloudAssetService.swift`，負責 CloudKit Asset 背景隨選下載與相簿未開 iCloud 照片時的自動本機相簿導出）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
 
@@ -380,7 +380,7 @@
 - [x] **Task 7.2.3**: 支援 iPadOS 17.7 與 iOS 17.0+ 部署相容（調整 Deployment Target 至 17.0，為 `ContentView` 與 `LibraryView` 引入 `#available(iOS 18.0, *)` 雙版本條件分支，全量單元測試 73 項全數通過）。
 
 #### 階段 7.3：雙軌圖片管理與隨選快取管線
-- [ ] **Task 7.3.1**: 實作 `ChekiImageCacheManager.swift`（支援輕量縮圖生成、本機快取目錄存儲、LRU 空間管理與一鍵清除暫存快取）。
+- [x] **Task 7.3.1**: 實作 `ChekiImageCacheManager.swift`（支援輕量縮圖生成、本機快取目錄存儲、LRU 空間管理與一鍵清除暫存快取；6 項單元測試全數通過，累計 79 項單元測試通過）。
 - [ ] **Task 7.3.2**: 實作 `ChekiCloudAssetService.swift`（負責 CloudKit Asset 背景隨選下載；若本機啟用「相簿同步」但系統相簿未啟用 iCloud 照片時，於圖檔下載後自動寫入該裝置系統相簿）。
 - [ ] **Task 7.3.3**: 整合 `ChekiDetailView` 與相片加載元件，優先尋址本機系統相簿，Fallback 走 CloudKit 隨選快取，載入期間顯示平滑過渡動畫。
 

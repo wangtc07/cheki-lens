@@ -764,7 +764,7 @@ private struct AppleLibraryPhotoCell: View {
 
         ZStack(alignment: .topTrailing) {
             if isValid,
-               let uiImage = ChekiThumbnailCache.shared.image(for: item) {
+               let uiImage = ChekiImageCacheManager.shared.syncThumbnail(for: item) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFit()
@@ -3792,7 +3792,7 @@ struct AlbumHeroDetailView: View {
                 .frame(height: 390)
                 .overlay {
                     if let heroItem = heroCoverItem,
-                       let uiImage = ChekiThumbnailCache.shared.image(for: heroItem) {
+                       let uiImage = ChekiImageCacheManager.shared.syncThumbnail(for: heroItem) {
                         Image(uiImage: uiImage)
                             .resizable()
                             .scaledToFill()
@@ -4482,28 +4482,6 @@ private struct InAppAlbumPhotoPickerSheet: View {
     }
 }
 
-private final class ChekiThumbnailCache: @unchecked Sendable {
-    static let shared = ChekiThumbnailCache()
-    private let cache = NSCache<NSString, UIImage>()
-
-    private init() {
-        cache.countLimit = 300
-    }
-
-    func image(for item: ChekiItem) -> UIImage? {
-        guard !item.isDeleted, item.modelContext != nil, let data = item.frontImageData else {
-            return nil
-        }
-        let key = "\(item.id.uuidString)-\(data.count)-\(data.hashValue)" as NSString
-        if let cached = cache.object(forKey: key) {
-            return cached
-        }
-        guard let decoded = UIImage(data: data) else { return nil }
-        cache.setObject(decoded, forKey: key)
-        return decoded
-    }
-}
-
 private struct AlbumSquareThumbnailCell: View {
     let item: ChekiItem
     var cornerRadius: CGFloat = 5
@@ -4518,7 +4496,7 @@ private struct AlbumSquareThumbnailCell: View {
             .aspectRatio(1, contentMode: .fit)
             .overlay {
                 if isValid,
-                   let uiImage = ChekiThumbnailCache.shared.image(for: item) {
+                   let uiImage = ChekiImageCacheManager.shared.syncThumbnail(for: item) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFill()
