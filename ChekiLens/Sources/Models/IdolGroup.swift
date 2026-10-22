@@ -12,25 +12,28 @@ final class IdolGroup {
     // MARK: Properties
 
     /// 唯一識別 UUID
-    var id: UUID
+    var id: UUID = UUID()
 
     /// 團體名稱（如「日向坂46」、「乃木坂46」）
-    var name: String
+    var name: String = ""
 
     /// 團體識別顏色 hex 字串（如 `"#FF6B9D"`），nil 表示使用預設藍
-    var colorHex: String?
+    var colorHex: String? = nil
 
     /// 創建時間
-    var createdAt: Date
+    var createdAt: Date = Date()
 
     /// 顯示排序權重（越小越靠前）
-    var sortOrder: Int
+    var sortOrder: Int = 0
+
+    /// 最後修改時間戳記（用於多裝置 CloudKit 同步）
+    var lastModifiedAt: Date = Date()
 
     // MARK: Relations
 
     /// 旗下偶像成員清單
     @Relationship(deleteRule: .cascade, inverse: \IdolMember.group)
-    var members: [IdolMember]
+    var members: [IdolMember] = []
 
     // MARK: Init
 
@@ -40,6 +43,7 @@ final class IdolGroup {
         colorHex: String? = nil,
         createdAt: Date = Date(),
         sortOrder: Int = 0,
+        lastModifiedAt: Date = Date(),
         members: [IdolMember] = []
     ) {
         self.id = id
@@ -47,6 +51,7 @@ final class IdolGroup {
         self.colorHex = colorHex
         self.createdAt = createdAt
         self.sortOrder = sortOrder
+        self.lastModifiedAt = lastModifiedAt
         self.members = members
     }
 }

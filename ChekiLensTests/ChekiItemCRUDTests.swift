@@ -41,6 +41,36 @@ final class ChekiItemCRUDTests: XCTestCase {
         XCTAssertFalse(saved.hasBothSides, "預設無背面資料")
         XCTAssertNil(saved.ocrDate, "預設無 OCR 日期")
         XCTAssertEqual(saved.borderInsetRatio, 0.0, accuracy: 0.001, "預設邊界偏移為 0")
+        XCTAssertNil(saved.cloudIdentifier, "預設無雲端識別碼")
+        XCTAssertNil(saved.backCloudIdentifier, "預設無背面雲端識別碼")
+        XCTAssertNil(saved.deletedAt, "預設未刪除")
+        XCTAssertFalse(saved.isDeleted, "預設 isDeleted 為 false")
+        XCTAssertEqual(saved.daysRemainingUntilPermanentDeletion, 30, "未刪除或剛刪除剩餘天數為 30")
+    }
+
+    func test_softDelete_andRestoreFromTrash() throws {
+        // Arrange
+        let item = ChekiItem()
+        context.insert(item)
+        try context.save()
+
+        // Act 1: Soft delete
+        let deleteTime = Date(timeIntervalSince1970: 1_700_000_000)
+        item.softDelete(at: deleteTime)
+        try context.save()
+
+        // Assert 1
+        XCTAssertTrue(item.isDeleted)
+        XCTAssertEqual(item.deletedAt, deleteTime)
+        XCTAssertEqual(item.lastModifiedAt, deleteTime)
+
+        // Act 2: Restore from trash
+        item.restoreFromTrash()
+        try context.save()
+
+        // Assert 2
+        XCTAssertFalse(item.isDeleted)
+        XCTAssertNil(item.deletedAt)
     }
 
     func test_createChekiItem_withAllFields() throws {

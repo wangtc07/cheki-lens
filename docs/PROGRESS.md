@@ -9,10 +9,10 @@
 
 - **最後更新時間**：2026-10-22
 - **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)
-- **當前分支**：`main`
-- **當前進行中任務**：已完成需求訪談與架構藍圖定案（見 `docs/ICLOUD_SYNC_ROADMAP.md`），即將執行 **Task 7.1.1**（`ChekiItem`、`IdolGroup`、`IdolMember`、`ChekiMemo` 屬性宣告重構，全量補齊預設值與 CloudKit 相容性，新增 `cloudIdentifier`、`backCloudIdentifier`、`deletedAt`、`lastModifiedAt` 欄位）。
-- **最新穩定 Git Commit**：feat(import): 完成 Task 6.7.6 掛載系統相簿批次匯入總流程與四處入口
-- **下一動執行指示**：執行 **Task 7.1.1**（SwiftData 實體 CloudKit 相容性與新欄位擴充）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
+- **當前分支**：`feat/multi-device-icloud-sync`
+- **當前進行中任務**：已完成 **Task 7.1.1**（`ChekiItem`、`IdolGroup`、`IdolMember`、`ChekiMemo` 屬性宣告重構，全量補齊預設值與 CloudKit 相容性，新增 `cloudIdentifier`、`backCloudIdentifier`、`deletedAt`、`lastModifiedAt`、`thumbnailData` 欄位與軟刪除 30 天管理方法；13 項單元測試全數通過）。
+- **最新穩定 Git Commit**：feat(model): 完成 Task 7.1.1 補齊 SwiftData 實體 CloudKit 預設值並擴充雲端識別與軟刪除欄位
+- **下一動執行指示**：執行 **Task 7.1.2**（實作 `PHCloudIdentifier` 轉換工具與相片跨裝置尋址模組 `PhotoCloudIdentifierMapper.swift`）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
 
@@ -371,7 +371,7 @@
 *詳細架構規格與訪談結論詳見：`docs/ICLOUD_SYNC_ROADMAP.md`*
 
 #### 階段 7.1：資料模型與 CloudKit 相容性重構
-- [ ] **Task 7.1.1**: 重構 `ChekiItem`、`IdolGroup`、`IdolMember`、`ChekiMemo` 屬性宣告，全量補齊屬性預設值與相容性檢查，新增 `cloudIdentifier`、`backCloudIdentifier`、`deletedAt`、`lastModifiedAt` 欄位。
+- [x] **Task 7.1.1**: 重構 `ChekiItem`、`IdolGroup`、`IdolMember`、`ChekiMemo` 屬性宣告，全量補齊屬性預設值與相容性檢查，新增 `cloudIdentifier`、`backCloudIdentifier`、`deletedAt`、`lastModifiedAt`、`thumbnailData` 欄位與 30 天軟刪除管理方法（13 項單元測試全數通過）。
 - [ ] **Task 7.1.2**: 實作 `PHCloudIdentifier` 轉換工具與相片跨裝置尋址模組 (`PhotoCloudIdentifierMapper.swift`)。
 
 #### 階段 7.2：雙模式 ModelContainer 與動態切換引擎
