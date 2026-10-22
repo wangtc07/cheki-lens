@@ -7,32 +7,36 @@
 
 ## 🏗️ 核心架構與雙軌同步模型 (Architecture & Dual-Track Model)
 
-```
-                       ┌────────────────────────────────────────┐
-                       │        ChekiLens Pro 資格驗證          │
-                       │   (StoreKit 2: isProLifetimeUnlocked)  │
-                       └───────────────────┬────────────────────┘
-                                           │
-                         ┌─────────────────┴─────────────────┐
-                         ▼                                   ▼
-                  【未解鎖 Pro / 關閉】              【已解鎖 Pro 且開啟】
-                         │                                   │
-                         ▼                                   ▼
-              純本機 ModelContainer               CloudKit ModelContainer
-           (cloudKitDatabase: .none)           (cloudKitDatabase: .automatic)
-           - 100% 留存在裝置本機               - 自動與 iCloud 私有資料庫同步
-           - 零雲端流量與商業隔離              - 支援靜默背景推送通知
-                                                             │
-                         ┌───────────────────────────────────┴───────────────────────────────────┐
-                         ▼                                                                       ▼
-             【軌道 1: 啟用系統相簿 + iCloud 照片】                              【軌道 2: 獨立儲存 / 未開相簿同步】
-                         │                                                                       │
-                         ▼                                                                       ▼
-             ★ 零流量直讀模式 (Zero-Traffic Direct)                             ★ 雲端隨選快取模式 (CloudKit Cache Pool)
-             - SwiftData 僅同步中繼資料與錨點坐標                                - 縮圖 (Thumbnail) 隨 SwiftData 即時同步
-             - 儲存 PHCloudIdentifier 跨裝置映射                               - 大圖 (4K原圖/裁切圖) 存於 CloudKit Asset
-             - 裝置 B 透過 PHCloudIdentifier 直讀                                - 點入單張檢視時隨選 (On-Demand) 下載
-               其本機系統相簿，不重複消耗 iCloud 空間                            - 支援本機 LRU 快取上限與過期釋放
+```mermaid
+flowchart TD
+    Start["啟動或進入 App"] --> CheckPro{"ChekiLens Pro 買斷狀態？"}
+
+    CheckPro -->|"未解鎖 Pro / 關閉同步"| LocalStore["純本機 ModelContainer (cloudKitDatabase: .none)"]
+    LocalStore --> LocalOnly["100% 儲存於裝置本機<br/>零雲端流量 / 商業化邊界隔離"]
+
+    CheckPro -->|"已解鎖 Pro 且開啟同步"| CloudStore["CloudKit ModelContainer (cloudKitDatabase: .automatic)"]
+    CloudStore --> CheckiCloud{"iCloud 登入狀態？"}
+    
+    CheckiCloud -->|"未登入 / 異常"| OfflineFallback["離線安全運作<br/>(等待登入後自動連線同步)"]
+    CheckiCloud -->|"已登入可用"| SwiftDataSync["SwiftData 私有資料庫同步<br/>(卡片中繼資料 / 成員 / 備忘 / 30天刪除標記)"]
+
+    SwiftDataSync --> CheckTrack{"圖片來源與相簿同步狀態？"}
+
+    CheckTrack -->|"軌道 1：啟用系統相簿 + iCloud 照片"| Track1["★ 零流量直讀模式"]
+    Track1 --> T1_1["SwiftData 僅同步 PHCloudIdentifier 雲端代碼"]
+    T1_1 --> T1_2["裝置 B 透過代碼直讀本機系統相簿<br/>(零額外傳輸 / 不消耗個人 iCloud 空間)"]
+
+    CheckTrack -->|"軌道 2：獨立儲存 / 未開相簿同步"| Track2["★ 雲端隨選快取模式"]
+    Track2 --> T2_1["輕量縮圖隨 SwiftData 秒級同步"]
+    T2_1 --> T2_2["大圖與原圖存於 CloudKit Asset"]
+    T2_2 --> T2_3["點開單張檢視時隨選 (On-Demand) 背景下載<br/>支援本機 LRU 快取上限與自動釋放"]
+
+    SwiftDataSync --> DeletionFlow["★ 刪除與 30 天復原機制"]
+    DeletionFlow --> D1["標記 deletedAt 移入「最近刪除」相冊 (保留 30 天)"]
+    D1 --> D2["鏡像同步至裝置 B 移入「最近刪除」"]
+    D2 --> D3{"本機是否開啟「同步刪除系統相片」？"}
+    D3 -->|"開啟"| D4["系統相簿亦同步移入 iOS 原生「最近刪除」"]
+    D3 -->|"關閉"| D5["僅於 App 內最近刪除，保留系統相片"]
 ```
 
 ---
