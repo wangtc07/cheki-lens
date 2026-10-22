@@ -9,7 +9,7 @@
 
 - **最後更新時間**：2026-10-22
 - **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.2 全數完成）
-- **當前分支**：`feat/multi-device-sync-phase7.2`
+- **當前分支**：`feat/multi-device-icloud-sync`
 - **當前進行中任務**：已完成 **Task 7.2.2**（升級 `ModelContainerProvider.swift`，支援依據 Pro 與偏好動態切換本機 Store 與 CloudKit Store、失敗優雅降級保護，以及跨 Store 資料合併遷移引擎 `migrateData`；Phase 7 累計 22 項單元測試全數通過）。
 - **最新穩定 Git Commit**：feat(store): 完成 Task 7.2.2 升級 ModelContainerProvider 動態雙模式切換與跨 Store 遷移引擎
 - **下一動執行指示**：執行 **Task 7.3.1**（實作 `ChekiImageCacheManager.swift`，支援輕量縮圖生成、本機快取目錄存儲、LRU 空間管理與一鍵清除暫存快取）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
