@@ -90,12 +90,17 @@ struct ContentView: View {
             guard hasCompletedOnboarding else { return }
             _ = await PhotoLibraryManager.shared.syncAllExternalEditsFromSystemPhotoLibrary(modelContext: modelContext)
             _ = try? await ChekiTrashManager.shared.purgeExpiredItems(in: modelContext)
+            ChekiMirrorDeletionManager.shared.startListeningForRemoteChanges(modelContext: modelContext)
+            let autoSync = UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary")
+            _ = await ChekiMirrorDeletionManager.shared.reconcileMirrorDeletions(in: modelContext, autoDeleteFromPhotos: autoSync)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, hasCompletedOnboarding else { return }
             Task {
                 _ = await PhotoLibraryManager.shared.syncAllExternalEditsFromSystemPhotoLibrary(modelContext: modelContext)
                 _ = try? await ChekiTrashManager.shared.purgeExpiredItems(in: modelContext)
+                let autoSync = UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary")
+                _ = await ChekiMirrorDeletionManager.shared.reconcileMirrorDeletions(in: modelContext, autoDeleteFromPhotos: autoSync)
             }
         }
     }
