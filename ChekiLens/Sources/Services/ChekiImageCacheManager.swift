@@ -285,7 +285,7 @@ public final class ChekiImageCacheManager: @unchecked Sendable {
     // MARK: - ChekiItem High-Level Resolvers
 
     func syncThumbnail(for item: ChekiItem) -> UIImage? {
-        guard !item.isDeleted && item.modelContext != nil else { return nil }
+        guard item.modelContext != nil else { return nil }
         let key = cacheKey(for: item.id, type: .thumbnail)
 
         if let cached = memoryImage(forKey: key) {
@@ -306,7 +306,7 @@ public final class ChekiImageCacheManager: @unchecked Sendable {
     }
 
     func resolveThumbnail(for item: ChekiItem) async -> UIImage? {
-        guard !item.isDeleted && item.modelContext != nil else { return nil }
+        guard item.modelContext != nil else { return nil }
         let key = cacheKey(for: item.id, type: .thumbnail)
 
         if let memoryHit = memoryImage(forKey: key) {

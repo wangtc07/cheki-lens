@@ -62,9 +62,10 @@ enum AlbumDisplayMode: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Uncategorized Album Route
+// MARK: - Uncategorized & Recently Deleted Album Routes
 
 struct UncategorizedAlbumRoute: Hashable {}
+struct RecentlyDeletedAlbumRoute: Hashable {}
 
 // MARK: - 1. LibraryView (底部左側 Tab 1：「全部」— 仿照 Apple 相簿 ライブラリ 頁面)
 
@@ -1263,6 +1264,9 @@ struct AlbumsRootView: View {
                     defaultMember: nil
                 )
             }
+            .navigationDestination(for: RecentlyDeletedAlbumRoute.self) { _ in
+                RecentlyDeletedView()
+            }
             .navigationDestination(for: ChekiDetailRoute.self) { route in
                 ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
                     .toolbar(.hidden, for: .tabBar)
@@ -1380,6 +1384,10 @@ struct AlbumsRootView: View {
                     groupsAlbumGrid
                 case .members:
                     allMembersAlbumGrid
+                }
+
+                if !isSelectingAlbums {
+                    albumUtilitiesSection
                 }
             }
             .padding(.top, 96)
@@ -1742,6 +1750,56 @@ struct AlbumsRootView: View {
             .albumCardLift(menu: uncategorizedMenuLifted, dragging: false)
             .opacity(isSelectingAlbums ? 0.4 : 1)
             .zIndex(uncategorizedMenuLifted ? 100 : 0)
+    }
+
+    // MARK: - 更多項目 / 實用工具（Utilities：最近刪除相冊）
+
+    @ViewBuilder
+    private var albumUtilitiesSection: some View {
+        let trashedCount = chekiItems.filter { $0.isDeleted && $0.modelContext != nil }.count
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tr("更多項目", "その他"))
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 16)
+                .padding(.top, 24)
+
+            Button {
+                albumPath.append(RecentlyDeletedAlbumRoute())
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 24, height: 24)
+
+                    Text(L10n.tr("最近刪除", "最近削除した項目"))
+                        .font(.body)
+                        .foregroundStyle(.primary)
+
+                    Spacer()
+
+                    if trashedCount > 0 {
+                        Text("\(trashedCount)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(.tertiaryLabel))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                )
+                .padding(.horizontal, 16)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     @ViewBuilder
@@ -5012,7 +5070,7 @@ private struct ApplePhotosSelectionBottomBar: View {
 /// - 單指點擊：切換該格的選取
 /// - 單指橫向或斜向滑動：從起點格到目前格做範圍選取或取消
 /// - 單指垂直滑動：不攔截，交給外層 `ScrollView`
-private struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
+struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
     let itemIDs: [ID]
     let columnCount: Int
     let spacing: CGFloat
