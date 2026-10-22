@@ -11,30 +11,32 @@
 flowchart TD
     Start["啟動或進入 App"] --> CheckPro{"ChekiLens Pro 買斷狀態？"}
 
-    CheckPro -->|"未解鎖 Pro / 關閉同步"| LocalStore["純本機 ModelContainer (cloudKitDatabase: .none)"]
-    LocalStore --> LocalOnly["100% 儲存於裝置本機<br/>零雲端流量 / 商業化邊界隔離"]
+    CheckPro -->|"未解鎖 Pro"| FreeLocal["純本機 ModelContainer (cloudKitDatabase: .none)<br/>100% 儲存於本機 / 無雲端同步"]
 
-    CheckPro -->|"已解鎖 Pro 且開啟同步"| CloudStore["CloudKit ModelContainer (cloudKitDatabase: .automatic)"]
-    CloudStore --> CheckiCloud{"iCloud 登入狀態？"}
-    
-    CheckiCloud -->|"未登入 / 異常"| OfflineFallback["離線安全運作<br/>(等待登入後自動連線同步)"]
-    CheckiCloud -->|"已登入可用"| SwiftDataSync["SwiftData 私有資料庫同步<br/>(卡片中繼資料 / 成員 / 備忘 / 30天刪除標記)"]
+    CheckPro -->|"已解鎖 Pro"| CheckiCloud{"Apple ID (iCloud) 登入狀態？"}
 
-    SwiftDataSync --> CheckTrack{"圖片來源與相簿同步狀態？"}
+    CheckiCloud -->|"未登入 iCloud"| ProOffline["離線安全運作<br/>(保留在本機，等待登入後自動連線同步)"]
 
-    CheckTrack -->|"軌道 1：啟用系統相簿 + iCloud 照片"| Track1["★ 零流量直讀模式"]
+    CheckiCloud -->|"已登入 iCloud"| SwiftDataSync["★ 啟用 CloudKit ModelContainer (多裝置同步)<br/>同步卡片中繼資料 / 成員 / 備忘 / 30天刪除標記"]
+
+    SwiftDataSync --> CheckPhotoSync{"系統相簿同步設定與狀態？"}
+
+    CheckPhotoSync -->|"開啟相簿同步 + 系統相簿有開 iCloud 照片"| Track1["★ 軌道 1：零流量直讀模式"]
     Track1 --> T1_1["SwiftData 僅同步 PHCloudIdentifier 雲端代碼"]
-    T1_1 --> T1_2["裝置 B 透過代碼直讀本機系統相簿<br/>(零額外傳輸 / 不消耗個人 iCloud 空間)"]
+    T1_1 --> T1_2["裝置 B 透過代碼直讀本機系統相簿<br/>(零額外雲端流量 / 不重複佔用空間)"]
 
-    CheckTrack -->|"軌道 2：獨立儲存 / 未開相簿同步"| Track2["★ 雲端隨選快取模式"]
-    Track2 --> T2_1["輕量縮圖隨 SwiftData 秒級同步"]
-    T2_1 --> T2_2["大圖與原圖存於 CloudKit Asset"]
-    T2_2 --> T2_3["點開單張檢視時隨選 (On-Demand) 背景下載<br/>支援本機 LRU 快取上限與自動釋放"]
+    CheckPhotoSync -->|"未開啟相簿同步 (純 App 獨立儲存)"| Track2A["★ 軌道 2A：App 獨立雲端隨選快取"]
+    Track2A --> T2A_1["縮圖秒級同步 + 原圖/裁切圖存於 CloudKit Asset"]
+    T2A_1 --> T2A_2["裝置 B 在 App 內隨選下載檢視<br/>純 App 內部同步，不寫入系統相簿"]
+
+    CheckPhotoSync -->|"開啟相簿同步，但系統相簿「未開 iCloud 照片」"| Track2B["★ 軌道 2B：雲端快取 + 同步下載至系統相簿"]
+    Track2B --> T2B_1["由 App 的 CloudKit Asset 同步圖檔至裝置 B"]
+    T2B_1 --> T2B_2["裝置 B 下載圖檔至 App 後，<br/>自動同步寫入該裝置的系統相簿"]
 
     SwiftDataSync --> DeletionFlow["★ 刪除與 30 天復原機制"]
     DeletionFlow --> D1["標記 deletedAt 移入「最近刪除」相冊 (保留 30 天)"]
     D1 --> D2["鏡像同步至裝置 B 移入「最近刪除」"]
-    D2 --> D3{"本機是否開啟「同步刪除系統相片」？"}
+    D2 --> D3{"裝置 B 是否開啟「同步刪除系統相片」？"}
     D3 -->|"開啟"| D4["系統相簿亦同步移入 iOS 原生「最近刪除」"]
     D3 -->|"關閉"| D5["僅於 App 內最近刪除，保留系統相片"]
 ```
@@ -74,7 +76,7 @@ flowchart TD
 
 ### 階段 7.3：雙軌圖片管理與隨選快取管線 (Phase 7.3: Dual-Track Image Pipeline & Cache)
 - [ ] **Task 7.3.1**: 實作 `ChekiImageCacheManager.swift`（支援輕量縮圖生成、本機快取目錄存儲、LRU 空間管理與一鍵清除暫存快取）。
-- [ ] **Task 7.3.2**: 實作 `ChekiCloudAssetService.swift`（當無系統相簿對應時，負責 CloudKit Asset 背景隨選下載與漸進式載入）。
+- [ ] **Task 7.3.2**: 實作 `ChekiCloudAssetService.swift`（負責 CloudKit Asset 背景隨選下載；若本機啟用「相簿同步」但系統相簿未啟用 iCloud 照片時，於圖檔下載後自動寫入該裝置系統相簿）。
 - [ ] **Task 7.3.3**: 整合 `ChekiDetailView` 與相片加載元件，優先尋址本機系統相簿，Fallback 走 CloudKit 隨選快取，載入期間顯示平滑過渡動畫。
 
 ### 階段 7.4：嚴格鏡像刪除、30 天「最近刪除」相冊與復原機制 (Phase 7.4: Mirror Deletion & Trash Bin)

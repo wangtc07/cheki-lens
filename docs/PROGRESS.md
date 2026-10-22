@@ -380,7 +380,7 @@
 
 #### 階段 7.3：雙軌圖片管理與隨選快取管線
 - [ ] **Task 7.3.1**: 實作 `ChekiImageCacheManager.swift`（支援輕量縮圖生成、本機快取目錄存儲、LRU 空間管理與一鍵清除暫存快取）。
-- [ ] **Task 7.3.2**: 實作 `ChekiCloudAssetService.swift`（當無系統相簿對應時，負責 CloudKit Asset 背景隨選下載與漸進式載入）。
+- [ ] **Task 7.3.2**: 實作 `ChekiCloudAssetService.swift`（負責 CloudKit Asset 背景隨選下載；若本機啟用「相簿同步」但系統相簿未啟用 iCloud 照片時，於圖檔下載後自動寫入該裝置系統相簿）。
 - [ ] **Task 7.3.3**: 整合 `ChekiDetailView` 與相片加載元件，優先尋址本機系統相簿，Fallback 走 CloudKit 隨選快取，載入期間顯示平滑過渡動畫。
 
 #### 階段 7.4：嚴格鏡像刪除、30 天「最近刪除」相冊與復原機制
