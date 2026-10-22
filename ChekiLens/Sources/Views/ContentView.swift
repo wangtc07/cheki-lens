@@ -89,11 +89,13 @@ struct ContentView: View {
         .task {
             guard hasCompletedOnboarding else { return }
             _ = await PhotoLibraryManager.shared.syncAllExternalEditsFromSystemPhotoLibrary(modelContext: modelContext)
+            _ = try? await ChekiTrashManager.shared.purgeExpiredItems(in: modelContext)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, hasCompletedOnboarding else { return }
             Task {
                 _ = await PhotoLibraryManager.shared.syncAllExternalEditsFromSystemPhotoLibrary(modelContext: modelContext)
+                _ = try? await ChekiTrashManager.shared.purgeExpiredItems(in: modelContext)
             }
         }
     }

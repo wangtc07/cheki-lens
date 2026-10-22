@@ -283,10 +283,24 @@ extension ChekiItem {
 
     /// 「最近刪除」保留期限（30 天）之剩餘天數（>= 0）
     var daysRemainingUntilPermanentDeletion: Int {
-        guard let deletedAt else { return 30 }
-        let expirationDate = Calendar.current.date(byAdding: .day, value: 30, to: deletedAt) ?? deletedAt
-        let remaining = Calendar.current.dateComponents([.day], from: Date(), to: expirationDate).day ?? 0
+        daysRemaining(relativeTo: Date(), expirationDays: 30)
+    }
+
+    /// 計算相對基準日之剩餘保留天數
+    func daysRemaining(relativeTo referenceDate: Date = Date(), expirationDays: Int = 30) -> Int {
+        guard let deletedAt else { return expirationDays }
+        let expirationDate = Calendar.current.date(byAdding: .day, value: expirationDays, to: deletedAt) ?? deletedAt
+        let remaining = Calendar.current.dateComponents([.day], from: referenceDate, to: expirationDate).day ?? 0
         return max(0, remaining)
+    }
+
+    /// 判斷是否已達自動硬刪除過期標準
+    func isExpired(relativeTo referenceDate: Date = Date(), expirationDays: Int = 30) -> Bool {
+        guard let deletedAt else { return false }
+        guard let expirationDate = Calendar.current.date(byAdding: .day, value: expirationDays, to: deletedAt) else {
+            return false
+        }
+        return referenceDate >= expirationDate
     }
 
     /// 移入「最近刪除」
@@ -299,6 +313,16 @@ extension ChekiItem {
     func restoreFromTrash() {
         deletedAt = nil
         lastModifiedAt = Date()
+    }
+
+    /// 查詢有效（未刪除）項目的 SwiftData Predicate
+    static var activePredicate: Predicate<ChekiItem> {
+        #Predicate<ChekiItem> { $0.deletedAt == nil }
+    }
+
+    /// 查詢移入最近刪除項目的 SwiftData Predicate
+    static var deletedPredicate: Predicate<ChekiItem> {
+        #Predicate<ChekiItem> { $0.deletedAt != nil }
     }
 
     /// 已指派的所有成員 UUID 陣列（去重且保序，並包含主 `idolMember`）

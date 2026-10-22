@@ -510,9 +510,9 @@ final class PhotoLibraryManager {
     }
 
     /// 非同步安全刪除指定的 `ChekiItem` 陣列：
-    /// 1. 先向 iOS 系統相簿 (`Photos.app`) 請求刪除對應的 `PHAsset`（確保系統相簿確實刪除且視圖狀態穩定不閃退）。
+    /// 1. 先向 iOS 系統相簿 (`Photos.app`) 請求刪除對應的 `PHAsset`（移入系統相簿最近刪除）。
     /// 2. 執行 `onBeforeContextDelete` 讓單張檢視器先行切換上/下一張或關閉頁面，徹底脫離被刪除物件之引用。
-    /// 3. 最後再解除關聯並從 SwiftData `modelContext` 刪除與儲存。
+    /// 3. 將項目移入 App 內建「最近刪除」相冊（保留 30 天，可隨時復原）。
     @MainActor
     func deleteItemsAsync(
         _ items: [ChekiItem],
@@ -533,18 +533,10 @@ final class PhotoLibraryManager {
         onBeforeContextDelete?()
         await Task.yield()
 
-        for item in liveItems where !item.isDeleted && item.modelContext != nil {
-            if let memo = item.memo {
-                item.memo = nil
-                modelContext.delete(memo)
-            }
-            item.idolMember = nil
-            modelContext.delete(item)
-        }
-        try? modelContext.save()
+        try? ChekiTrashManager.shared.softDelete(liveItems, in: modelContext)
     }
 
-    /// 刪除指定的 `ChekiItem` 陣列，並一併自 iOS 系統相簿 (`Photos.app`) 刪除對應的正反面照片
+    /// 刪除指定的 `ChekiItem` 陣列（移入「最近刪除」），並一併自 iOS 系統相簿 (`Photos.app`) 刪除對應的正反面照片
     @MainActor
     func deleteItems(
         _ items: [ChekiItem],
@@ -554,6 +546,15 @@ final class PhotoLibraryManager {
         Task { @MainActor in
             await self.deleteItemsAsync(items, modelContext: modelContext)
         }
+    }
+
+    /// 永久硬刪除指定之 `ChekiItem` 陣列（徹底自資料庫與快取抹除）
+    @MainActor
+    func permanentlyDeleteItems(
+        _ items: [ChekiItem],
+        modelContext: ModelContext
+    ) async throws {
+        try await ChekiTrashManager.shared.permanentlyDelete(items, in: modelContext)
     }
 
     /// 取消（解除）單張拍立得的背面綁定（不刪除照片）：

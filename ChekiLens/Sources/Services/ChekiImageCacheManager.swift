@@ -218,6 +218,32 @@ public final class ChekiImageCacheManager: @unchecked Sendable {
         }
     }
 
+    /// 同步自記憶體與磁碟移除指定快取鍵之圖檔
+    public func removeSync(forKey key: String) {
+        removeMemoryImage(forKey: key)
+        ioQueue.sync { [weak self] in
+            guard let self else { return }
+            let url = self.fileURL(for: key)
+            try? self.fileManager.removeItem(at: url)
+        }
+    }
+
+    /// 移除指定拍立得 UUID 之所有快取類型（縮圖、正面、背面、原始圖）
+    public func removeAllImages(for itemID: UUID) async {
+        for type in ChekiImageType.allCases {
+            let key = cacheKey(for: itemID, type: type)
+            await remove(forKey: key)
+        }
+    }
+
+    /// 同步移除指定拍立得 UUID 之所有快取類型
+    public func removeAllImagesSync(for itemID: UUID) {
+        for type in ChekiImageType.allCases {
+            let key = cacheKey(for: itemID, type: type)
+            removeSync(forKey: key)
+        }
+    }
+
     // MARK: - Thumbnail Generation
 
     public func generateThumbnailData(

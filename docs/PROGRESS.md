@@ -8,11 +8,11 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-10-23
-- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.3 全數完成）
+- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.4 進行中）
 - **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：完成 **Task 7.3.3**（整合 `ChekiDetailView` 雙軌非同步影像載入器 `ChekiDetailCardFaceRenderer`、底部底片條快取縮圖讀取與漸進式微過渡動畫；Phase 7 累計 86 項單元測試全數通過）。
-- **最新穩定 Git Commit**：feat(ui): 完成 Task 7.3.3 整合 ChekiDetailView 雙軌非同步載入器與漸進式過渡動畫
-- **下一動執行指示**：執行 **Task 7.4.1**（在 `ChekiItem` 實作已刪除拍立得 30 天自動過期硬刪除管線，並在圖庫查詢中支援軟刪除篩選）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
+- **當前進行中任務**：完成 **Task 7.4.1**（實作 `ChekiTrashManager` 30 天自動過期硬刪除管線、快取清除、圖庫軟刪除過濾與刪除確認提示；新增 9 項單元測試，全量累計 95 項單元測試通過）。
+- **最新穩定 Git Commit**：feat(trash): 完成 Task 7.4.1 實作 30 天自動過期硬刪除管線與軟刪除過濾機制
+- **下一動執行指示**：執行 **Task 7.4.2**（實作 App 內「最近刪除」相冊 UI，比照 Apple 相簿工具相冊，支援剩餘天數倒數「還有 29 天」、批次復原、批次立即永久刪除）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
 
@@ -385,7 +385,7 @@
 - [x] **Task 7.3.3**: 整合 `ChekiDetailView` 與相片加載元件，優先尋址本機系統相簿，Fallback 走 CloudKit 隨選快取，載入期間顯示平滑過渡動畫（全量單元測試 86 項全數通過）。
 
 #### 階段 7.4：嚴格鏡像刪除、30 天「最近刪除」相冊與復原機制
-- [ ] **Task 7.4.1**: 在 `ChekiItem` 引入 `deletedAt: Date?` 軟刪除欄位，並實作一般圖庫自動過濾、已刪除拍立得 30 天自動過期硬刪除管線。
+- [x] **Task 7.4.1**: 在 `ChekiItem` 引入 `deletedAt: Date?` 軟刪除欄位與 Predicate，實作 `ChekiTrashManager` 30 天自動過期硬刪除管線、App 啟動/喚醒自動清除、快取清理與圖庫軟刪除過濾（9 項單元測試全數通過，累計 95 項單元測試通過）。
 - [ ] **Task 7.4.2**: 實作 App 內「最近刪除」相冊 UI（比照 Apple 相簿工具相冊，支援剩餘天數倒數「還有 29 天」、批次復原、批次立即永久刪除）。
 - [ ] **Task 7.4.3**: 實作雲端遠端刪除監聽器，當遠端刪除且本機開啟「同步刪除系統相簿」時，非同步刪除對應的 `PHAsset`；若遠端復原亦同步還原。
 - [ ] **Task 7.4.4**: 撰寫多裝置並行修改、軟刪除同步與復原合併之單元測試（包含雙向編輯、離線更新與 LWW 合併）。

@@ -257,8 +257,8 @@ struct LibraryView: View {
             } message: {
                 Text(
                     autoSyncToPhotos
-                        ? L10n.tr("將同時從 App 與系統相簿刪除", "アプリと「写真」の両方から削除します")
-                        : L10n.tr("將從典藏庫永久刪除", "ライブラリから完全に削除します")
+                        ? L10n.tr("將同時從 App 與系統相簿移至「最近刪除」（保留 30 天）", "アプリと「写真」の両方で「最近削除した項目」に移動します（30日間保持）")
+                        : L10n.tr("將移至「最近刪除」（保留 30 天）", "「最近削除した項目」に移動します（30日間保持）")
                 )
             }
             .sheet(isPresented: $showingQuickCreateSheet) {
@@ -3673,8 +3673,8 @@ struct AlbumHeroDetailView: View {
         } message: {
             Text(
                 autoSyncToPhotos
-                    ? L10n.tr("將從典藏庫與系統相簿刪除。", "ライブラリと写真アプリから削除されます。")
-                    : L10n.tr("將從典藏庫移除且無法復原。", "ライブラリから削除され、元に戻せません。")
+                    ? L10n.tr("將從典藏庫與系統相簿移至「最近刪除」（保留 30 天）", "ライブラリと「写真」の両方で「最近削除した項目」に移動します（30日間保持）")
+                    : L10n.tr("將移至「最近刪除」（保留 30 天）", "「最近削除した項目」に移動します（30日間保持）")
             )
         }
         .sheet(isPresented: $showingSettingsSheet, onDismiss: {
