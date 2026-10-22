@@ -8,11 +8,11 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-10-22
-- **當前所屬階段**：Phase 6.7 — 系統相簿初始批次導入 (System Album Batch Import)
+- **當前所屬階段**：Phase 6.7 — 系統相簿初始批次導入 (System Album Batch Import)（全數完成）
 - **當前分支**：`main`
-- **當前進行中任務**：已完成 **Task 6.7.5**（實作 `AlbumImportCommitEngine` 正式匯入引擎、同名團體與成員自動合併、重複 Asset ID 略過、寫入 SwiftData 與雙語結果摘要）。
-- **最新穩定 Git Commit**：feat(import): 完成 Task 6.7.5 實作相簿批次匯入引擎、同名團體與成員自動合併及重複相片略過
-- **下一動執行指示**：執行 **Task 6.7.6**（掛載全處進入點：Onboarding 第 3 頁完成後引導提示、相簿庫空狀態按鈕、相簿頁與設定頁常駐匯入入口）。開工前先讀 `docs/PROGRESS.md` 與 `docs/UI_AGENT_GUIDELINES.md`。
+- **當前進行中任務**：已完成 **Task 6.7.6**（建立 `SystemAlbumBatchImportFlowSheet` 總流程容器與 `SystemAlbumBatchImportFlowState` 狀態機，並掛載 Onboarding 完成後引導提示、相簿庫空狀態按鈕、相冊頁與設定頁常駐匯入入口；Phase 6.7 全數 39 項單元測試通過）。
+- **最新穩定 Git Commit**：feat(import): 完成 Task 6.7.6 掛載系統相簿批次匯入總流程與四處入口
+- **下一動執行指示**：Phase 6.7（系統相簿初始批次導入）已全數完成，後續可執行 **Task 6.3**（建立 App 圖示、啟動畫面與 App Store 截圖產生流程）或進行實機驗收。開工前先讀 `docs/PROGRESS.md` 與 `docs/UI_AGENT_GUIDELINES.md`。
 
 ---
 
@@ -362,7 +362,7 @@
 - [x] **Task 6.7.3**: 實作 `StagingImportShelfView`（步驟 2：工作台團體與成員卡片展示、卡片內相片讀入進度狀態機 `StagingCardLoadPhase`、支援關閉邊緣偵測時保留原圖並執行長寬比判定與 OCR 之 `StagingAlbumPhotoProcessor`、以及批次圈選成員歸類團體與重新命名；5 項單元測試全數通過）
 - [x] **Task 6.7.4**: 整合 `BatchPairingView` 供成員卡片點入深層編輯（步驟 3：建立 `StagingSlotDeckReducer` 純函式配對狀態機，支援點入讀入完成的成員卡片檢視所有照片預覽、拖放與雙擊外框手動配對背面、拆開／對調、剔除雜圖與調整規格／日期並回寫至成員卡片；13 項單元測試全數通過）
 - [x] **Task 6.7.5**: 實作 `AlbumImportCommitEngine`（步驟 4：最終確認正式匯入，自動合併既有同名團體與成員並將未分類同名成員晉升歸入團體、略過已匯入的重複相片 Asset ID、寫入 SwiftData 並顯示雙語結果摘要；5 項單元測試全數通過）
-- [ ] **Task 6.7.6**: 掛載全處進入點（Onboarding 第 3 頁完成後引導提示、相簿庫空狀態按鈕、相簿頁與設定頁常駐匯入入口）
+- [x] **Task 6.7.6**: 掛載全處進入點（實作 `SystemAlbumBatchImportFlowSheet` 與 `SystemAlbumBatchImportFlowState` 總流程狀態機，並串接 Onboarding 第 3 頁完成後引導提示、相簿庫空狀態按鈕、相冊頁漢堡選單／空狀態與設定頁常駐匯入入口；4 項流程狀態機測試與 Phase 6.7 全數 39 項單元測試通過）
 
 ---
 

@@ -574,36 +574,48 @@ struct SystemAlbumSelectionContentView: View {
 
 struct SystemAlbumSelectionSheet: View {
     var selectAllByDefault: Bool = false
+    var dismissOnConfirm: Bool = true
     var onConfirm: ([SystemPhotoAlbumNode]) -> Void
     var onCancel: (() -> Void)? = nil
 
-    @State private var state = SystemAlbumSelectionState()
+    private var externalState: Binding<SystemAlbumSelectionState>?
+    @State private var internalState = SystemAlbumSelectionState()
     @State private var isLoading = true
     @State private var authorizationStatus: PHAuthorizationStatus = .notDetermined
     @Environment(\.dismiss) private var dismiss
 
     init(
+        state: Binding<SystemAlbumSelectionState>? = nil,
         selectAllByDefault: Bool = false,
+        dismissOnConfirm: Bool = true,
         onCancel: (() -> Void)? = nil,
         onConfirm: @escaping ([SystemPhotoAlbumNode]) -> Void
     ) {
+        self.externalState = state
         self.selectAllByDefault = selectAllByDefault
+        self.dismissOnConfirm = dismissOnConfirm
         self.onCancel = onCancel
         self.onConfirm = onConfirm
+    }
+
+    private var activeState: Binding<SystemAlbumSelectionState> {
+        externalState ?? $internalState
     }
 
     var body: some View {
         NavigationStack {
             SystemAlbumSelectionContentView(
-                state: $state,
+                state: activeState,
                 isLoading: isLoading,
                 authorizationStatus: authorizationStatus,
                 onRefresh: {
-                    await loadHierarchy()
+                    await loadHierarchy(forceReload: true)
                 },
                 onConfirm: { selection in
                     onConfirm(selection)
-                    dismiss()
+                    if dismissOnConfirm {
+                        dismiss()
+                    }
                 }
             )
             .navigationTitle(L10n.tr("選擇系統相簿", "アルバム選択"))
@@ -620,23 +632,29 @@ struct SystemAlbumSelectionSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     ConfirmToolbarButton(accessibilityIdentifier: "chrome.import.albumSelection.confirm") {
-                        onConfirm(state.buildResolvedSelection())
-                        dismiss()
+                        onConfirm(activeState.wrappedValue.buildResolvedSelection())
+                        if dismissOnConfirm {
+                            dismiss()
+                        }
                     }
-                    .disabled(!state.canProceed)
+                    .disabled(!activeState.wrappedValue.canProceed)
                 }
             }
         }
         .task {
-            await loadHierarchy()
+            await loadHierarchy(forceReload: false)
         }
     }
 
-    private func loadHierarchy() async {
-        isLoading = true
+    private func loadHierarchy(forceReload: Bool) async {
         authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if !forceReload && !activeState.wrappedValue.hierarchy.isEmpty {
+            isLoading = false
+            return
+        }
+        isLoading = true
         let hierarchy = await SystemAlbumExplorerService.shared.fetchHierarchy()
-        state.applyHierarchy(hierarchy, selectAllByDefault: selectAllByDefault)
+        activeState.wrappedValue.applyHierarchy(hierarchy, selectAllByDefault: selectAllByDefault)
         isLoading = false
     }
 }

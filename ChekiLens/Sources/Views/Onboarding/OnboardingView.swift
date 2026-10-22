@@ -22,7 +22,9 @@ private struct OnboardingFeature: Identifiable {
 struct OnboardingView: View {
 
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage("shouldPresentInitialSystemAlbumImport") private var shouldPresentInitialSystemAlbumImport = false
     @State private var currentPage = 0
+    @State private var showingInitialImportPrompt = false
 
     // Page 2 互動展示狀態
     @State private var isFlippedToBack = false
@@ -95,6 +97,25 @@ struct OnboardingView: View {
             }
             .onAppear {
                 refreshPermissionStatuses()
+            }
+            .alert(
+                L10n.tr("匯入既有系統相冊？", "既存のアルバムを取り込みますか？"),
+                isPresented: $showingInitialImportPrompt
+            ) {
+                Button(L10n.tr("立即匯入相冊", "アルバムを取り込む")) {
+                    shouldPresentInitialSystemAlbumImport = true
+                    completeOnboarding()
+                }
+                Button(L10n.tr("稍後再說", "あとで"), role: .cancel) {
+                    completeOnboarding()
+                }
+            } message: {
+                Text(
+                    L10n.tr(
+                        "可直接選擇系統相簿中的資料夾或成員相冊，自動建立團體、成員並批次匯入所有拍立得。",
+                        "「写真」アプリのフォルダやアルバムを選択して、グループ・メンバーの作成とチェキの一括取り込みを行えます。"
+                    )
+                )
             }
         }
         .applyAppAppearanceAndLocale()
@@ -504,7 +525,7 @@ struct OnboardingView: View {
                         currentPage += 1
                     }
                 } else {
-                    completeOnboarding()
+                    showingInitialImportPrompt = true
                 }
             } label: {
                 Text(currentPage < totalPages - 1 ? L10n.tr("繼續", "次へ") : L10n.tr("開始使用", "はじめる"))

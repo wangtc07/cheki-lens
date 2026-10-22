@@ -13,6 +13,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage("shouldPresentInitialSystemAlbumImport") private var shouldPresentInitialSystemAlbumImport = false
     @AppStorage("appAppearanceMode") private var appAppearanceModeRaw: String = AppAppearanceMode.system.rawValue
     @AppStorage("appLanguageMode") private var appLanguageModeRaw: String = AppLanguageMode.system.rawValue
     @State private var selectedTab: MainLibraryTab = .allPhotos
@@ -49,6 +50,9 @@ struct ContentView: View {
                         .id(route.itemID)
                         .zIndex(100)
                     }
+                }
+                .fullScreenCover(isPresented: $shouldPresentInitialSystemAlbumImport) {
+                    SystemAlbumBatchImportFlowSheet()
                 }
             } else {
                 OnboardingView()

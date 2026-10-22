@@ -92,6 +92,7 @@ struct LibraryView: View {
 
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
+    @State private var showingSystemAlbumBatchImport: Bool = false
     @State private var showingCameraScanner: Bool = false
     @State private var pendingCaptureReview: CaptureReviewRequest?
     @State private var captureReviewRequest: CaptureReviewRequest?
@@ -262,6 +263,9 @@ struct LibraryView: View {
             }
             .sheet(isPresented: $showingQuickCreateSheet) {
                 QuickCreateIdolSheet()
+            }
+            .fullScreenCover(isPresented: $showingSystemAlbumBatchImport) {
+                SystemAlbumBatchImportFlowSheet()
             }
         .sheet(isPresented: $showingSettingsSheet, onDismiss: {
                 if autoSyncToPhotos {
@@ -490,6 +494,12 @@ struct LibraryView: View {
 
                     Section("管理") {
                         Button {
+                            showingSystemAlbumBatchImport = true
+                        } label: {
+                            Label(L10n.tr("匯入系統相冊", "システムアルバム読込"), systemImage: "folder.badge.plus")
+                        }
+
+                        Button {
                             showingQuickCreateSheet = true
                         } label: {
                             Label(L10n.tr("團體 / 成員", "グループ / メンバー"), systemImage: "person.badge.plus")
@@ -640,6 +650,14 @@ struct LibraryView: View {
                     Label(L10n.tr("相簿", "アルバム"), systemImage: "photo.badge.plus")
                 }
                 .buttonStyle(.borderedProminent)
+
+                Button {
+                    showingSystemAlbumBatchImport = true
+                } label: {
+                    Label(L10n.tr("匯入系統相冊", "システムアルバム読込"), systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("library.empty.batchImportAlbums")
             }
         }
     }
@@ -916,6 +934,7 @@ struct AlbumsRootView: View {
     @State private var memberScrollPosition = ScrollPosition(edge: .top)
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
+    @State private var showingSystemAlbumBatchImport: Bool = false
     @State private var showingBatchPairingSheet: Bool = false
     @State private var showingCameraScanner: Bool = false
     @State private var pendingCaptureReview: CaptureReviewRequest?
@@ -1091,6 +1110,9 @@ struct AlbumsRootView: View {
             .sheet(isPresented: $showingQuickCreateSheet) {
                 QuickCreateIdolSheet()
             }
+            .fullScreenCover(isPresented: $showingSystemAlbumBatchImport) {
+                SystemAlbumBatchImportFlowSheet()
+            }
             .sheet(isPresented: $showingSettingsSheet) {
                 SettingsView()
             }
@@ -1224,6 +1246,13 @@ struct AlbumsRootView: View {
                     showingAlbumPhotosPicker = true
                 }
             )
+
+            Button {
+                showingSystemAlbumBatchImport = true
+            } label: {
+                Label(L10n.tr("匯入系統相冊", "システムアルバム読込"), systemImage: "folder.badge.plus")
+            }
+            .accessibilityIdentifier("albums.menu.batchImportAlbums")
 
             if hierarchyMode == .groups && !sortedGroups.isEmpty {
                 Menu {
@@ -1391,12 +1420,22 @@ struct AlbumsRootView: View {
             } description: {
                 Text(L10n.tr("按團體與成員分類拍立得", "グループとメンバーでチェキを整理"))
             } actions: {
-                Button {
-                    showingQuickCreateSheet = true
-                } label: {
-                    Label(L10n.tr("團體 / 成員", "グループ / メンバー"), systemImage: "plus")
+                VStack(spacing: 12) {
+                    Button {
+                        showingQuickCreateSheet = true
+                    } label: {
+                        Label(L10n.tr("團體 / 成員", "グループ / メンバー"), systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        showingSystemAlbumBatchImport = true
+                    } label: {
+                        Label(L10n.tr("匯入系統相冊", "システムアルバム読込"), systemImage: "folder.badge.plus")
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("albums.emptyGroups.batchImportAlbums")
                 }
-                .buttonStyle(.borderedProminent)
             }
             .padding(.top, 48)
         } else if displayMode == .grid {
@@ -1509,12 +1548,22 @@ struct AlbumsRootView: View {
             } description: {
                 Text(L10n.tr("集中瀏覽所有成員相冊", "全メンバーのアルバムを一括表示"))
             } actions: {
-                Button {
-                    showingQuickCreateSheet = true
-                } label: {
-                    Label(L10n.tr("成員", "メンバー"), systemImage: "plus")
+                VStack(spacing: 12) {
+                    Button {
+                        showingQuickCreateSheet = true
+                    } label: {
+                        Label(L10n.tr("成員", "メンバー"), systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        showingSystemAlbumBatchImport = true
+                    } label: {
+                        Label(L10n.tr("匯入系統相冊", "システムアルバム読込"), systemImage: "folder.badge.plus")
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("albums.emptyMembers.batchImportAlbums")
                 }
-                .buttonStyle(.borderedProminent)
             }
             .padding(.top, 48)
         } else if displayMode == .grid {

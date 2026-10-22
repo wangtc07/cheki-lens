@@ -179,6 +179,7 @@ struct SettingsView: View {
     @AppStorage("hasSeenDetailCoachMark") private var hasSeenDetailCoachMark: Bool = false
 
     @State private var showingProPurchaseSheet: Bool = false
+    @State private var showingSystemAlbumBatchImport: Bool = false
     @State private var isRestoringPurchases: Bool = false
     @State private var isSyncingAlbumsToPhotos: Bool = false
     @State private var alertTitle: String = ""
@@ -246,6 +247,25 @@ struct SettingsView: View {
                             iconColor: .indigo
                         )
                     }
+
+                    Button {
+                        showingSystemAlbumBatchImport = true
+                    } label: {
+                        HStack {
+                            SettingsRowLabel(
+                                title: L10n.tr("批次匯入系統相冊", "システムアルバム一括読込"),
+                                subtitle: L10n.tr("依資料夾與相簿自動建立團體與成員", "フォルダとアルバムからグループとメンバーを自動作成"),
+                                systemImage: "folder.badge.plus",
+                                iconColor: .purple
+                            )
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.row.batchImportAlbums")
                 } header: {
                     Text(L10n.tr("系統相簿同步", "システムアルバム同期"))
                 } footer: {
@@ -531,6 +551,9 @@ struct SettingsView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .applyAppAppearanceAndLocale()
+            }
+            .fullScreenCover(isPresented: $showingSystemAlbumBatchImport) {
+                SystemAlbumBatchImportFlowSheet()
             }
             .alert(
                 alertTitle,
