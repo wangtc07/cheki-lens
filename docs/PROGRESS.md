@@ -8,11 +8,11 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-10-22
-- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)
+- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.1 全數完成）
 - **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：已完成 **Task 7.1.1**（`ChekiItem`、`IdolGroup`、`IdolMember`、`ChekiMemo` 屬性宣告重構，全量補齊預設值與 CloudKit 相容性，新增 `cloudIdentifier`、`backCloudIdentifier`、`deletedAt`、`lastModifiedAt`、`thumbnailData` 欄位與軟刪除 30 天管理方法；13 項單元測試全數通過）。
-- **最新穩定 Git Commit**：feat(model): 完成 Task 7.1.1 補齊 SwiftData 實體 CloudKit 預設值並擴充雲端識別與軟刪除欄位
-- **下一動執行指示**：執行 **Task 7.1.2**（實作 `PHCloudIdentifier` 轉換工具與相片跨裝置尋址模組 `PhotoCloudIdentifierMapper.swift`）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
+- **當前進行中任務**：已完成 **Task 7.1.2**（實作 `PHCloudIdentifier` 轉換工具與相片跨裝置尋址模組 `PhotoCloudIdentifierMapper.swift`，包含空白防禦、批次雙向查表與測試 Mock 封裝；Phase 7.1 累計 17 項單元測試全數通過）。
+- **最新穩定 Git Commit**：feat(photos): 完成 Task 7.1.2 實作 PHCloudIdentifier 雙向映射器與跨裝置尋址模組
+- **下一動執行指示**：執行 **Task 7.2.1**（封裝 `CloudKitSyncManager.swift`，管理 iCloud 帳號狀態監測 `CKContainer.accountStatus`、同步狀態機與最後同步時間戳記）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
 
@@ -372,7 +372,7 @@
 
 #### 階段 7.1：資料模型與 CloudKit 相容性重構
 - [x] **Task 7.1.1**: 重構 `ChekiItem`、`IdolGroup`、`IdolMember`、`ChekiMemo` 屬性宣告，全量補齊屬性預設值與相容性檢查，新增 `cloudIdentifier`、`backCloudIdentifier`、`deletedAt`、`lastModifiedAt`、`thumbnailData` 欄位與 30 天軟刪除管理方法（13 項單元測試全數通過）。
-- [ ] **Task 7.1.2**: 實作 `PHCloudIdentifier` 轉換工具與相片跨裝置尋址模組 (`PhotoCloudIdentifierMapper.swift`)。
+- [x] **Task 7.1.2**: 實作 `PHCloudIdentifier` 轉換工具與相片跨裝置尋址模組 (`PhotoCloudIdentifierMapper.swift`)，包含批次雙向查表、空白防禦與 `MockPhotoCloudIdentifierMapper` 測試實作（4 項單元測試全數通過）。
 
 #### 階段 7.2：雙模式 ModelContainer 與動態切換引擎
 - [ ] **Task 7.2.1**: 封裝 `CloudKitSyncManager.swift`，管理 iCloud 帳號狀態監測 (`CKContainer.accountStatus`)、同步狀態機（閒置/同步中/成功/錯誤）與最後同步時間戳記。
