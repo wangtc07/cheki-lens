@@ -698,7 +698,9 @@ struct StagingImportShelfView: View {
     var onCancel: (() -> Void)? = nil
     var onCommitImport: (([StagingMemberAlbumCard]) -> Void)? = nil
     var onInspectCard: ((StagingMemberAlbumCard) -> Void)? = nil
+    var onFinishCommit: ((AlbumImportCommitResult) -> Void)? = nil
 
+    @Environment(\.modelContext) private var modelContext
     @AppStorage("defaultBorderInsetPercentage") private var defaultBorderInsetPercentage: Double = 0.0
     @AppStorage("autoRecognizeOCRDateOnImport") private var autoRecognizeOCRDateOnImport: Bool = true
 
@@ -711,6 +713,8 @@ struct StagingImportShelfView: View {
     @State private var targetOldGroupName: String = ""
     @State private var targetCardIDForAction: String = ""
     @State private var inspectingCard: StagingMemberAlbumCard? = nil
+    @State private var commitResultForAlert: AlbumImportCommitResult? = nil
+    @State private var commitErrorMessage: String? = nil
 
     private let columns = [
         GridItem(.flexible(), spacing: 14),
@@ -768,7 +772,7 @@ struct StagingImportShelfView: View {
                         .accessibilityIdentifier("staging.shelf.selectModeToggle")
 
                         ConfirmToolbarButton(accessibilityIdentifier: "chrome.staging.shelf.confirm") {
-                            onCommitImport?(state.cards)
+                            handleConfirmImport()
                         }
                         .disabled(!state.canCommitImport)
                     }
@@ -820,6 +824,35 @@ struct StagingImportShelfView: View {
                         state.updateCardSlots(card.id, slots: updatedSlots)
                     }
                 )
+            }
+            .alert(
+                L10n.tr("匯入完成", "インポート完了"),
+                isPresented: Binding(
+                    get: { commitResultForAlert != nil },
+                    set: { if !$0 { commitResultForAlert = nil } }
+                ),
+                presenting: commitResultForAlert
+            ) { result in
+                Button(L10n.tr("確定", "OK")) {
+                    let finalResult = result
+                    commitResultForAlert = nil
+                    onFinishCommit?(finalResult)
+                }
+            } message: { result in
+                Text(result.localizedSummaryMessage)
+            }
+            .alert(
+                L10n.tr("匯入失敗", "インポート失敗"),
+                isPresented: Binding(
+                    get: { commitErrorMessage != nil },
+                    set: { if !$0 { commitErrorMessage = nil } }
+                )
+            ) {
+                Button(L10n.tr("確定", "OK"), role: .cancel) {
+                    commitErrorMessage = nil
+                }
+            } message: {
+                Text(commitErrorMessage ?? "")
             }
         }
         .task {
@@ -987,7 +1020,7 @@ struct StagingImportShelfView: View {
 
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    onCommitImport?(state.cards)
+                    handleConfirmImport()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.down.doc.fill")
@@ -1010,6 +1043,24 @@ struct StagingImportShelfView: View {
             .padding(.bottom, 8)
         }
         .background(Color(.systemBackground))
+    }
+
+    private func handleConfirmImport() {
+        if let onCommitImport {
+            onCommitImport(state.cards)
+            return
+        }
+        do {
+            let ratio = defaultBorderInsetPercentage / 100.0
+            let result = try AlbumImportCommitEngine.commit(
+                cards: state.cards,
+                in: modelContext,
+                borderInsetRatio: ratio
+            )
+            commitResultForAlert = result
+        } catch {
+            commitErrorMessage = error.localizedDescription
+        }
     }
 
     private func handleConfirmNewGroup() {

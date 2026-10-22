@@ -477,6 +477,10 @@ final class SystemAlbumExplorerService: Sendable {
             .folding(options: [.caseInsensitive, .widthInsensitive], locale: Locale(identifier: "ja_JP"))
     }
 
+    nonisolated static func namesMatch(_ lhs: String, _ rhs: String) -> Bool {
+        normalizedNameKey(lhs) == normalizedNameKey(rhs)
+    }
+
     /// 當關閉邊緣偵測（相片已事先裁切）時，依影像像素尺寸推斷拍立得相紙規格（`Mini` / `Square` / `Wide`）
     nonisolated static func inferFilmFormat(for imageSize: CGSize) -> FilmFormat {
         guard imageSize.width > 0, imageSize.height > 0 else {
