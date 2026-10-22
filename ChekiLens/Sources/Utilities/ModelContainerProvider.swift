@@ -2,41 +2,203 @@ import SwiftUI
 import SwiftData
 import CoreGraphics
 import ImageIO
+import OSLog
 
 // MARK: - ModelContainerProvider
 
 /// 統一管理 ModelContainer 生命週期的服務層
 ///
-/// 提供兩種容器：
-/// 1. `live`：磁碟持久化容器（正式 App 使用）
-/// 2. `preview`：記憶體容器（SwiftUI Preview / XCTest 使用）
-enum ModelContainerProvider {
+/// 提供：
+/// 1. `live`：持久化容器（自動依據 Pro 資格與使用者偏好動態啟用 CloudKit 雲端同步或純本機模式）
+/// 2. `createContainer(enableCloudKit:storeURL:)`：按需創建指定同步模式之容器
+/// 3. `migrateData(from:to:)`：跨 Store 資料合併與遷移引擎
+/// 4. `preview`：記憶體容器（SwiftUI Preview / XCTest 使用）
+public enum ModelContainerProvider {
+
+    /// 統一 Schema 定義
+    public static let sharedSchema = Schema([
+        ChekiItem.self,
+        IdolGroup.self,
+        IdolMember.self,
+        ChekiMemo.self
+    ])
 
     // MARK: Live Container
 
-    /// 正式持久化 ModelContainer（所有 @Model 實體均納入 Schema）
+    /// 正式持久化 ModelContainer
+    /// 依據 Pro 買斷狀態與 iCloud 同步開關決定是否連接 CloudKit
     @MainActor
-    static let live: ModelContainer = {
-        let schema = Schema([
-            ChekiItem.self,
-            IdolGroup.self,
-            IdolMember.self,
-            ChekiMemo.self
-        ])
-        let config = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: false,
-            allowsSave: true,
-            groupContainer: .none,
-            cloudKitDatabase: .none
-        )
-        do {
-            let container = try ModelContainer(for: schema, configurations: [config])
-            return container
-        } catch {
-            fatalError("❌ ModelContainer (live) 初始化失敗：\(error.localizedDescription)")
-        }
+    public static var live: ModelContainer = {
+        let enableCloudKit = shouldEnableCloudKitSync()
+        return createContainerWithFallback(enableCloudKit: enableCloudKit)
     }()
+
+    /// 判定當前是否應啟用 CloudKit 雲端同步
+    public static func shouldEnableCloudKitSync() -> Bool {
+        let isPro = UserDefaults.standard.bool(forKey: "isProLifetimeUnlocked")
+        let isSyncEnabled = UserDefaults.standard.object(forKey: "isICloudSyncEnabled") as? Bool ?? true
+        return isPro && isSyncEnabled
+    }
+
+    /// 建立 ModelConfiguration
+    public static func makeConfiguration(
+        enableCloudKit: Bool,
+        isStoredInMemoryOnly: Bool = false,
+        storeURL: URL? = nil
+    ) -> ModelConfiguration {
+        if let storeURL {
+            return ModelConfiguration(
+                schema: sharedSchema,
+                url: storeURL,
+                allowsSave: true,
+                cloudKitDatabase: enableCloudKit ? .automatic : .none
+            )
+        } else {
+            return ModelConfiguration(
+                schema: sharedSchema,
+                isStoredInMemoryOnly: isStoredInMemoryOnly,
+                allowsSave: true,
+                groupContainer: .none,
+                cloudKitDatabase: enableCloudKit ? .automatic : .none
+            )
+        }
+    }
+
+    /// 建立指定同步模式之 ModelContainer
+    @MainActor
+    public static func createContainer(
+        enableCloudKit: Bool,
+        storeURL: URL? = nil
+    ) throws -> ModelContainer {
+        let config = makeConfiguration(enableCloudKit: enableCloudKit, isStoredInMemoryOnly: false, storeURL: storeURL)
+        return try ModelContainer(for: sharedSchema, configurations: [config])
+    }
+
+    /// 嘗試建立容器，若 CloudKit 初始化遭遇網路/環境錯誤則優雅降級為純本機 Store
+    @MainActor
+    public static func createContainerWithFallback(
+        enableCloudKit: Bool,
+        storeURL: URL? = nil
+    ) -> ModelContainer {
+        if enableCloudKit {
+            do {
+                return try createContainer(enableCloudKit: true, storeURL: storeURL)
+            } catch {
+                let logger = Logger(subsystem: "com.chekilens.app", category: "ModelContainerProvider")
+                logger.error("⚠️ CloudKit 容器初始化失敗，降級為純本機 Store: \(error.localizedDescription)")
+            }
+        }
+
+        do {
+            return try createContainer(enableCloudKit: false, storeURL: storeURL)
+        } catch {
+            fatalError("❌ 本機 ModelContainer 初始化失敗：\(error.localizedDescription)")
+        }
+    }
+
+    /// 跨 Container 資料遷移引擎（例如從獨立本機 Store 遷移複製至 CloudKit Store）
+    @MainActor
+    @discardableResult
+    public static func migrateData(
+        from sourceContainer: ModelContainer,
+        to targetContainer: ModelContainer
+    ) throws -> (groups: Int, members: Int, chekis: Int, memos: Int) {
+        let sourceContext = sourceContainer.mainContext
+        let targetContext = targetContainer.mainContext
+
+        let sourceGroups = try sourceContext.fetch(FetchDescriptor<IdolGroup>())
+        let existingTargetGroupIDs = Set((try targetContext.fetch(FetchDescriptor<IdolGroup>())).map(\.id))
+
+        var migratedGroups = 0
+        for group in sourceGroups where !existingTargetGroupIDs.contains(group.id) {
+            let newGroup = IdolGroup(
+                id: group.id,
+                name: group.name,
+                colorHex: group.colorHex,
+                createdAt: group.createdAt,
+                sortOrder: group.sortOrder,
+                lastModifiedAt: group.lastModifiedAt
+            )
+            targetContext.insert(newGroup)
+            migratedGroups += 1
+        }
+
+        let sourceMembers = try sourceContext.fetch(FetchDescriptor<IdolMember>())
+        let existingTargetMemberIDs = Set((try targetContext.fetch(FetchDescriptor<IdolMember>())).map(\.id))
+
+        var migratedMembers = 0
+        for member in sourceMembers where !existingTargetMemberIDs.contains(member.id) {
+            let newMember = IdolMember(
+                id: member.id,
+                stageName: member.stageName,
+                realName: member.realName,
+                avatarImageData: member.avatarImageData,
+                tags: member.tags,
+                createdAt: member.createdAt,
+                sortOrder: member.sortOrder,
+                lastModifiedAt: member.lastModifiedAt
+            )
+            targetContext.insert(newMember)
+            migratedMembers += 1
+        }
+
+        let sourceItems = try sourceContext.fetch(FetchDescriptor<ChekiItem>())
+        let existingTargetItemIDs = Set((try targetContext.fetch(FetchDescriptor<ChekiItem>())).map(\.id))
+
+        var migratedChekis = 0
+        for item in sourceItems where !existingTargetItemIDs.contains(item.id) {
+            let newItem = ChekiItem(
+                id: item.id,
+                frontImageData: item.frontImageData,
+                backImageData: item.backImageData,
+                originalFrontImageData: item.originalFrontImageData,
+                originalBackImageData: item.originalBackImageData,
+                thumbnailData: item.thumbnailData,
+                capturedAt: item.capturedAt,
+                ocrDate: item.ocrDate,
+                originalCapturedAt: item.originalCapturedAt,
+                isJudgedDateManuallySet: item.isJudgedDateManuallySet,
+                isDateWrittenToAlbum: item.isDateWrittenToAlbum,
+                deletedAt: item.deletedAt,
+                lastModifiedAt: item.lastModifiedAt,
+                filmFormat: item.filmFormat,
+                detectedAspectRatio: item.detectedAspectRatio,
+                borderInsetRatio: item.borderInsetRatio,
+                perspectivePointsJSON: item.perspectivePointsJSON,
+                backPerspectivePointsJSON: item.backPerspectivePointsJSON,
+                detectionMethod: item.detectionMethod,
+                processingState: item.processingState,
+                isSyncedToPhotoLibrary: item.isSyncedToPhotoLibrary,
+                frontAssetIdentifier: item.frontAssetIdentifier,
+                backAssetIdentifier: item.backAssetIdentifier,
+                cloudIdentifier: item.cloudIdentifier,
+                backCloudIdentifier: item.backCloudIdentifier
+            )
+            targetContext.insert(newItem)
+            migratedChekis += 1
+        }
+
+        let sourceMemos = try sourceContext.fetch(FetchDescriptor<ChekiMemo>())
+        let existingTargetMemoIDs = Set((try targetContext.fetch(FetchDescriptor<ChekiMemo>())).map(\.id))
+
+        var migratedMemos = 0
+        for memo in sourceMemos where !existingTargetMemoIDs.contains(memo.id) {
+            let newMemo = ChekiMemo(
+                id: memo.id,
+                eventName: memo.eventName,
+                noteText: memo.noteText,
+                hashtags: memo.hashtags,
+                createdAt: memo.createdAt,
+                updatedAt: memo.updatedAt,
+                lastModifiedAt: memo.lastModifiedAt
+            )
+            targetContext.insert(newMemo)
+            migratedMemos += 1
+        }
+
+        try targetContext.save()
+        return (migratedGroups, migratedMembers, migratedChekis, migratedMemos)
+    }
 
     // MARK: Preview / Test Container
 
@@ -44,18 +206,12 @@ enum ModelContainerProvider {
     ///
     /// 呼叫後自動填入 `PreviewData.populate(into:)` 假資料
     @MainActor
-    static func preview(withSampleData: Bool = true) throws -> ModelContainer {
-        let schema = Schema([
-            ChekiItem.self,
-            IdolGroup.self,
-            IdolMember.self,
-            ChekiMemo.self
-        ])
+    public static func preview(withSampleData: Bool = true) throws -> ModelContainer {
         let config = ModelConfiguration(
-            schema: schema,
+            schema: sharedSchema,
             isStoredInMemoryOnly: true
         )
-        let container = try ModelContainer(for: schema, configurations: [config])
+        let container = try ModelContainer(for: sharedSchema, configurations: [config])
 
         if withSampleData {
             PreviewData.populate(into: container.mainContext)
