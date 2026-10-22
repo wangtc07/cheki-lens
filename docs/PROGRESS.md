@@ -8,11 +8,11 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-10-22
-- **當前所屬階段**：Phase 6.7 — 系統相簿初始批次導入 (System Album Batch Import)（全數完成）
+- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)
 - **當前分支**：`main`
-- **當前進行中任務**：已完成 **Task 6.7.6**（建立 `SystemAlbumBatchImportFlowSheet` 總流程容器與 `SystemAlbumBatchImportFlowState` 狀態機，並掛載 Onboarding 完成後引導提示、相簿庫空狀態按鈕、相冊頁與設定頁常駐匯入入口；Phase 6.7 全數 39 項單元測試通過）。
+- **當前進行中任務**：已完成需求訪談與架構藍圖定案（見 `docs/ICLOUD_SYNC_ROADMAP.md`），即將執行 **Task 7.1.1**（`ChekiItem`、`IdolGroup`、`IdolMember`、`ChekiMemo` 屬性宣告重構，全量補齊預設值與 CloudKit 相容性，新增 `cloudIdentifier`、`backCloudIdentifier`、`deletedAt`、`lastModifiedAt` 欄位）。
 - **最新穩定 Git Commit**：feat(import): 完成 Task 6.7.6 掛載系統相簿批次匯入總流程與四處入口
-- **下一動執行指示**：Phase 6.7（系統相簿初始批次導入）已全數完成，後續可執行 **Task 6.3**（建立 App 圖示、啟動畫面與 App Store 截圖產生流程）或進行實機驗收。開工前先讀 `docs/PROGRESS.md` 與 `docs/UI_AGENT_GUIDELINES.md`。
+- **下一動執行指示**：執行 **Task 7.1.1**（SwiftData 實體 CloudKit 相容性與新欄位擴充）。開工前先讀 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
 
@@ -363,6 +363,39 @@
 - [x] **Task 6.7.4**: 整合 `BatchPairingView` 供成員卡片點入深層編輯（步驟 3：建立 `StagingSlotDeckReducer` 純函式配對狀態機，支援點入讀入完成的成員卡片檢視所有照片預覽、拖放與雙擊外框手動配對背面、拆開／對調、剔除雜圖與調整規格／日期並回寫至成員卡片；13 項單元測試全數通過）
 - [x] **Task 6.7.5**: 實作 `AlbumImportCommitEngine`（步驟 4：最終確認正式匯入，自動合併既有同名團體與成員並將未分類同名成員晉升歸入團體、略過已匯入的重複相片 Asset ID、寫入 SwiftData 並顯示雙語結果摘要；5 項單元測試全數通過）
 - [x] **Task 6.7.6**: 掛載全處進入點（實作 `SystemAlbumBatchImportFlowSheet` 與 `SystemAlbumBatchImportFlowState` 總流程狀態機，並串接 Onboarding 第 3 頁完成後引導提示、相簿庫空狀態按鈕、相冊頁漢堡選單／空狀態與設定頁常駐匯入入口；4 項流程狀態機測試與 Phase 6.7 全數 39 項單元測試通過）
+
+---
+
+### 階段 7：多裝置 iCloud 同步與最近刪除相冊 (Phase 7: Multi-Device iCloud Sync & Recently Deleted)
+
+*詳細架構規格與訪談結論詳見：`docs/ICLOUD_SYNC_ROADMAP.md`*
+
+#### 階段 7.1：資料模型與 CloudKit 相容性重構
+- [ ] **Task 7.1.1**: 重構 `ChekiItem`、`IdolGroup`、`IdolMember`、`ChekiMemo` 屬性宣告，全量補齊屬性預設值與相容性檢查，新增 `cloudIdentifier`、`backCloudIdentifier`、`deletedAt`、`lastModifiedAt` 欄位。
+- [ ] **Task 7.1.2**: 實作 `PHCloudIdentifier` 轉換工具與相片跨裝置尋址模組 (`PhotoCloudIdentifierMapper.swift`)。
+
+#### 階段 7.2：雙模式 ModelContainer 與動態切換引擎
+- [ ] **Task 7.2.1**: 封裝 `CloudKitSyncManager.swift`，管理 iCloud 帳號狀態監測 (`CKContainer.accountStatus`)、同步狀態機（閒置/同步中/成功/錯誤）與最後同步時間戳記。
+- [ ] **Task 7.2.2**: 升級 `ModelContainerProvider.swift`，支援根據 Pro 資格與使用者開關動態切換本機 Store (`.none`) 與 CloudKit Store (`.automatic`)，並實作既有本機 SQLite 資料自動遷移合併至 CloudKit 容器。
+
+#### 階段 7.3：雙軌圖片管理與隨選快取管線
+- [ ] **Task 7.3.1**: 實作 `ChekiImageCacheManager.swift`（支援輕量縮圖生成、本機快取目錄存儲、LRU 空間管理與一鍵清除暫存快取）。
+- [ ] **Task 7.3.2**: 實作 `ChekiCloudAssetService.swift`（當無系統相簿對應時，負責 CloudKit Asset 背景隨選下載與漸進式載入）。
+- [ ] **Task 7.3.3**: 整合 `ChekiDetailView` 與相片加載元件，優先尋址本機系統相簿，Fallback 走 CloudKit 隨選快取，載入期間顯示平滑過渡動畫。
+
+#### 階段 7.4：嚴格鏡像刪除、30 天「最近刪除」相冊與復原機制
+- [ ] **Task 7.4.1**: 在 `ChekiItem` 引入 `deletedAt: Date?` 軟刪除欄位，並實作一般圖庫自動過濾、已刪除拍立得 30 天自動過期硬刪除管線。
+- [ ] **Task 7.4.2**: 實作 App 內「最近刪除」相冊 UI（比照 Apple 相簿工具相冊，支援剩餘天數倒數「還有 29 天」、批次復原、批次立即永久刪除）。
+- [ ] **Task 7.4.3**: 實作雲端遠端刪除監聽器，當遠端刪除且本機開啟「同步刪除系統相簿」時，非同步刪除對應的 `PHAsset`；若遠端復原亦同步還原。
+- [ ] **Task 7.4.4**: 撰寫多裝置並行修改、軟刪除同步與復原合併之單元測試（包含雙向編輯、離線更新與 LWW 合併）。
+
+#### 階段 7.5：UI 介面與設定控制面板
+- [ ] **Task 7.5.1**: 在 `SettingsView` 新增「iCloud 多裝置同步」獨立圓角卡片群組（帳號狀態指示燈、Pro 狀態、同步 Toggle、最後同步時間、立即同步按鈕、快取大小與清除按鈕）。
+- [ ] **Task 7.5.2**: 多語系字串補齊（繁體中文與日文）與 iPad / 多裝置佈局適配。
+
+#### 階段 7.6：端到端整合驗證與實機多裝置驗收
+- [ ] **Task 7.6.1**: 單元測試與回歸測試驗證（模型架構、遷移邏輯、快取機制、CloudIdentifier 映射）。
+- [ ] **Task 7.6.2**: 模擬器與多設備真實 CloudKit 測試環境聯調驗收。
 
 ---
 
