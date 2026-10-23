@@ -90,6 +90,7 @@ struct LibraryView: View {
     private var chromeState = NavigationChromeState.shared
     @State private var selectedItemIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm: Bool = false
+    @State private var showingRecentlyDeleted: Bool = false
 
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
@@ -333,6 +334,10 @@ struct LibraryView: View {
                 photosTargetItem: $photosBacksideTargetItem,
                 isShowingPhotosPicker: $isShowingPhotosBacksidePicker
             )
+            .navigationDestination(isPresented: $showingRecentlyDeleted) {
+                RecentlyDeletedView()
+                    .toolbar(.hidden, for: .tabBar)
+            }
             .navigationDestination(for: ChekiDetailRoute.self) { route in
                 ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
                     .toolbar(.hidden, for: .tabBar)
@@ -505,6 +510,19 @@ struct LibraryView: View {
                         } label: {
                             Label(L10n.tr("團體 / 成員", "グループ / メンバー"), systemImage: "person.badge.plus")
                         }
+
+                        Button {
+                            showingRecentlyDeleted = true
+                        } label: {
+                            let trashedCount = chekiItems.filter { $0.isDeleted && $0.modelContext != nil }.count
+                            Label(
+                                trashedCount > 0
+                                    ? "\(L10n.tr("最近刪除", "最近削除した項目")) (\(trashedCount))"
+                                    : L10n.tr("最近刪除", "最近削除した項目"),
+                                systemImage: "trash"
+                            )
+                        }
+                        .accessibilityIdentifier("library.menu.recentlyDeleted")
 
                         Button {
                             showingSettingsSheet = true
@@ -1266,6 +1284,7 @@ struct AlbumsRootView: View {
             }
             .navigationDestination(for: RecentlyDeletedAlbumRoute.self) { _ in
                 RecentlyDeletedView()
+                    .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(for: ChekiDetailRoute.self) { route in
                 ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
@@ -1342,6 +1361,19 @@ struct AlbumsRootView: View {
 
             Divider()
 
+            Button {
+                albumPath.append(RecentlyDeletedAlbumRoute())
+            } label: {
+                let trashedCount = chekiItems.filter { $0.isDeleted && $0.modelContext != nil }.count
+                Label(
+                    trashedCount > 0
+                        ? "\(L10n.tr("最近刪除", "最近削除した項目")) (\(trashedCount))"
+                        : L10n.tr("最近刪除", "最近削除した項目"),
+                    systemImage: "trash"
+                )
+            }
+            .accessibilityIdentifier("albums.menu.recentlyDeleted")
+
             SettingsMenuButton { showingSettingsSheet = true }
     }
 
@@ -1384,10 +1416,6 @@ struct AlbumsRootView: View {
                     groupsAlbumGrid
                 case .members:
                     allMembersAlbumGrid
-                }
-
-                if !isSelectingAlbums {
-                    albumUtilitiesSection
                 }
             }
             .padding(.top, 96)
@@ -1750,56 +1778,6 @@ struct AlbumsRootView: View {
             .albumCardLift(menu: uncategorizedMenuLifted, dragging: false)
             .opacity(isSelectingAlbums ? 0.4 : 1)
             .zIndex(uncategorizedMenuLifted ? 100 : 0)
-    }
-
-    // MARK: - 更多項目 / 實用工具（Utilities：最近刪除相冊）
-
-    @ViewBuilder
-    private var albumUtilitiesSection: some View {
-        let trashedCount = chekiItems.filter { $0.isDeleted && $0.modelContext != nil }.count
-        VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.tr("更多項目", "その他"))
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 16)
-                .padding(.top, 24)
-
-            Button {
-                albumPath.append(RecentlyDeletedAlbumRoute())
-            } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 24, height: 24)
-
-                    Text(L10n.tr("最近刪除", "最近削除した項目"))
-                        .font(.body)
-                        .foregroundStyle(.primary)
-
-                    Spacer()
-
-                    if trashedCount > 0 {
-                        Text("\(trashedCount)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color(.tertiaryLabel))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(.secondarySystemGroupedBackground))
-                )
-                .padding(.horizontal, 16)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
     }
 
     @ViewBuilder

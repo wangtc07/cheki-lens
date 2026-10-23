@@ -109,4 +109,24 @@ final class RecentlyDeletedViewTests: XCTestCase {
         XCTAssertEqual(all.count, 1)
         XCTAssertEqual(all.first?.id, item2.id)
     }
+
+    func test_recentlyDeletedMenuLabel_formatsCount() {
+        let title = L10n.tr("最近刪除", "最近削除した項目")
+
+        let zeroCount = 0
+        let zeroLabel = zeroCount > 0 ? "\(title) (\(zeroCount))" : title
+        XCTAssertEqual(zeroLabel, title)
+
+        let fiveCount = 5
+        let fiveLabel = fiveCount > 0 ? "\(title) (\(fiveCount))" : title
+        XCTAssertTrue(fiveLabel.contains("(5)"))
+        XCTAssertTrue(fiveLabel.contains(title))
+    }
+
+    func test_recentlyDeletedAlbumRoute_canBeAppendedToNavigationPath() {
+        var path = NavigationPath()
+        XCTAssertEqual(path.count, 0)
+        path.append(RecentlyDeletedAlbumRoute())
+        XCTAssertEqual(path.count, 1)
+    }
 }

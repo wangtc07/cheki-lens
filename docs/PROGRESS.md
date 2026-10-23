@@ -10,8 +10,8 @@
 - **最後更新時間**：2026-10-23
 - **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.5 進行中）
 - **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：完成 **無 CloudKit 權限實機點開設定閃退之防禦修復**（修復個人免費開發者憑證在實體裝置上因缺少 CloudKit Entitlements，於進入 SettingsView 呼叫 `CKContainer.default()` 時觸發 `SIGTRAP` 崩潰之問題；透過 `CloudKitEntitlementChecker` ISO-Latin-1 DER 解析、容器實例化惰性解構與無憑證安全降級防禦；累計 116 項單元測試全數通過，並已安裝於實機驗證）。
-- **最新穩定 Git Commit**：fix(sync): 修正無 CloudKit 憑證實機上呼叫 CKContainer 觸發崩潰問題與防禦降級
+- **當前進行中任務**：完成 **「最近刪除」項目移至漢堡選單**（將原本相冊頁底部的「更多項目 > 最近刪除」卡片移除，改整合至相冊頁（`AlbumsRootView`）與圖庫首頁（`LibraryView`）的頂部漢堡選單內，支援垃圾桶動態項目數顯示與直接導航，全量 118 項單元測試全數通過，並已安裝至實機）。
+- **最新穩定 Git Commit**：refactor(ui): 將「最近刪除」由相冊底部列表移動至頂部漢堡選單
 - **下一動執行指示**：執行 **Task 7.5.2**（多語系字串補齊至 `Localizable.xcstrings`（繁體中文與日文）與 iPad / 多裝置佈局適配）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
