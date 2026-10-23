@@ -364,9 +364,11 @@ struct SettingsView: View {
                     )) {
                         SettingsRowLabel(
                             title: L10n.tr("iCloud 雲端同步", "iCloud 同期"),
-                            subtitle: isProLifetimeUnlocked
-                                ? L10n.tr("多裝置自動同步拍立得資料與標籤", "複数端末でチェキデータとタグを自動同期")
-                                : L10n.tr("需 ChekiLens Pro 買斷版", "ChekiLens Pro 買い切り版が必要"),
+                            subtitle: !CloudKitEntitlementChecker.isCloudKitEntitled
+                                ? L10n.tr("本機憑證未配置 CloudKit 權限", "現在のプロファイルではCloudKitが無効です")
+                                : (isProLifetimeUnlocked
+                                    ? L10n.tr("多裝置自動同步拍立得資料與標籤", "複数端末でチェキデータとタグを自動同期")
+                                    : L10n.tr("需 ChekiLens Pro 買斷版", "ChekiLens Pro 買い切り版が必要")),
                             systemImage: "icloud.fill",
                             iconColor: .blue
                         )
@@ -816,6 +818,9 @@ struct SettingsView: View {
 
     // MARK: - iCloud 帳號狀態指示燈色彩
     private var accountStatusIndicatorColor: Color {
+        guard CloudKitEntitlementChecker.isCloudKitEntitled else {
+            return .secondary
+        }
         switch cloudKitSyncManager.accountStatus {
         case .available:
             return .green

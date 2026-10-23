@@ -26,21 +26,67 @@ public protocol CloudKitContainerProtocol: Sendable {
     func checkConnection() async throws
 }
 
+// MARK: - CloudKitEntitlementChecker
+
+/// 檢查當前執行環境是否具備 CloudKit 權限與憑證
+public enum CloudKitEntitlementChecker {
+    /// 檢查當前執行環境是否具備 CloudKit 權限（實體裝置需在 provisioning profile 內包含 CloudKit 權限）
+    public static var isCloudKitEntitled: Bool {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        let provisionURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision")
+            ?? Bundle.main.bundleURL.appendingPathComponent("embedded.mobileprovision")
+        guard FileManager.default.fileExists(atPath: provisionURL.path),
+              let data = try? Data(contentsOf: provisionURL) else {
+            // App Store 或 TestFlight 發布版會移除 embedded.mobileprovision，依賴系統簽署
+            return true
+        }
+        // embedded.mobileprovision 為 DER/ASN.1 格式二進位簽署檔案，必須使用 .isoLatin1 解碼以完整讀取內嵌之 XML Plist
+        guard let content = String(data: data, encoding: .isoLatin1) else {
+            return false
+        }
+        return content.contains("com.apple.developer.icloud-container-identifiers") ||
+               content.contains("com.apple.developer.icloud-services")
+        #endif
+    }
+}
+
 // MARK: - LiveCloudKitContainer
 
 /// 正式環境使用之 CloudKit Container 包裝
 public final class LiveCloudKitContainer: CloudKitContainerProtocol, @unchecked Sendable {
-    private let container: CKContainer
+    private let customContainer: CKContainer?
 
-    public init(container: CKContainer = .default()) {
-        self.container = container
+    public init(container: CKContainer? = nil) {
+        self.customContainer = container
+    }
+
+    private var resolvedContainer: CKContainer? {
+        if let customContainer {
+            return customContainer
+        }
+        guard CloudKitEntitlementChecker.isCloudKitEntitled else {
+            return nil
+        }
+        return CKContainer.default()
     }
 
     public func fetchAccountStatus() async throws -> CKAccountStatus {
-        try await container.accountStatus()
+        guard let container = resolvedContainer else {
+            return .couldNotDetermine
+        }
+        return try await container.accountStatus()
     }
 
     public func checkConnection() async throws {
+        guard let container = resolvedContainer else {
+            throw NSError(
+                domain: "CKErrorDomain",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: L10n.tr("此裝置/憑證未啟用 CloudKit 權限", "この端末/プロファイルではCloudKitが無効です")]
+            )
+        }
         let _ = try await container.privateCloudDatabase.allRecordZones()
     }
 }
@@ -148,6 +194,7 @@ public final class CloudKitSyncManager: CloudKitSyncManaging {
     // MARK: Account Monitoring
 
     private func setupAccountChangeListener() {
+        guard CloudKitEntitlementChecker.isCloudKitEntitled else { return }
         accountChangeListenerTask = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: .CKAccountChanged) {
                 guard let self else { return }
@@ -159,6 +206,11 @@ public final class CloudKitSyncManager: CloudKitSyncManaging {
 
     /// 重新查詢系統 Apple ID 的 iCloud 狀態
     public func refreshAccountStatus() async {
+        guard CloudKitEntitlementChecker.isCloudKitEntitled else {
+            self.accountStatus = .couldNotDetermine
+            updateSyncState()
+            return
+        }
         do {
             let status = try await container.fetchAccountStatus()
             self.accountStatus = status
@@ -236,13 +288,16 @@ public final class CloudKitSyncManager: CloudKitSyncManaging {
 
     // MARK: Computed Helpers
 
-    /// 是否具備啟用同步的完整條件（登入 iCloud ＋ 開啟同步開關 ＋ 解鎖 Pro）
+    /// 是否具備啟用同步的完整條件（登入 iCloud ＋ 開啟同步開關 ＋ 解鎖 Pro ＋ 憑證支援）
     public var canSync: Bool {
-        accountStatus == .available && isICloudSyncEnabled && StoreKitManager.shared.isProUnlocked
+        CloudKitEntitlementChecker.isCloudKitEntitled && accountStatus == .available && isICloudSyncEnabled && StoreKitManager.shared.isProUnlocked
     }
 
     /// 帳號狀態在地化描述
     public var accountStatusDescription: String {
+        guard CloudKitEntitlementChecker.isCloudKitEntitled else {
+            return L10n.tr("憑證未啟用 iCloud", "iCloud未設定")
+        }
         switch accountStatus {
         case .available:
             return L10n.tr("已連接 iCloud", "iCloud 接続済み")
@@ -261,6 +316,9 @@ public final class CloudKitSyncManager: CloudKitSyncManaging {
 
     /// 同步狀態在地化描述
     public var syncStateDescription: String {
+        guard CloudKitEntitlementChecker.isCloudKitEntitled else {
+            return L10n.tr("個人憑證無 CloudKit", "CloudKit未対応")
+        }
         switch syncState {
         case .idle:
             if !StoreKitManager.shared.isProUnlocked {

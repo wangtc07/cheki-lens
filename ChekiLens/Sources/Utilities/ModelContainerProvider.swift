@@ -35,6 +35,9 @@ public enum ModelContainerProvider {
 
     /// 判定當前是否應啟用 CloudKit 雲端同步
     public static func shouldEnableCloudKitSync() -> Bool {
+        guard CloudKitEntitlementChecker.isCloudKitEntitled else {
+            return false
+        }
         let isPro = UserDefaults.standard.bool(forKey: "isProLifetimeUnlocked")
         let isSyncEnabled = UserDefaults.standard.object(forKey: "isICloudSyncEnabled") as? Bool ?? true
         return isPro && isSyncEnabled

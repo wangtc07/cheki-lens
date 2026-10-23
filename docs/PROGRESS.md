@@ -10,8 +10,8 @@
 - **最後更新時間**：2026-10-23
 - **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.5 進行中）
 - **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：完成 **Task 7.5.1**（在 `SettingsView` 新增「iCloud 多裝置同步」獨立圓角卡片群組，包含帳號狀態指示燈、Pro 狀態與升級引導、同步總開關 Toggle、同步狀態描述與最後同步相對時間、手動「立即同步」按鈕與進度指示、本機暫存快取容量顯示與清除快取二次確認對話框；新增 5 項單元測試，累計 116 項單元測試全數通過）。
-- **最新穩定 Git Commit**：feat(settings): 完成 Task 7.5.1 在 SettingsView 新增 iCloud 多裝置同步與快取管理控制面板
+- **當前進行中任務**：完成 **無 CloudKit 權限實機點開設定閃退之防禦修復**（修復個人免費開發者憑證在實體裝置上因缺少 CloudKit Entitlements，於進入 SettingsView 呼叫 `CKContainer.default()` 時觸發 `SIGTRAP` 崩潰之問題；透過 `CloudKitEntitlementChecker` ISO-Latin-1 DER 解析、容器實例化惰性解構與無憑證安全降級防禦；累計 116 項單元測試全數通過，並已安裝於實機驗證）。
+- **最新穩定 Git Commit**：fix(sync): 修正無 CloudKit 憑證實機上呼叫 CKContainer 觸發崩潰問題與防禦降級
 - **下一動執行指示**：執行 **Task 7.5.2**（多語系字串補齊至 `Localizable.xcstrings`（繁體中文與日文）與 iPad / 多裝置佈局適配）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---

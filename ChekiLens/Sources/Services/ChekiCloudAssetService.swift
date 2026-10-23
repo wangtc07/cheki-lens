@@ -99,13 +99,26 @@ public protocol CloudKitAssetFetcherProtocol: Sendable {
 
 /// 預設 CloudKit 遠端 Asset 下載器
 public final class DefaultCloudKitAssetFetcher: CloudKitAssetFetcherProtocol {
-    private let container: CKContainer
+    private let customContainer: CKContainer?
 
-    public init(container: CKContainer = .default()) {
-        self.container = container
+    public init(container: CKContainer? = nil) {
+        self.customContainer = container
+    }
+
+    private var resolvedContainer: CKContainer? {
+        if let customContainer {
+            return customContainer
+        }
+        guard CloudKitEntitlementChecker.isCloudKitEntitled else {
+            return nil
+        }
+        return CKContainer.default()
     }
 
     public func fetchAssetData(recordName: String, field: String) async throws -> Data? {
+        guard let container = resolvedContainer else {
+            return nil
+        }
         let recordID = CKRecord.ID(recordName: recordName)
         let database = container.privateCloudDatabase
 
