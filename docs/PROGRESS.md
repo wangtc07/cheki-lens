@@ -8,11 +8,11 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-10-23
-- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.4 全數完成）
+- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.5 進行中）
 - **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：完成 **Task 7.4.4**（實作 `ChekiItem` 與 `ChekiMemo` LWW (Last-Write-Wins) 衝突解決機制、整合 `ModelContainerProvider` 跨 Store 遷移合併，撰寫雙向編輯、離線更新、軟刪除與復原並行同步單元測試；新增 7 項單元測試，Phase 7 累計 111 項單元測試全數通過）。
-- **最新穩定 Git Commit**：feat(test): 完成 Task 7.4.4 多裝置並行修改與 LWW 合併單元測試
-- **下一動執行指示**：執行 **Task 7.5.1**（在 `SettingsView` 新增「iCloud 多裝置同步」獨立圓角卡片群組，包含帳號狀態指示燈、Pro 狀態、同步 Toggle、最後同步時間、立即同步按鈕、快取大小與清除快取）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
+- **當前進行中任務**：完成 **Task 7.5.1**（在 `SettingsView` 新增「iCloud 多裝置同步」獨立圓角卡片群組，包含帳號狀態指示燈、Pro 狀態與升級引導、同步總開關 Toggle、同步狀態描述與最後同步相對時間、手動「立即同步」按鈕與進度指示、本機暫存快取容量顯示與清除快取二次確認對話框；新增 5 項單元測試，累計 116 項單元測試全數通過）。
+- **最新穩定 Git Commit**：feat(settings): 完成 Task 7.5.1 在 SettingsView 新增 iCloud 多裝置同步與快取管理控制面板
+- **下一動執行指示**：執行 **Task 7.5.2**（多語系字串補齊至 `Localizable.xcstrings`（繁體中文與日文）與 iPad / 多裝置佈局適配）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
 
@@ -391,7 +391,7 @@
 - [x] **Task 7.4.4**: 撰寫多裝置並行修改、軟刪除同步與復原合併之單元測試（包含雙向編輯、離線更新與 LWW 合併，7 項單元測試全數通過，Phase 7 累計 111 項單元測試全數通過）。
 
 #### 階段 7.5：UI 介面與設定控制面板
-- [ ] **Task 7.5.1**: 在 `SettingsView` 新增「iCloud 多裝置同步」獨立圓角卡片群組（帳號狀態指示燈、Pro 狀態、同步 Toggle、最後同步時間、立即同步按鈕、快取大小與清除按鈕）。
+- [x] **Task 7.5.1**: 在 `SettingsView` 新增「iCloud 多裝置同步」獨立圓角卡片群組（帳號狀態指示燈、Pro 狀態與解鎖引導、同步 Toggle、最後同步相對時間、手動立即同步按鈕、快取大小與清除暫存快取二次確認對話框，5 項單元測試全數通過，累計 116 項單元測試通過）。
 - [ ] **Task 7.5.2**: 多語系字串補齊（繁體中文與日文）與 iPad / 多裝置佈局適配。
 
 #### 階段 7.6：端到端整合驗證與實機多裝置驗收
