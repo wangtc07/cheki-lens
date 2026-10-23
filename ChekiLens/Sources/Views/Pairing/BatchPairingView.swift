@@ -778,9 +778,29 @@ struct BatchPairingView: View {
                 }
 
                 Spacer()
+
+                // 右側：選取按鈕（點擊進入多選批次排除模式）
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    togglePhotoSelectionApplyMode()
+                } label: {
+                    Text(isSelectingPhotosToApply ? L10n.tr("完成", "完了") : L10n.tr("多選排除", "複数選択"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isSelectingPhotosToApply ? .white : .blue)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5.5)
+                        .background {
+                            if isSelectingPhotosToApply {
+                                Capsule().fill(Color.blue)
+                            }
+                        }
+                        .modifier(OptionalLiquidGlassCapsuleModifier(isEnabled: !isSelectingPhotosToApply))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("staging.pairing.toggleSelectMode")
             }
 
-            Text(L10n.tr("拖曳或點選相片可配對正反面，亦可點擊右上角調整規格與日期", "ドラッグまたはタップで表裏ペアリング。右上タップでサイズと日付を変更可能"))
+            Text(L10n.tr("點擊相片右上角 ✕ 可排除非拍立得，亦可拖曳配對正反面", "写真右上の✕でチェキ以外を除外、ドラッグで表裏ペアリング"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -1007,6 +1027,31 @@ struct BatchPairingView: View {
                                 .shadow(color: .black.opacity(0.25), radius: 3, x: 0, y: 1)
                         }
                         .padding(8)
+                        Spacer()
+                    }
+                } else {
+                    // 非選取模式時，在卡片右上角提供快速排除/移除按鈕
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                withAnimation(ChekiMotion.toggle) {
+                                    removeSlot(id: slot.id)
+                                }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(.secondary.opacity(0.85), Color(.secondarySystemGroupedBackground))
+                                    .symbolRenderingMode(.palette)
+                                    .background(Circle().fill(Color(.systemBackground).opacity(0.85)))
+                                    .shadow(color: .black.opacity(0.18), radius: 3, x: 0, y: 1)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("chrome.workbench.slot.remove.\(slot.id.uuidString)")
+                            .accessibilityLabel(L10n.tr("排除此相片", "この写真を除外"))
+                        }
+                        .padding(6)
                         Spacer()
                     }
                 }
@@ -1842,6 +1887,23 @@ struct BatchPairingView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("chrome.preview.date")
+
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            let idToRemove = slot.id
+                            dismissMagnifiedPreview()
+                            withAnimation(ChekiMotion.toggle) {
+                                removeSlot(id: idToRemove)
+                            }
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
+                                .foregroundStyle(.red)
+                                .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(L10n.tr("排除相片", "写真を除外"))
+                        .accessibilityIdentifier("chrome.preview.delete")
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 18)
@@ -1917,21 +1979,23 @@ struct BatchPairingView: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    /// 「選擇套用」模式橫幅
+    /// 「選擇套用」或「批次排除」模式橫幅
     private var photoMultiSelectApplyBanner: some View {
         HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.badge.questionmark.fill")
+            Image(systemName: onCompleteStagingEdit != nil ? "trash.circle.fill" : "checkmark.circle.badge.questionmark.fill")
                 .font(.subheadline)
-                .foregroundStyle(.blue)
+                .foregroundStyle(onCompleteStagingEdit != nil ? .red : .blue)
 
-            Text(L10n.tr("點選相片套用 \(selectedTargetMembersDisplayString)", "写真を選択して \(selectedTargetMembersDisplayString) を適用"))
+            Text(onCompleteStagingEdit != nil
+                 ? L10n.tr("勾選非拍立得相片進行排除", "チェキ以外の写真を選択して除外")
+                 : L10n.tr("點選相片套用 \(selectedTargetMembersDisplayString)", "写真を選択して \(selectedTargetMembersDisplayString) を適用"))
                 .font(.caption)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
 
             Spacer(minLength: 4)
 
-            Button(selectedSlotIDsForApply.count == slots.count ? "取消全選" : "全選") {
+            Button(selectedSlotIDsForApply.count == slots.count ? L10n.tr("取消全選", "全解除") : L10n.tr("全選", "全選択")) {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 withAnimation(ChekiMotion.toggle) {
                     if selectedSlotIDsForApply.count == slots.count {
@@ -1944,15 +2008,36 @@ struct BatchPairingView: View {
             .buttonStyle(.bordered)
             .controlSize(.mini)
 
-            Button(L10n.tr("套用 · \(selectedSlotIDsForApply.count)", "適用 · \(selectedSlotIDsForApply.count)")) {
-                confirmApplyTargetMembersToSelectedSlots()
+            if onCompleteStagingEdit != nil {
+                Button(role: .destructive) {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    withAnimation(ChekiMotion.toggle) {
+                        slots.removeAll(where: { selectedSlotIDsForApply.contains($0.id) })
+                        selectedSlotIDsForApply.removeAll()
+                        isSelectingPhotosToApply = false
+                    }
+                } label: {
+                    Text(L10n.tr("排除 · \(selectedSlotIDsForApply.count)", "除外 · \(selectedSlotIDsForApply.count)"))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .controlSize(.mini)
+                .disabled(selectedSlotIDsForApply.isEmpty)
+                .accessibilityIdentifier("staging.pairing.bannerExclude")
+            } else {
+                Button(L10n.tr("套用 · \(selectedSlotIDsForApply.count)", "適用 · \(selectedSlotIDsForApply.count)")) {
+                    confirmApplyTargetMembersToSelectedSlots()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .disabled(selectedSlotIDsForApply.isEmpty)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.mini)
-            .disabled(selectedSlotIDsForApply.isEmpty)
         }
         .padding(10)
-        .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(
+            (onCompleteStagingEdit != nil ? Color.red : Color.blue).opacity(0.12),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
     }
 
     private var manualPairingInstructionBanner: some View {
@@ -2147,30 +2232,76 @@ struct BatchPairingView: View {
                             selectedSlotIDsForApply.removeAll()
                         }
                     } label: {
-                        Text("取消")
+                        Text(L10n.tr("取消", "キャンセル"))
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
-                            .padding(.horizontal, 18)
+                            .padding(.horizontal, 16)
                             .padding(.vertical, 8)
                             .background(Color(.tertiarySystemFill), in: Capsule())
                     }
                     .buttonStyle(.plain)
 
                     Button {
-                        confirmApplyTargetMembersToSelectedSlots()
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(ChekiMotion.toggle) {
+                            if selectedSlotIDsForApply.count == slots.count {
+                                selectedSlotIDsForApply.removeAll()
+                            } else {
+                                selectedSlotIDsForApply = Set(slots.map(\.id))
+                            }
+                        }
                     } label: {
-                        Text(L10n.tr("套用 · \(selectedSlotIDsForApply.count) 張", "適用 · \(selectedSlotIDsForApply.count) 枚"))
+                        Text(selectedSlotIDsForApply.count == slots.count ? L10n.tr("取消全選", "全解除") : L10n.tr("全選", "全選択"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Color(.tertiarySystemFill), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+
+                    if onCompleteStagingEdit != nil {
+                        Button(role: .destructive) {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            withAnimation(ChekiMotion.toggle) {
+                                slots.removeAll(where: { selectedSlotIDsForApply.contains($0.id) })
+                                selectedSlotIDsForApply.removeAll()
+                                isSelectingPhotosToApply = false
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "trash")
+                                Text(L10n.tr("排除 · \(selectedSlotIDsForApply.count) 張", "除外 · \(selectedSlotIDsForApply.count) 枚"))
+                            }
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
                             .background(
-                                selectedSlotIDsForApply.isEmpty ? Color.blue.opacity(0.4) : Color.blue,
+                                selectedSlotIDsForApply.isEmpty ? Color.red.opacity(0.4) : Color.red,
                                 in: Capsule()
                             )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(selectedSlotIDsForApply.isEmpty)
+                        .accessibilityIdentifier("staging.pairing.batchExclude")
+                    } else {
+                        Button {
+                            confirmApplyTargetMembersToSelectedSlots()
+                        } label: {
+                            Text(L10n.tr("套用 · \(selectedSlotIDsForApply.count) 張", "適用 · \(selectedSlotIDsForApply.count) 枚"))
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    selectedSlotIDsForApply.isEmpty ? Color.blue.opacity(0.4) : Color.blue,
+                                    in: Capsule()
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(selectedSlotIDsForApply.isEmpty)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(selectedSlotIDsForApply.isEmpty)
                 }
             } else if let onCompleteStagingEdit {
                 Button {

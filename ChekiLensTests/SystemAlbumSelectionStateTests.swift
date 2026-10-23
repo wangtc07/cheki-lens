@@ -56,7 +56,8 @@ final class SystemAlbumSelectionStateTests: XCTestCase {
         var state = SystemAlbumSelectionState()
 
         state.applyHierarchy(hierarchy, selectAllByDefault: false)
-        XCTAssertEqual(state.expandedFolderIDs, ["folder-nogi", "folder-hina"])
+        // 預設全數收合資料夾，提升清單整潔度與載入體驗
+        XCTAssertEqual(state.expandedFolderIDs, [])
         XCTAssertTrue(state.selectedAlbumIDs.isEmpty)
         XCTAssertFalse(state.isAllSelected)
         XCTAssertEqual(state.selectedAlbumCount, 0)
@@ -64,7 +65,7 @@ final class SystemAlbumSelectionStateTests: XCTestCase {
         XCTAssertFalse(state.canProceed)
 
         state.applyHierarchy(hierarchy, selectAllByDefault: true)
-        XCTAssertEqual(state.expandedFolderIDs, ["folder-nogi", "folder-hina"])
+        XCTAssertEqual(state.expandedFolderIDs, [])
         XCTAssertEqual(state.selectedAlbumIDs, ["album-nogi-1", "album-nogi-2", "album-hina-1", "album-solo"])
         XCTAssertTrue(state.isAllSelected)
         XCTAssertEqual(state.selectedAlbumCount, 4)
@@ -195,10 +196,13 @@ final class SystemAlbumSelectionStateTests: XCTestCase {
         var state = SystemAlbumSelectionState()
         state.applyHierarchy(hierarchy, selectAllByDefault: false)
 
+        // 預設收合
+        XCTAssertFalse(state.isFolderExpanded("folder-nogi"))
+        // 點擊展開
+        state.toggleFolderExpansion("folder-nogi")
         XCTAssertTrue(state.isFolderExpanded("folder-nogi"))
+        // 再次點擊收合
         state.toggleFolderExpansion("folder-nogi")
         XCTAssertFalse(state.isFolderExpanded("folder-nogi"))
-        state.toggleFolderExpansion("folder-nogi")
-        XCTAssertTrue(state.isFolderExpanded("folder-nogi"))
     }
 }

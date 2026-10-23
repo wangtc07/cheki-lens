@@ -115,11 +115,12 @@ struct StagingImportShelfState: Equatable {
         existingGroupNames: [String] = [],
         existingAssetIDs: Set<String> = []
     ) {
+        let populatedAlbums = SystemAlbumExplorerService.populateAssetIdentifiers(for: albums)
         var seenIDs = existingAssetIDs
         var builtCards: [StagingMemberAlbumCard] = []
-        builtCards.reserveCapacity(albums.count)
+        builtCards.reserveCapacity(populatedAlbums.count)
 
-        for album in albums {
+        for album in populatedAlbums {
             let filterResult = SystemAlbumExplorerService.filterNewAssetIdentifiers(
                 album.assetIdentifiers,
                 excluding: seenIDs
@@ -385,6 +386,17 @@ struct StagingImportShelfState: Equatable {
         guard let idx = cards.firstIndex(where: { $0.id == cardID }) else { return }
         cards[idx].slots = slots
     }
+
+    mutating func removeCard(_ cardID: String) {
+        cards.removeAll(where: { $0.id == cardID })
+        selectedCardIDs.remove(cardID)
+    }
+
+    mutating func removeSelectedCards() {
+        cards.removeAll(where: { selectedCardIDs.contains($0.id) })
+        selectedCardIDs.removeAll()
+        isSelectionMode = false
+    }
 }
 
 struct StagingAlbumPhotoProcessor {
@@ -536,6 +548,7 @@ struct StagingMemberCardCell: View {
     var onTapCard: () -> Void
     var onRenameMember: () -> Void
     var onAssignGroup: (String?) -> Void
+    var onRemoveCard: (() -> Void)? = nil
     var availableGroups: [String]
 
     var body: some View {
@@ -688,6 +701,13 @@ struct StagingMemberCardCell: View {
             Divider()
             Button(action: onTapCard) {
                 Label(L10n.tr("檢視相片", "写真を確認"), systemImage: "photo.on.rectangle")
+            }
+        }
+
+        if let onRemoveCard {
+            Divider()
+            Button(role: .destructive, action: onRemoveCard) {
+                Label(L10n.tr("排除此相冊", "このアルバムを除外"), systemImage: "trash")
             }
         }
     }
@@ -931,6 +951,26 @@ struct StagingImportShelfView: View {
             }
             .disabled(state.selectedCardIDs.isEmpty)
             .accessibilityIdentifier("staging.shelf.assignGroupMenu")
+            if !state.selectedCardIDs.isEmpty {
+                Button(role: .destructive) {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    withAnimation(ChekiMotion.toggle) {
+                        state.removeSelectedCards()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "trash")
+                        Text(L10n.tr("排除", "除外"))
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.red.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("staging.shelf.removeSelectedCards")
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -995,6 +1035,11 @@ struct StagingImportShelfView: View {
                         onAssignGroup: { newGroup in
                             withAnimation(ChekiMotion.toggle) {
                                 state.assignCard(card.id, toGroup: newGroup)
+                            }
+                        },
+                        onRemoveCard: {
+                            withAnimation(ChekiMotion.toggle) {
+                                state.removeCard(card.id)
                             }
                         },
                         availableGroups: state.availableGroupNames

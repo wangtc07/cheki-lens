@@ -167,6 +167,29 @@ final class StagingImportShelfStateTests: XCTestCase {
         XCTAssertTrue(state.canCommitImport)
     }
 
+    func testRemoveCardAndRemoveSelectedCards() {
+        let nodes = makeSampleNodes()
+        var state = StagingImportShelfState(albums: nodes)
+        XCTAssertEqual(state.cards.count, 4)
+
+        // 單張排除
+        state.removeCard("album-empty-1")
+        XCTAssertEqual(state.cards.count, 3)
+        XCTAssertNil(state.cards.first(where: { $0.id == "album-empty-1" }))
+
+        // 多選排除
+        state.toggleSelectionMode()
+        state.toggleCardSelection("album-nogi-1")
+        state.toggleCardSelection("album-solo-1")
+        XCTAssertEqual(state.selectedCardIDs.count, 2)
+
+        state.removeSelectedCards()
+        XCTAssertEqual(state.cards.count, 1)
+        XCTAssertEqual(state.cards.first?.id, "album-nogi-2")
+        XCTAssertFalse(state.isSelectionMode)
+        XCTAssertTrue(state.selectedCardIDs.isEmpty)
+    }
+
     func testMakePreCroppedStagingPhoto() {
         let dummyImage = UIGraphicsImageRenderer(size: CGSize(width: 810, height: 1290)).image { ctx in
             UIColor.white.setFill()

@@ -122,7 +122,7 @@ nonisolated struct SystemAlbumSelectionState: Equatable, Sendable {
 
     mutating func applyHierarchy(_ newHierarchy: SystemPhotoLibraryHierarchy, selectAllByDefault: Bool = false) {
         hierarchy = newHierarchy
-        expandedFolderIDs = Set(newHierarchy.folders.map(\.id))
+        expandedFolderIDs = []
         if selectAllByDefault {
             selectedAlbumIDs = Set(newHierarchy.allAlbums.map(\.id))
         } else {
@@ -252,6 +252,7 @@ struct SystemAlbumSelectionContentView: View {
     var isLoading: Bool = false
     var authorizationStatus: PHAuthorizationStatus = .authorized
     var onRefresh: (() async -> Void)? = nil
+    var onCancel: (() -> Void)? = nil
     var onConfirm: ([SystemPhotoAlbumNode]) -> Void
 
     var body: some View {
@@ -269,8 +270,27 @@ struct SystemAlbumSelectionContentView: View {
             Divider()
 
             if isLoading {
-                ProgressView(L10n.tr("正在掃描相簿…", "アルバムをスキャン中…"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 16) {
+                    ProgressView(L10n.tr("正在掃描相簿…", "アルバムをスキャン中…"))
+                        .controlSize(.regular)
+
+                    if let onCancel {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            onCancel()
+                        } label: {
+                            Text(L10n.tr("取消", "キャンセル"))
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(Color(.tertiarySystemFill), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("import.albumSelection.loadingCancel")
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if state.hierarchy.isEmpty {
                 ContentUnavailableView(
                     L10n.tr("未找到相簿", "アルバムが見つかりません"),
@@ -611,6 +631,9 @@ struct SystemAlbumSelectionSheet: View {
                 onRefresh: {
                     await loadHierarchy(forceReload: true)
                 },
+                onCancel: {
+                    handleDismissOrCancel()
+                },
                 onConfirm: { selection in
                     onConfirm(selection)
                     if dismissOnConfirm {
@@ -623,11 +646,7 @@ struct SystemAlbumSelectionSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     CloseToolbarButton(accessibilityIdentifier: "chrome.import.albumSelection.close") {
-                        if let onCancel {
-                            onCancel()
-                        } else {
-                            dismiss()
-                        }
+                        handleDismissOrCancel()
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -646,6 +665,14 @@ struct SystemAlbumSelectionSheet: View {
         }
     }
 
+    private func handleDismissOrCancel() {
+        if let onCancel {
+            onCancel()
+        } else {
+            dismiss()
+        }
+    }
+
     private func loadHierarchy(forceReload: Bool) async {
         authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if !forceReload && !activeState.wrappedValue.hierarchy.isEmpty {
@@ -654,6 +681,7 @@ struct SystemAlbumSelectionSheet: View {
         }
         isLoading = true
         let hierarchy = await SystemAlbumExplorerService.shared.fetchHierarchy()
+        guard !Task.isCancelled else { return }
         activeState.wrappedValue.applyHierarchy(hierarchy, selectAllByDefault: selectAllByDefault)
         isLoading = false
     }
