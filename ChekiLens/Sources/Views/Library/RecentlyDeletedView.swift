@@ -213,6 +213,7 @@ struct RecentlyDeletedView: View {
             Image(uiImage: uiImage)
                 .resizable()
                 .scaledToFill()
+                .id(ChekiImageDisplayRevision.shared.token(for: item.id))
         } else if let data = item.thumbnailData ?? item.frontImageData, let uiImage = UIImage(data: data) {
             Image(uiImage: uiImage)
                 .resizable()

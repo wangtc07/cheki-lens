@@ -242,6 +242,15 @@ extension ChekiItem {
         ocrDate ?? capturedAt
     }
 
+    /// 正反面寫入系統相簿的時間。`plusOneSecond` 時背面比正面晚一秒，其餘與正面同一秒。
+    func pairedSystemAlbumDates(timelineStrategy: String) -> (front: Date, back: Date) {
+        let front = displayDate
+        if timelineStrategy == "plusOneSecond" {
+            return (front, front.addingTimeInterval(1))
+        }
+        return (front, front)
+    }
+
     /// App 內「原始拍攝日期」排序用。只代表按下快門或匯入的當下，不寫入系統相簿。
     var appOriginalCaptureDate: Date {
         originalCapturedAt ?? capturedAt

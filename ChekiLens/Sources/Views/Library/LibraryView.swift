@@ -787,6 +787,7 @@ private struct AppleLibraryPhotoCell: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFit()
+                    .id(ChekiImageDisplayRevision.shared.token(for: item.id))
                     .overlay {
                         ChekiWatermarkOverlayView(compact: true)
                     }
@@ -3832,6 +3833,7 @@ struct AlbumHeroDetailView: View {
                         Image(uiImage: uiImage)
                             .resizable()
                             .scaledToFill()
+                            .id(ChekiImageDisplayRevision.shared.token(for: heroItem.id))
                             .scaleEffect(1.22)
                     } else {
                         LinearGradient(
@@ -4536,6 +4538,7 @@ private struct AlbumSquareThumbnailCell: View {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFill()
+                        .id(ChekiImageDisplayRevision.shared.token(for: item.id))
                         .scaleEffect(1.22)
                 } else {
                     Image(systemName: "photo")

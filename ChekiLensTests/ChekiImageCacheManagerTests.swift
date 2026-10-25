@@ -163,4 +163,33 @@ final class ChekiImageCacheManagerTests: XCTestCase {
         let diskCached = await sut.image(forKey: key)
         XCTAssertNotNil(diskCached)
     }
+
+    func test_replaceDisplayedImages_dropsPreviousAutoCrop() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: ChekiItem.self, configurations: config)
+        let context = ModelContext(container)
+
+        let first = makeTestImage(size: CGSize(width: 80, height: 120), color: .blue)
+        let firstData = try XCTUnwrap(first.jpegData(compressionQuality: 0.9))
+        let item = ChekiItem(frontImageData: firstData, backImageData: firstData)
+        context.insert(item)
+
+        let frontKey = sut.cacheKey(for: item.id, type: .front)
+        let backKey = sut.cacheKey(for: item.id, type: .back)
+        sut.setMemoryImage(first, forKey: frontKey)
+        sut.setMemoryImage(first, forKey: backKey)
+
+        let revised = makeTestImage(size: CGSize(width: 90, height: 140), color: .red)
+        let revisedData = try XCTUnwrap(revised.jpegData(compressionQuality: 0.9))
+        item.frontImageData = revisedData
+        item.backImageData = revisedData
+        sut.replaceDisplayedImages(for: item)
+
+        let cachedFront = try XCTUnwrap(sut.memoryImage(forKey: frontKey))
+        let cachedBack = try XCTUnwrap(sut.memoryImage(forKey: backKey))
+        XCTAssertEqual(cachedFront.cgImage?.width, revised.cgImage?.width, "正面應換成重新裁切後的圖")
+        XCTAssertEqual(cachedBack.cgImage?.width, revised.cgImage?.width, "背面應換成重新裁切後的圖")
+        XCTAssertNotEqual(cachedFront.cgImage?.width, first.cgImage?.width)
+        XCTAssertNotNil(item.thumbnailData)
+    }
 }

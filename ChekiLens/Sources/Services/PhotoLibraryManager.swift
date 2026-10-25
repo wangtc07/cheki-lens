@@ -276,6 +276,22 @@ final class PhotoLibraryManager {
         Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
     }
     
+    /// 只改既有照片的拍攝時間，不重寫影像。重新裁切其中一面時，用來讓另一面日期跟著判斷日。
+    func updateAssetCreationDate(identifier: String, to date: Date) async {
+        guard !identifier.isEmpty else { return }
+        guard await requestAuthorization() else { return }
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject else { return }
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                let changeRequest = PHAssetChangeRequest(for: asset)
+                changeRequest.creationDate = date
+            }
+            Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
+        } catch {
+            // 日期寫回失敗時，App 內已裁切的影像仍保留
+        }
+    }
+
     /// 將既有 `PHAsset` 加入指定相簿（不複製或新建照片）
     func addExistingAsset(identifier: String, creationDate: Date? = nil, to album: PHAssetCollection) async throws {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject else { return }

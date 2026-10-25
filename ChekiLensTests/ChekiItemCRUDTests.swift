@@ -211,6 +211,19 @@ final class ChekiItemCRUDTests: XCTestCase {
         XCTAssertEqual(item.appOriginalCaptureDate, shutter)
     }
 
+    func test_pairedSystemAlbumDates_backFollowsFront() {
+        let judged = Date(timeIntervalSince1970: 1_600_000_000)
+        let item = ChekiItem(capturedAt: judged, ocrDate: judged)
+
+        let sameSecond = item.pairedSystemAlbumDates(timelineStrategy: "sameSecond")
+        XCTAssertEqual(sameSecond.front, judged)
+        XCTAssertEqual(sameSecond.back, judged, "背面應與正面同一秒")
+
+        let plusOne = item.pairedSystemAlbumDates(timelineStrategy: "plusOneSecond")
+        XCTAssertEqual(plusOne.front, judged)
+        XCTAssertEqual(plusOne.back, judged.addingTimeInterval(1), "背面應比正面晚一秒")
+    }
+
     // MARK: - Delete Tests
 
     func test_deleteChekiItem() throws {

@@ -989,6 +989,20 @@ private struct ChekiDetailCardFaceRenderer<
     @State private var displayedImage: UIImage?
     @State private var isCloudResolving: Bool = false
 
+    private var boundImageData: Data? {
+        switch side {
+        case .front: return item.frontImageData
+        case .back: return item.backImageData
+        case .originalFront: return item.originalFrontImageData
+        case .originalBack: return item.originalBackImageData
+        }
+    }
+
+    private var boundImageToken: String {
+        let revision = ChekiImageDisplayRevision.shared.token(for: item.id)
+        return "\(item.id.uuidString)-\(side.rawValue)-\(revision)"
+    }
+
     var body: some View {
         Group {
             if let image = displayedImage {
@@ -1054,7 +1068,7 @@ private struct ChekiDetailCardFaceRenderer<
                 placeholder()
             }
         }
-        .task(id: item.id) {
+        .task(id: boundImageToken) {
             await loadCardImage()
         }
     }
@@ -1071,6 +1085,14 @@ private struct ChekiDetailCardFaceRenderer<
     }
 
     private func loadCardImage() async {
+        if let data = boundImageData, let decoded = UIImage(data: data), decoded.size.width > 0 {
+            let key = ChekiImageCacheManager.shared.cacheKey(for: item.id, type: side.imageType)
+            ChekiImageCacheManager.shared.setMemoryImage(decoded, forKey: key, cost: data.count)
+            displayedImage = decoded
+            isCloudResolving = false
+            return
+        }
+
         if let immediate = ChekiCloudAssetService.shared.synchronousImage(for: item, side: side) {
             displayedImage = immediate
         }
@@ -1442,6 +1464,7 @@ private struct ChekiDetailCardFaceRenderer<
                                     Image(uiImage: uiImage)
                                         .resizable()
                                         .scaledToFill()
+                                        .id(ChekiImageDisplayRevision.shared.token(for: stripItem.id))
                                         .frame(
                                             width: isCurrent ? currentWidth : normalWidth,
                                             height: isCurrent ? currentHeight : normalHeight
@@ -1931,6 +1954,7 @@ private struct ChekiDetailCardFaceRenderer<
             } else {
                 target.frontImageData = outcome.calibratedJPEGData
             }
+            ChekiImageCacheManager.shared.replaceDisplayedImages(for: target)
             try? modelContext.save()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
 
@@ -2263,6 +2287,7 @@ private struct ChekiDetailCardFaceRenderer<
                 currentItem.detectedAspectRatio = 1.0 / currentItem.detectedAspectRatio
             }
         }
+        ChekiImageCacheManager.shared.replaceDisplayedImages(for: currentItem)
         try? modelContext.save()
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         Task { await syncCurrentItemToSystemPhotos() }
@@ -3353,6 +3378,7 @@ private struct ChekiQuadCropEditorView: View {
     private func revertToOriginalAndDismiss() async {
         guard item.canRevertToOriginal(backside: editingBackside) else { return }
         item.revertToOriginal(backside: editingBackside)
+        ChekiImageCacheManager.shared.replaceDisplayedImages(for: item)
         try? modelContext.save()
 
         let assetID = editingBackside ? item.backAssetIdentifier : item.frontAssetIdentifier
@@ -3422,11 +3448,13 @@ private struct ChekiQuadCropEditorView: View {
                     }
                     item.frontImageData = croppedJPEG
                     item.perspectivePointsJSON = encodedJSON
-                    if item.ocrDate == nil,
-                       !item.isJudgedDateManuallySet,
-                       let ocrRes = await visionManager.recognizeDate(from: cropResult.cgImage) {
-                        item.applyAutomaticJudgedDate(ocrRes.date, preservingTimeFrom: item.appOriginalCaptureDate)
-                    }
+                }
+                ChekiImageCacheManager.shared.replaceDisplayedImages(for: item)
+                if !editingBackside,
+                   item.ocrDate == nil,
+                   !item.isJudgedDateManuallySet,
+                   let ocrRes = await visionManager.recognizeDate(from: cropResult.cgImage) {
+                    item.applyAutomaticJudgedDate(ocrRes.date, preservingTimeFrom: item.appOriginalCaptureDate)
                 }
                 item.borderInsetRatio = defaultBorderInsetPercentage / 100.0
                 let resolvedFormat = FilmFormat.resolvedConcreteFormat(
@@ -3438,11 +3466,16 @@ private struct ChekiQuadCropEditorView: View {
                 if cropResult.outputSize.width > 0 {
                     item.detectedAspectRatio = Double(cropResult.outputSize.height / cropResult.outputSize.width)
                 }
+                let timelineStrategy = UserDefaults.standard.string(forKey: "backsideTimelineStrategy") ?? "sameSecond"
+                let albumDates = item.pairedSystemAlbumDates(timelineStrategy: timelineStrategy)
                 try? modelContext.save()
 
                 // 若此照片關聯系統相簿 PHAsset，直接修改原圖（不新增重複照片，且保留原始底圖供復原）
                 let targetAssetID = editingBackside ? item.backAssetIdentifier : item.frontAssetIdentifier
                 let origData = editingBackside ? item.originalBackImageData : item.originalFrontImageData
+                let editedDate = editingBackside ? albumDates.back : albumDates.front
+                let otherAssetID = editingBackside ? item.frontAssetIdentifier : item.backAssetIdentifier
+                let otherDate = editingBackside ? albumDates.front : albumDates.back
                 if targetAssetID != nil || item.isSyncedToPhotoLibrary {
                     let albumName = item.idolMember?.albumTitle ?? "ChekiLens"
                     let folderName = item.idolMember?.group?.name
@@ -3451,7 +3484,7 @@ private struct ChekiQuadCropEditorView: View {
                            croppedUIImage,
                            originalImageData: origData,
                            existingAssetIdentifier: targetAssetID,
-                           creationDate: item.displayDate,
+                           creationDate: editedDate,
                            to: album
                        ) {
                         if editingBackside {
@@ -3459,8 +3492,14 @@ private struct ChekiQuadCropEditorView: View {
                         } else {
                             item.frontAssetIdentifier = updatedID
                         }
+                        item.isDateWrittenToAlbum = item.ocrDate != nil || item.isJudgedDateManuallySet
                         try? modelContext.save()
                     }
+                }
+                if let otherAssetID, !otherAssetID.isEmpty {
+                    await PhotoLibraryManager.shared.updateAssetCreationDate(identifier: otherAssetID, to: otherDate)
+                    item.isDateWrittenToAlbum = item.ocrDate != nil || item.isJudgedDateManuallySet
+                    try? modelContext.save()
                 }
 
                 UINotificationFeedbackGenerator().notificationOccurred(.success)

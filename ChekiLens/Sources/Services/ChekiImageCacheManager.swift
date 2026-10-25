@@ -1,7 +1,27 @@
 import Foundation
+import Observation
 import UIKit
 import ImageIO
 import SwiftData
+
+/// 裁切或換圖後遞增。畫面讀這個數字，才會放下自動導入時留下的舊圖。
+@MainActor
+@Observable
+final class ChekiImageDisplayRevision {
+    static let shared = ChekiImageDisplayRevision()
+
+    private(set) var generations: [UUID: Int] = [:]
+
+    func token(for itemID: UUID) -> Int {
+        generations[itemID] ?? 0
+    }
+
+    func bump(itemID: UUID) {
+        var next = generations
+        next[itemID, default: 0] += 1
+        generations = next
+    }
+}
 
 /// 拍立得影像類型列舉
 public enum ChekiImageType: String, Sendable, CaseIterable {
@@ -233,6 +253,41 @@ public final class ChekiImageCacheManager: @unchecked Sendable {
         for type in ChekiImageType.allCases {
             let key = cacheKey(for: itemID, type: type)
             await remove(forKey: key)
+        }
+    }
+
+    /// 自動導入後再改邊界時，清掉第一次裁切留下的記憶體／磁碟圖，並放上目前正反面與縮圖。
+    func replaceDisplayedImages(for item: ChekiItem) {
+        removeAllImagesSync(for: item.id)
+
+        if let frontData = item.frontImageData, let frontImage = UIImage(data: frontData) {
+            setMemoryImage(
+                frontImage,
+                forKey: cacheKey(for: item.id, type: .front),
+                cost: frontData.count
+            )
+            if let thumbData = generateThumbnailData(from: frontData),
+               let thumbImage = UIImage(data: thumbData) {
+                item.thumbnailData = thumbData
+                setMemoryImage(
+                    thumbImage,
+                    forKey: cacheKey(for: item.id, type: .thumbnail),
+                    cost: thumbData.count
+                )
+            }
+        }
+
+        if let backData = item.backImageData, let backImage = UIImage(data: backData) {
+            setMemoryImage(
+                backImage,
+                forKey: cacheKey(for: item.id, type: .back),
+                cost: backData.count
+            )
+        }
+
+        let itemID = item.id
+        Task { @MainActor in
+            ChekiImageDisplayRevision.shared.bump(itemID: itemID)
         }
     }
 
