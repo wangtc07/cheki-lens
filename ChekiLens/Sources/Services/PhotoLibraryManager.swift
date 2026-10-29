@@ -273,7 +273,8 @@ final class PhotoLibraryManager {
                 albumChangeRequest?.addAssets([asset] as NSArray)
             }
         }
-        Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
+        let updatedAsset = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil).firstObject
+        Self.recordAssetSyncedTimestamp(for: asset.localIdentifier, modificationDate: updatedAsset?.modificationDate ?? Date())
     }
     
     /// 只改既有照片的拍攝時間，不重寫影像。重新裁切其中一面時，用來讓另一面日期跟著判斷日。
@@ -692,7 +693,8 @@ final class PhotoLibraryManager {
             let changeRequest = PHAssetChangeRequest(for: asset)
             changeRequest.revertAssetContentToOriginal()
         }
-        Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
+        let updatedAsset = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil).firstObject
+        Self.recordAssetSyncedTimestamp(for: asset.localIdentifier, modificationDate: updatedAsset?.modificationDate ?? Date())
     }
     
     private func requestContentEditingInput(for asset: PHAsset) async throws -> PHContentEditingInput {
@@ -733,6 +735,25 @@ final class PhotoLibraryManager {
         return UserDefaults.standard.double(forKey: key)
     }
 
+    /// 讀取 `PHAsset` 原始未經任何裁切或調色的相片資料（`.version = .unadjusted`，確保二次進入手動編輯器時永遠載入最乾淨的未裁切底圖）
+    func requestRawUnadjustedImageData(for asset: PHAsset) async -> Data? {
+        await withCheckedContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.version = .unadjusted
+            options.deliveryMode = .highQualityFormat
+            options.isNetworkAccessAllowed = true
+            options.isSynchronous = false
+            var didResume = false
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, info in
+                guard !didResume else { return }
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if isDegraded { return }
+                didResume = true
+                continuation.resume(returning: data)
+            }
+        }
+    }
+
     /// 讀取 `PHAsset` 在 iOS 系統相簿中最新渲染後的影像資料（`.version = .current`，包含系統相簿內所有調色、色溫、濾鏡與曝光修改）
     private func requestCurrentRenderedImageData(for asset: PHAsset) async -> Data? {
         await withCheckedContinuation { continuation in
@@ -758,10 +779,10 @@ final class PhotoLibraryManager {
         let currentModTime = asset.modificationDate?.timeIntervalSince1970 ?? 0
 
         if let lastKnown = Self.lastKnownSyncedTimestamp(for: assetID) {
-            return currentModTime > lastKnown + 0.5
+            guard currentModTime > lastKnown + 0.5 else { return false }
         }
 
-        // 若為舊項目尚未紀錄 timestamp，檢查該 PHAsset 是否含有非 ChekiLens 寫入之系統調色 (.adjustmentData)
+        // 檢查該 PHAsset 是否含有非 ChekiLens 寫入之系統調色 (.adjustmentData)
         let resources = PHAssetResource.assetResources(for: asset)
         let hasAdjustmentResource = resources.contains { $0.type == .adjustmentData }
         guard hasAdjustmentResource else {
@@ -779,11 +800,9 @@ final class PhotoLibraryManager {
             }
             asset.requestContentEditingInput(with: options) { _, _ in
                 if let formatID = detectedFormatID {
-                    // 若 formatIdentifier 不是 ChekiLens 寫入的（例如 com.apple.photo 原生相簿調色），代表在系統相簿有調色修改
+                    // 若 formatIdentifier 是 ChekiLens 寫入的（如 wangtc07.ChekiLens.crop），代表為 App 自身非外部編輯
                     let isExternal = !formatID.hasPrefix("wangtc07.ChekiLens")
-                    if !isExternal {
-                        Self.recordAssetSyncedTimestamp(for: assetID, modificationDate: asset.modificationDate)
-                    }
+                    Self.recordAssetSyncedTimestamp(for: assetID, modificationDate: asset.modificationDate)
                     continuation.resume(returning: isExternal)
                 } else {
                     continuation.resume(returning: true)
@@ -823,8 +842,8 @@ final class PhotoLibraryManager {
                 if distToOrig + 8.0 < distToCrop {
                     isRenderedUncroppedOriginal = true
                 }
-            } else if !Self.isProLifetimeUnlocked {
-                isRenderedUncroppedOriginal = true
+            } else {
+                isRenderedUncroppedOriginal = false
             }
 
             if isRenderedUncroppedOriginal {

@@ -163,8 +163,8 @@ final class ChekiItem {
         self.id = id
         self.frontImageData = frontImageData
         self.backImageData = backImageData
-        self.originalFrontImageData = originalFrontImageData ?? frontImageData
-        self.originalBackImageData = originalBackImageData ?? backImageData
+        self.originalFrontImageData = originalFrontImageData ?? (perspectivePointsJSON != nil ? nil : frontImageData)
+        self.originalBackImageData = originalBackImageData ?? (backPerspectivePointsJSON != nil ? nil : backImageData)
         self.thumbnailData = thumbnailData
         self.capturedAt = capturedAt
         self.ocrDate = ocrDate

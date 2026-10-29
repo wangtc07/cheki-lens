@@ -675,6 +675,7 @@ struct BatchPairingView: View {
                     }
                 }
             )
+            .id(targetPhotoID)
             .transition(.opacity)
             .zIndex(100)
         }
@@ -3464,11 +3465,13 @@ struct BatchPairingView: View {
                     targetItem.originalFrontImageData = slot.frontPhoto.imageData
                 }
                 targetItem.frontImageData = initialFrontData
+                targetItem.perspectivePointsJSON = slot.frontPhoto.isRevertedToOriginal ? nil : slot.frontPhoto.normalizedCornersJSON
                 if let backPhoto = slot.backPhoto {
                     if targetItem.originalBackImageData == nil {
                         targetItem.originalBackImageData = backPhoto.imageData
                     }
                     targetItem.backImageData = initialBackData
+                    targetItem.backPerspectivePointsJSON = (backPhoto.isRevertedToOriginal == true) ? nil : backPhoto.normalizedCornersJSON
                     if let backAssetId = backPhoto.assetIdentifier {
                         targetItem.backAssetIdentifier = backAssetId
                     }
@@ -3491,7 +3494,9 @@ struct BatchPairingView: View {
                     filmFormat: concreteFormat,
                     detectedAspectRatio: concreteFormat.aspectRatio,
                     borderInsetRatio: defaultInsetRatio,
-                    processingState: .detecting,
+                    perspectivePointsJSON: slot.frontPhoto.isRevertedToOriginal ? nil : slot.frontPhoto.normalizedCornersJSON,
+                    backPerspectivePointsJSON: (slot.backPhoto?.isRevertedToOriginal == true) ? nil : slot.backPhoto?.normalizedCornersJSON,
+                    processingState: .completed,
                     frontAssetIdentifier: slot.frontPhoto.assetIdentifier,
                     backAssetIdentifier: slot.backPhoto?.assetIdentifier,
                     idolMember: targetMember,
@@ -3941,6 +3946,7 @@ private struct StagingPhotoQuadCropEditorView: View {
     @AppStorage("defaultBorderInsetPercentage") private var defaultBorderInsetPercentage: Double = 0.0
 
     @State private var sourceUIImage: UIImage
+    @State private var displayProxyUIImage: UIImage? = nil
     @State private var didRotateSourceImage: Bool = false
     @State private var normalizedCorners: [CGPoint] = Self.defaultQuadCorners
     @State private var initialCornersSnapshot: [CGPoint] = Self.defaultQuadCorners
@@ -3967,7 +3973,19 @@ private struct StagingPhotoQuadCropEditorView: View {
         self.onApplyManualCrop = onApplyManualCrop
         self.onClose = onClose
         _sourceUIImage = State(initialValue: photo.uiImage)
+        _displayProxyUIImage = State(initialValue: Self.makeDisplayProxy(from: photo.uiImage))
         _selectedFormat = State(initialValue: photo.resolvedFilmFormat.concreteFormat)
+    }
+
+    private static func makeDisplayProxy(from image: UIImage, maxDimension: CGFloat = 1400) -> UIImage {
+        let size = image.size
+        guard max(size.width, size.height) > maxDimension, max(size.width, size.height) > 1 else { return image }
+        let ratio = maxDimension / max(size.width, size.height)
+        let newSize = CGSize(width: max(1, round(size.width * ratio)), height: max(1, round(size.height * ratio)))
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
     }
 
     private var effectiveZoom: CGFloat {
@@ -4097,9 +4115,9 @@ private struct StagingPhotoQuadCropEditorView: View {
             }
 
             ZStack {
-                Image(uiImage: sourceUIImage)
+                Image(uiImage: displayProxyUIImage ?? sourceUIImage)
                     .resizable()
-                    .interpolation(.high)
+                    .interpolation(.medium)
                     .frame(width: transformedRect.width, height: transformedRect.height)
                     .position(x: transformedRect.midX, y: transformedRect.midY)
 
@@ -4146,7 +4164,7 @@ private struct StagingPhotoQuadCropEditorView: View {
                 if let activeIdx = activeDraggingCornerIndex,
                    activeIdx < normalizedCorners.count {
                     vertexLoupeView(
-                        uiImage: sourceUIImage,
+                        uiImage: displayProxyUIImage ?? sourceUIImage,
                         normalizedPoint: normalizedCorners[activeIdx],
                         cornerIndex: activeIdx
                     )
@@ -4572,6 +4590,7 @@ private struct StagingPhotoQuadCropEditorView: View {
             ))
         }
         sourceUIImage = rotated
+        displayProxyUIImage = Self.makeDisplayProxy(from: rotated)
         didRotateSourceImage = true
         let rotatedPts = normalizedCorners.map { pt in
             CGPoint(x: pt.y, y: 1.0 - pt.x)

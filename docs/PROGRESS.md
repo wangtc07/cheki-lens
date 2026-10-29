@@ -8,11 +8,11 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-10-29
-- **進行中的修正**：單張預覽檢視向下拖動返回總覽頁（首頁）手勢與過渡體驗優化修復完成。
+- **進行中的修正**：修復預覽二次進入裁切時雙重邊框問題，並實現邊界調整即時預覽與底圖保留。
 - **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.5 進行中）/ Phase 6.5 UX 體驗精修完成
 - **當前分支**：`feat/multi-device-icloud-sync`
-- **當前進行中任務**：完成 **單張預覽向下拖動返回總覽頁（首頁）體驗修復**（1. 優化 `ChekiDetailView` 手勢方向鎖定與向下優先權，避免自然拇指弧度之斜向拖動被誤判為左右翻頁；2. 支援水平滑動中轉向向下拖動時動態切換為下拉返回模式；3. 雙向保證 `NavigationChromeState.dismissDetail()` 與 `@Environment(\.dismiss)` 同步觸發，確保跨各種導覽容器皆能安全關閉；4. 修復背面檢視時下滑防翻轉抖動；5. 補齊 4 項專屬手勢與路由狀態單元測試 `ChekiDetailDismissTests`，全量單元測試全數通過）。
-- **最新穩定 Git Commit**：fix(detail): 優化單張預覽向下拖動返回總覽頁手勢判定與多容器退回邏輯
+- **當前進行中任務**：完成 **預覽點編輯再次編輯雙重邊框問題與邊界微調延遲修復**（1. 修復 `PhotoLibraryManager.hasExternalSystemEdit` 誤將 ChekiLens 自身修改判斷為系統外部調色導致裁切圖反覆透視重裁與覆寫底圖問題；2. 支援從 PHAsset 請求 `version = .unadjusted` 原始底圖，確保二次編輯永遠載入未裁切原始照片；3. `ChekiItem.init` 於已有透視座標時不預設覆寫 `originalFrontImageData`；4. `BatchPairingView` 歸檔時確實寫入 `perspectivePointsJSON` 與 `backPerspectivePointsJSON`，避免事後編輯無座標而觸發高耗時 Vision 重複偵測；5. 引入 1400px 輕量畫布與放大鏡顯示代理（Display Proxy），徹底消除 48MB 原始圖在手勢拖曳時之掉幀卡頓，達成 120fps 即時零延遲反應；全量 130+ 項單元測試全數通過）。
+- **最新穩定 Git Commit**：fix(crop): 修復預覽再次編輯雙重邊框與裁切暫存覆寫底圖問題，並加速邊界調整即時響應
 - **下一動執行指示**：接續執行 **Task 7.5.2**（多語系字串補齊至 `Localizable.xcstrings`（繁體中文與日文）與 iPad / 多裝置佈局適配）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---

@@ -224,6 +224,49 @@ final class ChekiItemCRUDTests: XCTestCase {
         XCTAssertEqual(plusOne.back, judged.addingTimeInterval(1), "背面應比正面晚一秒")
     }
 
+    func test_originalImageData_notDefaultedToCropped_whenPointsPresent() {
+        let dummyCroppedData = Data([0x01, 0x02, 0x03])
+        let points = [
+            CGPoint(x: 0.1, y: 0.1),
+            CGPoint(x: 0.9, y: 0.1),
+            CGPoint(x: 0.9, y: 0.9),
+            CGPoint(x: 0.1, y: 0.9)
+        ]
+        let json = ChekiItem.encodeNormalizedCorners(points)
+
+        // When item is initialized with a cropped image and perspective points,
+        // originalFrontImageData should remain nil rather than being set to the cropped image!
+        let item = ChekiItem(
+            frontImageData: dummyCroppedData,
+            perspectivePointsJSON: json
+        )
+        XCTAssertNil(item.originalFrontImageData, "已裁切之照片不應將裁切成品誤寫為 originalFrontImageData")
+    }
+
+    func test_originalImageData_preservesRawWhenExplicitlyProvided() {
+        let rawData = Data([0xAA, 0xBB, 0xCC])
+        let croppedData = Data([0x11, 0x22, 0x33])
+        let points = [
+            CGPoint(x: 0.15, y: 0.15),
+            CGPoint(x: 0.85, y: 0.15),
+            CGPoint(x: 0.85, y: 0.85),
+            CGPoint(x: 0.15, y: 0.85)
+        ]
+        let json = ChekiItem.encodeNormalizedCorners(points)
+
+        let item = ChekiItem(
+            frontImageData: croppedData,
+            originalFrontImageData: rawData,
+            perspectivePointsJSON: json
+        )
+        XCTAssertEqual(item.originalFrontImageData, rawData, "原始底圖應永遠完整保留")
+        XCTAssertEqual(item.frontImageData, croppedData)
+
+        let decoded = ChekiItem.decodeNormalizedCorners(from: item.perspectivePointsJSON)
+        XCTAssertEqual(decoded?.count, 4)
+        XCTAssertEqual(decoded?[0].x, 0.15)
+    }
+
     // MARK: - Delete Tests
 
     func test_deleteChekiItem() throws {

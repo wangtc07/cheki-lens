@@ -2553,6 +2553,7 @@ private struct ChekiQuadCropEditorView: View {
 
     // 來源底圖（含完整外圍區域供重新手動調整四個頂點）
     @State private var sourceUIImage: UIImage?
+    @State private var displayProxyUIImage: UIImage? = nil
     // 四個頂點（正規化 0.0 ~ 1.0，順序：[TL, TR, BR, BL]）
     @State private var normalizedCorners: [CGPoint] = [
         CGPoint(x: 0.12, y: 0.12),
@@ -2769,9 +2770,9 @@ private struct ChekiQuadCropEditorView: View {
 
                 ZStack {
                     // 底層：原始圖片（支援雙指縮放與平移，並繪製細虛線標示相片原始邊界）
-                    Image(uiImage: uiImage)
+                    Image(uiImage: displayProxyUIImage ?? uiImage)
                         .resizable()
-                        .interpolation(.high)
+                        .interpolation(.medium)
                         .overlay(
                             Rectangle()
                                 .strokeBorder(
@@ -2999,9 +3000,9 @@ private struct ChekiQuadCropEditorView: View {
                     Spacer()
                 }
 
-                Image(uiImage: uiImage)
+                Image(uiImage: displayProxyUIImage ?? uiImage)
                     .resizable()
-                    .interpolation(.high)
+                    .interpolation(.medium)
                     .overlay(
                         Rectangle()
                             .strokeBorder(
@@ -3268,46 +3269,82 @@ private struct ChekiQuadCropEditorView: View {
     // MARK: - 5. 載入底圖、自動偵測與套用四頂點透視裁切
 
     private func loadSourceImageAndCorners(forBackside: Bool) {
-        if forBackside {
-            if let origBackData = item.originalBackImageData,
-               let origBackImg = UIImage(data: origBackData)?.normalizedImage {
-                sourceUIImage = origBackImg
-                if let saved = ChekiItem.decodeNormalizedCorners(from: item.backPerspectivePointsJSON) {
-                    normalizedCorners = saved
-                } else {
-                    normalizedCorners = Self.defaultQuadCorners
+        let isFront = !forBackside
+        let origData = isFront ? item.originalFrontImageData : item.originalBackImageData
+        let croppedData = isFront ? item.frontImageData : item.backImageData
+        let savedPointsJSON = isFront ? item.perspectivePointsJSON : item.backPerspectivePointsJSON
+        let assetID = isFront ? item.frontAssetIdentifier : item.backAssetIdentifier
+
+        let isOrigIdenticalToCrop: Bool = {
+            guard let orig = origData, let crop = croppedData else { return false }
+            return orig == crop
+        }()
+
+        if let orig = origData,
+           !isOrigIdenticalToCrop,
+           let origImg = UIImage(data: orig)?.normalizedImage {
+            sourceUIImage = origImg
+            displayProxyUIImage = Self.makeDisplayProxy(from: origImg)
+            if let saved = ChekiItem.decodeNormalizedCorners(from: savedPointsJSON), saved.count == 4 {
+                normalizedCorners = saved
+            } else {
+                normalizedCorners = Self.defaultQuadCorners
+            }
+        } else if let assetID, !assetID.isEmpty,
+                  let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject {
+            // 從系統相簿讀取 true unadjusted raw image，避免舊有裁切圖覆寫了原圖
+            Task { @MainActor in
+                if let rawData = await PhotoLibraryManager.shared.requestRawUnadjustedImageData(for: asset),
+                   let rawImg = UIImage(data: rawData)?.normalizedImage {
+                    if isFront {
+                        item.originalFrontImageData = rawData
+                    } else {
+                        item.originalBackImageData = rawData
+                    }
+                    sourceUIImage = rawImg
+                    displayProxyUIImage = Self.makeDisplayProxy(from: rawImg)
+                    if let saved = ChekiItem.decodeNormalizedCorners(from: savedPointsJSON), saved.count == 4 {
+                        normalizedCorners = saved
+                    }
                 }
-            } else if let croppedBackData = item.backImageData,
-                      let croppedBackImg = UIImage(data: croppedBackData)?.normalizedImage {
-                let (canvasImg, defaultCorners) = Self.synthesizeUncroppedCanvas(around: croppedBackImg)
-                sourceUIImage = canvasImg
-                normalizedCorners = defaultCorners
-                if let jpeg = canvasImg.jpegData(compressionQuality: 0.92) {
+            }
+        } else if let orig = origData,
+                  let origImg = UIImage(data: orig)?.normalizedImage {
+            sourceUIImage = origImg
+            displayProxyUIImage = Self.makeDisplayProxy(from: origImg)
+            if let saved = ChekiItem.decodeNormalizedCorners(from: savedPointsJSON), saved.count == 4 {
+                normalizedCorners = saved
+            } else {
+                normalizedCorners = Self.defaultQuadCorners
+            }
+        } else if let cropped = croppedData,
+                  let croppedImg = UIImage(data: cropped)?.normalizedImage {
+            let (canvasImg, defaultCorners) = Self.synthesizeUncroppedCanvas(around: croppedImg)
+            sourceUIImage = canvasImg
+            displayProxyUIImage = Self.makeDisplayProxy(from: canvasImg)
+            normalizedCorners = defaultCorners
+            if let jpeg = canvasImg.jpegData(compressionQuality: 0.92) {
+                if isFront {
+                    item.originalFrontImageData = jpeg
+                    item.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(defaultCorners)
+                } else {
                     item.originalBackImageData = jpeg
                     item.backPerspectivePointsJSON = ChekiItem.encodeNormalizedCorners(defaultCorners)
                 }
             }
-        } else {
-            if let origFrontData = item.originalFrontImageData,
-               let origFrontImg = UIImage(data: origFrontData)?.normalizedImage {
-                sourceUIImage = origFrontImg
-                if let saved = ChekiItem.decodeNormalizedCorners(from: item.perspectivePointsJSON) {
-                    normalizedCorners = saved
-                } else {
-                    normalizedCorners = Self.defaultQuadCorners
-                }
-            } else if let croppedFrontData = item.frontImageData,
-                      let croppedFrontImg = UIImage(data: croppedFrontData)?.normalizedImage {
-                let (canvasImg, defaultCorners) = Self.synthesizeUncroppedCanvas(around: croppedFrontImg)
-                sourceUIImage = canvasImg
-                normalizedCorners = defaultCorners
-                if let jpeg = canvasImg.jpegData(compressionQuality: 0.92) {
-                    item.originalFrontImageData = jpeg
-                    item.perspectivePointsJSON = ChekiItem.encodeNormalizedCorners(defaultCorners)
-                }
-            }
         }
         initialCornersSnapshot = normalizedCorners
+    }
+
+    private static func makeDisplayProxy(from image: UIImage, maxDimension: CGFloat = 1400) -> UIImage {
+        let size = image.size
+        guard max(size.width, size.height) > maxDimension, max(size.width, size.height) > 1 else { return image }
+        let ratio = maxDimension / max(size.width, size.height)
+        let newSize = CGSize(width: max(1, round(size.width * ratio)), height: max(1, round(size.height * ratio)))
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
     }
 
     @MainActor
@@ -3386,6 +3423,7 @@ private struct ChekiQuadCropEditorView: View {
             ))
         }
         sourceUIImage = rotated
+        displayProxyUIImage = Self.makeDisplayProxy(from: rotated)
         // 同步逆時針旋轉正規化頂點：(x, y) -> (y, 1 - x)
         let rotatedPts = normalizedCorners.map { pt in
             CGPoint(x: pt.y, y: 1.0 - pt.x)
@@ -3465,13 +3503,13 @@ private struct ChekiQuadCropEditorView: View {
                 let encodedJSON = ChekiItem.encodeNormalizedCorners(manualNorm)
                 if editingBackside {
                     if item.originalBackImageData == nil {
-                        item.originalBackImageData = item.backImageData ?? uiImage.jpegData(compressionQuality: 0.92)
+                        item.originalBackImageData = uiImage.jpegData(compressionQuality: 0.92)
                     }
                     item.backImageData = croppedJPEG
                     item.backPerspectivePointsJSON = encodedJSON
                 } else {
                     if item.originalFrontImageData == nil {
-                        item.originalFrontImageData = item.frontImageData ?? uiImage.jpegData(compressionQuality: 0.92)
+                        item.originalFrontImageData = uiImage.jpegData(compressionQuality: 0.92)
                     }
                     item.frontImageData = croppedJPEG
                     item.perspectivePointsJSON = encodedJSON
