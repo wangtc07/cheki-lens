@@ -228,7 +228,8 @@ public enum ModelContainerProvider {
     public static func preview(withSampleData: Bool = true) throws -> ModelContainer {
         let config = ModelConfiguration(
             schema: sharedSchema,
-            isStoredInMemoryOnly: true
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
         )
         let container = try ModelContainer(for: sharedSchema, configurations: [config])
 

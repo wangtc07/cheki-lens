@@ -124,7 +124,7 @@ final class ChekiImageCacheManagerTests: XCTestCase {
     }
 
     func test_resolveThumbnail_forChekiItem_usesThumbnailDataFirst() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: ChekiItem.self, configurations: config)
         let context = ModelContext(container)
 
@@ -144,7 +144,7 @@ final class ChekiImageCacheManagerTests: XCTestCase {
     }
 
     func test_resolveThumbnail_forChekiItem_generatesFromFrontData() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: ChekiItem.self, configurations: config)
         let context = ModelContext(container)
 
@@ -165,7 +165,7 @@ final class ChekiImageCacheManagerTests: XCTestCase {
     }
 
     func test_replaceDisplayedImages_dropsPreviousAutoCrop() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: ChekiItem.self, configurations: config)
         let context = ModelContext(container)
 

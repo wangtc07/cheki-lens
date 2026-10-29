@@ -70,7 +70,7 @@ final class ChekiCloudAssetServiceTests: XCTestCase {
             userDefaults: testUserDefaults
         )
 
-        let modelConfig = ModelConfiguration(isStoredInMemoryOnly: true)
+        let modelConfig = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         modelContainer = try! ModelContainer(for: ChekiItem.self, configurations: modelConfig)
         modelContext = ModelContext(modelContainer)
     }

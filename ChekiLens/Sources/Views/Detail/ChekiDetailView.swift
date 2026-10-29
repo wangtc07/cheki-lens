@@ -720,7 +720,7 @@ struct ChekiDetailView: View {
         let targetAnchor: GridCellAnchor? = isCurrent ? gridAnchor(for: pageItem.id) : nil
         let isDockedToGrid = isCurrent && isCardDockedToGridCell && targetAnchor != nil
 
-        let effectiveFlipProgress = (isCurrent && !isDockedToGrid && !isDraggingDownToDismiss) ? flipProgress : 0.0
+        let effectiveFlipProgress = (isCurrent && !isDockedToGrid) ? flipProgress : 0.0
         let expandScale = fullScreenExpandScale(
             for: pageItem,
             baseAvailableSize: baseAvailableSize,
@@ -1679,7 +1679,7 @@ private struct ChekiDetailCardFaceRenderer<
         pageStride: CGFloat,
         fullScreenSize: CGSize
     ) -> some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .local)
+        DragGesture(minimumDistance: 8, coordinateSpace: .local)
             .onChanged { value in
                 guard !isAnimatingDismissToGrid && !fallbackFadeOutDismiss else { return }
 
@@ -1691,35 +1691,66 @@ private struct ChekiDetailCardFaceRenderer<
                 let dx = value.translation.width
                 let dy = value.translation.height
 
+                // 1. 若已經處於下拉返回狀態，直接 1:1 跟隨手指 2D 位移與縮小
+                if isDraggingDownToDismiss {
+                    dismissDragOffset = CGSize(width: dx, height: max(-10, dy))
+                    return
+                }
+
+                // 2. 下拉手勢判定優先權：只要手指朝下移動（dy > 0 且 dy > abs(dx) * 0.55，或 dy > 14），立即進入下拉返回模式
+                if dy > 0 && (dy > abs(dx) * 0.55 || dy > 14) {
+                    dragAxisLock = .vertical
+                    isDraggingDownToDismiss = true
+                    dismissDragOffset = CGSize(width: dx, height: dy)
+                    return
+                }
+
+                // 3. 若尚未鎖定方向，根據移動量初判
                 if dragAxisLock == nil {
-                    if abs(dx) > 8 || abs(dy) > 8 {
-                        dragAxisLock = abs(dx) >= abs(dy) ? .horizontal : .vertical
+                    if abs(dx) > 10 || abs(dy) > 10 {
+                        if dy > 0 && dy > abs(dx) * 0.5 {
+                            dragAxisLock = .vertical
+                            isDraggingDownToDismiss = true
+                            dismissDragOffset = CGSize(width: dx, height: dy)
+                            return
+                        } else if abs(dx) > abs(dy) * 1.1 {
+                            dragAxisLock = .horizontal
+                        } else {
+                            dragAxisLock = .vertical
+                        }
                     }
                 }
 
                 if dragAxisLock == .vertical {
-                    // 向下滑動：相片跟隨手指 2D 位移並平滑縮小，同時背景漸淡透出底層一覽
                     if dy > 0 || isDraggingDownToDismiss {
-                        if !isDraggingDownToDismiss {
-                            isDraggingDownToDismiss = true
-                        }
-                        dismissDragOffset = CGSize(width: dx, height: max(-24, dy))
+                        isDraggingDownToDismiss = true
+                        dismissDragOffset = CGSize(width: dx, height: max(-10, dy))
                     }
                     return
                 }
 
-                guard dragAxisLock == .horizontal else { return }
+                // 4. 水平左右翻頁滑動（若在水平模式中手指轉向明顯朝下拖動，打破水平鎖定轉為下拉返回）
+                if dragAxisLock == .horizontal {
+                    if dy > 24 && dy > abs(dx) * 1.2 {
+                        // 使用者轉向朝下拖曳 -> 切換為下拉返回
+                        dragAxisLock = .vertical
+                        horizontalDragOffset = 0
+                        isDraggingDownToDismiss = true
+                        dismissDragOffset = CGSize(width: dx, height: dy)
+                        return
+                    }
 
-                let itemsCount = filmstripItems.count
-                let idx = currentIndex
-                let isOverscrollingLeading = (idx == 0 && dx > 0)
-                let isOverscrollingTrailing = (idx >= itemsCount - 1 && dx < 0)
+                    let itemsCount = filmstripItems.count
+                    let idx = currentIndex
+                    let isOverscrollingLeading = (idx == 0 && dx > 0)
+                    let isOverscrollingTrailing = (idx >= itemsCount - 1 && dx < 0)
 
-                if isOverscrollingLeading || isOverscrollingTrailing {
-                    // 首尾邊界橡皮筋阻尼回饋
-                    horizontalDragOffset = dx * 0.28
-                } else {
-                    horizontalDragOffset = dx
+                    if isOverscrollingLeading || isOverscrollingTrailing {
+                        // 首尾邊界橡皮筋阻尼回饋
+                        horizontalDragOffset = dx * 0.28
+                    } else {
+                        horizontalDragOffset = dx
+                    }
                 }
             }
             .onEnded { value in
@@ -1742,11 +1773,10 @@ private struct ChekiDetailCardFaceRenderer<
                 let dy = value.translation.height
                 let predictedDx = value.predictedEndTranslation.width
                 let predictedDy = value.predictedEndTranslation.height
-                let activeAxis = dragAxisLock ?? (abs(dx) >= abs(dy) ? .horizontal : .vertical)
 
                 if isDraggingDownToDismiss {
-                    // 放開手指時：若下滑距離或慣性超過門檻，圖片平滑縮回一覽中該相片的原本位置；否則彈回中央
-                    if dy > 45 || predictedDy > 120 {
+                    // 放開手指時：若下滑距離或慣性超過門檻，圖片平滑縮回一覽原本位置並返回總覽頁；否則彈回中央
+                    if dy > 40 || predictedDy > 90 {
                         triggerAnimatedDismissToGrid()
                     } else {
                         withAnimation(ChekiMotion.small) {
@@ -1757,17 +1787,19 @@ private struct ChekiDetailCardFaceRenderer<
                     return
                 }
 
+                let activeAxis = dragAxisLock ?? (abs(dx) >= abs(dy) ? .horizontal : .vertical)
+
                 if activeAxis == .vertical {
                     withAnimation(pageAndZoomAnimation) {
                         horizontalDragOffset = 0
                     }
                     // 向上滑動 -> 呼出資訊與備忘面板 (Task 4.6)
-                    if dy < -50 {
+                    if dy < -45 || predictedDy < -100 {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         hasSeenDetailCoachMark = true
                         showingInfoSheet = true
-                    } else if dy > 65 {
-                        // 向下滑動 -> 圖片縮回一覽原本位置並返回
+                    } else if dy > 40 || predictedDy > 90 {
+                        // 向下滑動 -> 圖片縮回一覽原本位置並返回總覽頁
                         triggerAnimatedDismissToGrid()
                     }
                 } else {
@@ -1793,16 +1825,12 @@ private struct ChekiDetailCardFaceRenderer<
     private func triggerAnimatedDismissToGrid() {
         guard !isAnimatingDismissToGrid && !fallbackFadeOutDismiss else { return }
 
-        // 若是由舊版 NavigationStack 路徑推入，直接呼叫 dismiss()
-        guard NavigationChromeState.shared.activeDetailRoute != nil else {
-            dismiss()
-            return
-        }
-
         let activeID = currentItem.id
         NavigationChromeState.shared.activeZoomItemID = activeID
 
-        if gridAnchor(for: activeID) != nil {
+        let hasGridAnchor = gridAnchor(for: activeID) != nil
+
+        if hasGridAnchor {
             withAnimation(ChekiMotion.small) {
                 isDraggingDownToDismiss = false
                 isAnimatingDismissToGrid = true
@@ -1816,6 +1844,7 @@ private struct ChekiDetailCardFaceRenderer<
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.33) {
                 NavigationChromeState.shared.dismissDetail()
+                dismiss()
             }
         } else {
             withAnimation(.easeOut(duration: 0.22)) {
@@ -1823,16 +1852,14 @@ private struct ChekiDetailCardFaceRenderer<
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.21) {
                 NavigationChromeState.shared.dismissDetail()
+                dismiss()
             }
         }
     }
 
     private func performImmediateDismiss() {
-        if NavigationChromeState.shared.activeDetailRoute != nil {
-            NavigationChromeState.shared.dismissDetail()
-        } else {
-            dismiss()
-        }
+        NavigationChromeState.shared.dismissDetail()
+        dismiss()
     }
 
     /// 全畫面放大與左右翻頁共用的平滑漸進漸出曲線（Ease-In-Ease-Out，慢進慢出無急跳）
