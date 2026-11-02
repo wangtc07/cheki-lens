@@ -62,9 +62,10 @@ enum AlbumDisplayMode: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Uncategorized Album Route
+// MARK: - Uncategorized & Recently Deleted Album Routes
 
 struct UncategorizedAlbumRoute: Hashable {}
+struct RecentlyDeletedAlbumRoute: Hashable {}
 
 // MARK: - 1. LibraryView (底部左側 Tab 1：「全部」— 仿照 Apple 相簿 ライブラリ 頁面)
 
@@ -89,6 +90,7 @@ struct LibraryView: View {
     private var chromeState = NavigationChromeState.shared
     @State private var selectedItemIDs = Set<PersistentIdentifier>()
     @State private var showDeleteConfirm: Bool = false
+    @State private var showingRecentlyDeleted: Bool = false
 
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
@@ -257,8 +259,8 @@ struct LibraryView: View {
             } message: {
                 Text(
                     autoSyncToPhotos
-                        ? L10n.tr("將同時從 App 與系統相簿刪除", "アプリと「写真」の両方から削除します")
-                        : L10n.tr("將從典藏庫永久刪除", "ライブラリから完全に削除します")
+                        ? L10n.tr("將同時從 App 與系統相簿移至「最近刪除」（保留 30 天）", "アプリと「写真」の両方で「最近削除した項目」に移動します（30日間保持）")
+                        : L10n.tr("將移至「最近刪除」（保留 30 天）", "「最近削除した項目」に移動します（30日間保持）")
                 )
             }
             .sheet(isPresented: $showingQuickCreateSheet) {
@@ -332,6 +334,10 @@ struct LibraryView: View {
                 photosTargetItem: $photosBacksideTargetItem,
                 isShowingPhotosPicker: $isShowingPhotosBacksidePicker
             )
+            .navigationDestination(isPresented: $showingRecentlyDeleted) {
+                RecentlyDeletedView()
+                    .toolbar(.hidden, for: .tabBar)
+            }
             .navigationDestination(for: ChekiDetailRoute.self) { route in
                 ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
                     .toolbar(.hidden, for: .tabBar)
@@ -504,6 +510,19 @@ struct LibraryView: View {
                         } label: {
                             Label(L10n.tr("團體 / 成員", "グループ / メンバー"), systemImage: "person.badge.plus")
                         }
+
+                        Button {
+                            showingRecentlyDeleted = true
+                        } label: {
+                            let trashedCount = chekiItems.filter { $0.isDeleted && $0.modelContext != nil }.count
+                            Label(
+                                trashedCount > 0
+                                    ? "\(L10n.tr("最近刪除", "最近削除した項目")) (\(trashedCount))"
+                                    : L10n.tr("最近刪除", "最近削除した項目"),
+                                systemImage: "trash"
+                            )
+                        }
+                        .accessibilityIdentifier("library.menu.recentlyDeleted")
 
                         Button {
                             showingSettingsSheet = true
@@ -764,10 +783,11 @@ private struct AppleLibraryPhotoCell: View {
 
         ZStack(alignment: .topTrailing) {
             if isValid,
-               let uiImage = ChekiThumbnailCache.shared.image(for: item) {
+               let uiImage = ChekiImageCacheManager.shared.syncThumbnail(for: item) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFit()
+                    .id(ChekiImageDisplayRevision.shared.token(for: item.id))
                     .overlay {
                         ChekiWatermarkOverlayView(compact: true)
                     }
@@ -903,6 +923,54 @@ private struct AlbumDragSelectOverlay: View {
     }
 }
 
+@available(iOS 18.0, *)
+private struct AlbumScrollTrackingModifier: ViewModifier {
+    let mode: AlbumHierarchyMode
+    @Binding var groupsSegmentHidden: Bool
+    @Binding var membersSegmentHidden: Bool
+    @State private var groupScrollPosition = ScrollPosition(edge: .top)
+    @State private var memberScrollPosition = ScrollPosition(edge: .top)
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition(mode == .groups ? $groupScrollPosition : $memberScrollPosition)
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top
+            } action: { _, offset in
+                let hidden = offset > 40
+                let shown = offset <= 2
+                guard hidden || shown else { return }
+                switch mode {
+                case .groups where groupsSegmentHidden != hidden:
+                    groupsSegmentHidden = hidden
+                case .members where membersSegmentHidden != hidden:
+                    membersSegmentHidden = hidden
+                default:
+                    break
+                }
+            }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    fileprivate func trackAlbumScroll(
+        mode: AlbumHierarchyMode,
+        groupsSegmentHidden: Binding<Bool>,
+        membersSegmentHidden: Binding<Bool>
+    ) -> some View {
+        if #available(iOS 18.0, *) {
+            modifier(AlbumScrollTrackingModifier(
+                mode: mode,
+                groupsSegmentHidden: groupsSegmentHidden,
+                membersSegmentHidden: membersSegmentHidden
+            ))
+        } else {
+            self
+        }
+    }
+}
+
 // MARK: - 2. AlbumsRootView (底部左側 Tab 2：「相冊」— 仿照 Apple 原生相簿設計)
 
 /// Apple 原生相簿風格的「相冊」視圖
@@ -930,8 +998,6 @@ struct AlbumsRootView: View {
     @State private var pendingDeletion: AlbumPendingDeletion?
     @State private var groupsSegmentHidden: Bool = false
     @State private var membersSegmentHidden: Bool = false
-    @State private var groupScrollPosition = ScrollPosition(edge: .top)
-    @State private var memberScrollPosition = ScrollPosition(edge: .top)
     @State private var showingQuickCreateSheet: Bool = false
     @State private var showingSettingsSheet: Bool = false
     @State private var showingSystemAlbumBatchImport: Bool = false
@@ -1217,6 +1283,10 @@ struct AlbumsRootView: View {
                     defaultMember: nil
                 )
             }
+            .navigationDestination(for: RecentlyDeletedAlbumRoute.self) { _ in
+                RecentlyDeletedView()
+                    .toolbar(.hidden, for: .tabBar)
+            }
             .navigationDestination(for: ChekiDetailRoute.self) { route in
                 ChekiDetailView(itemID: route.itemID, scopedItemIDs: route.scopedItemIDs)
                     .toolbar(.hidden, for: .tabBar)
@@ -1291,6 +1361,19 @@ struct AlbumsRootView: View {
             )
 
             Divider()
+
+            Button {
+                albumPath.append(RecentlyDeletedAlbumRoute())
+            } label: {
+                let trashedCount = chekiItems.filter { $0.isDeleted && $0.modelContext != nil }.count
+                Label(
+                    trashedCount > 0
+                        ? "\(L10n.tr("最近刪除", "最近削除した項目")) (\(trashedCount))"
+                        : L10n.tr("最近刪除", "最近削除した項目"),
+                    systemImage: "trash"
+                )
+            }
+            .accessibilityIdentifier("albums.menu.recentlyDeleted")
 
             SettingsMenuButton { showingSettingsSheet = true }
     }
@@ -1391,22 +1474,11 @@ struct AlbumsRootView: View {
                 AlbumDragFloatCard(model: floating)
             }
         }
-        .scrollPosition(mode == .groups ? $groupScrollPosition : $memberScrollPosition)
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            geometry.contentOffset.y + geometry.contentInsets.top
-        } action: { _, offset in
-            let hidden = offset > 40
-            let shown = offset <= 2
-            guard hidden || shown else { return }
-            switch mode {
-            case .groups where groupsSegmentHidden != hidden:
-                groupsSegmentHidden = hidden
-            case .members where membersSegmentHidden != hidden:
-                membersSegmentHidden = hidden
-            default:
-                break
-            }
-        }
+        .trackAlbumScroll(
+            mode: mode,
+            groupsSegmentHidden: $groupsSegmentHidden,
+            membersSegmentHidden: $membersSegmentHidden
+        )
         .gridPinchGesture(enabled: displayMode == .grid && !isSelectingAlbums, pinchZoomGesture)
     }
 
@@ -3638,8 +3710,8 @@ struct AlbumHeroDetailView: View {
         } message: {
             Text(
                 autoSyncToPhotos
-                    ? L10n.tr("將從典藏庫與系統相簿刪除。", "ライブラリと写真アプリから削除されます。")
-                    : L10n.tr("將從典藏庫移除且無法復原。", "ライブラリから削除され、元に戻せません。")
+                    ? L10n.tr("將從典藏庫與系統相簿移至「最近刪除」（保留 30 天）", "ライブラリと「写真」の両方で「最近削除した項目」に移動します（30日間保持）")
+                    : L10n.tr("將移至「最近刪除」（保留 30 天）", "「最近削除した項目」に移動します（30日間保持）")
             )
         }
         .sheet(isPresented: $showingSettingsSheet, onDismiss: {
@@ -3757,10 +3829,11 @@ struct AlbumHeroDetailView: View {
                 .frame(height: 390)
                 .overlay {
                     if let heroItem = heroCoverItem,
-                       let uiImage = ChekiThumbnailCache.shared.image(for: heroItem) {
+                       let uiImage = ChekiImageCacheManager.shared.syncThumbnail(for: heroItem) {
                         Image(uiImage: uiImage)
                             .resizable()
                             .scaledToFill()
+                            .id(ChekiImageDisplayRevision.shared.token(for: heroItem.id))
                             .scaleEffect(1.22)
                     } else {
                         LinearGradient(
@@ -4447,28 +4520,6 @@ private struct InAppAlbumPhotoPickerSheet: View {
     }
 }
 
-private final class ChekiThumbnailCache: @unchecked Sendable {
-    static let shared = ChekiThumbnailCache()
-    private let cache = NSCache<NSString, UIImage>()
-
-    private init() {
-        cache.countLimit = 300
-    }
-
-    func image(for item: ChekiItem) -> UIImage? {
-        guard !item.isDeleted, item.modelContext != nil, let data = item.frontImageData else {
-            return nil
-        }
-        let key = "\(item.id.uuidString)-\(data.count)-\(data.hashValue)" as NSString
-        if let cached = cache.object(forKey: key) {
-            return cached
-        }
-        guard let decoded = UIImage(data: data) else { return nil }
-        cache.setObject(decoded, forKey: key)
-        return decoded
-    }
-}
-
 private struct AlbumSquareThumbnailCell: View {
     let item: ChekiItem
     var cornerRadius: CGFloat = 5
@@ -4483,10 +4534,11 @@ private struct AlbumSquareThumbnailCell: View {
             .aspectRatio(1, contentMode: .fit)
             .overlay {
                 if isValid,
-                   let uiImage = ChekiThumbnailCache.shared.image(for: item) {
+                   let uiImage = ChekiImageCacheManager.shared.syncThumbnail(for: item) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFill()
+                        .id(ChekiImageDisplayRevision.shared.token(for: item.id))
                         .scaleEffect(1.22)
                 } else {
                     Image(systemName: "photo")
@@ -4999,7 +5051,7 @@ private struct ApplePhotosSelectionBottomBar: View {
 /// - 單指點擊：切換該格的選取
 /// - 單指橫向或斜向滑動：從起點格到目前格做範圍選取或取消
 /// - 單指垂直滑動：不攔截，交給外層 `ScrollView`
-private struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
+struct ApplePhotosDragSelectOverlay<ID: Hashable>: UIViewRepresentable {
     let itemIDs: [ID]
     let columnCount: Int
     let spacing: CGFloat

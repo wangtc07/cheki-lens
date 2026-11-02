@@ -23,23 +23,49 @@ struct ContentView: View {
         Group {
             if hasCompletedOnboarding {
                 ZStack {
-                    TabView(selection: $selectedTab) {
-                        Tab(L10n.tr("全部", "すべて"), systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
+                    if #available(iOS 18.0, *) {
+                        TabView(selection: $selectedTab) {
+                            Tab(L10n.tr("全部", "すべて"), systemImage: "photo.on.rectangle.angled", value: MainLibraryTab.allPhotos) {
+                                LibraryView()
+                                    .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                            }
+
+                            Tab(L10n.tr("相冊", "アルバム"), systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
+                                AlbumsRootView()
+                                    .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                            }
+
+                            Tab(L10n.tr("搜尋", "検索"), systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
+                                LibrarySearchView()
+                                    .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                            }
+                        }
+                        .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
+                    } else {
+                        TabView(selection: $selectedTab) {
                             LibraryView()
+                                .tabItem {
+                                    Label(L10n.tr("全部", "すべて"), systemImage: "photo.on.rectangle.angled")
+                                }
+                                .tag(MainLibraryTab.allPhotos)
                                 .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
-                        }
 
-                        Tab(L10n.tr("相冊", "アルバム"), systemImage: "rectangle.stack.fill", value: MainLibraryTab.albums) {
                             AlbumsRootView()
+                                .tabItem {
+                                    Label(L10n.tr("相冊", "アルバム"), systemImage: "rectangle.stack.fill")
+                                }
+                                .tag(MainLibraryTab.albums)
                                 .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
-                        }
 
-                        Tab(L10n.tr("搜尋", "検索"), systemImage: "magnifyingglass", value: MainLibraryTab.search, role: .search) {
                             LibrarySearchView()
+                                .tabItem {
+                                    Label(L10n.tr("搜尋", "検索"), systemImage: "magnifyingglass")
+                                }
+                                .tag(MainLibraryTab.search)
                                 .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
                         }
+                        .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
                     }
-                    .toolbar(chromeState.shouldHideMainTabBar ? .hidden : .visible, for: .tabBar)
 
                     if let route = chromeState.activeDetailRoute {
                         ChekiDetailView(
@@ -63,11 +89,18 @@ struct ContentView: View {
         .task {
             guard hasCompletedOnboarding else { return }
             _ = await PhotoLibraryManager.shared.syncAllExternalEditsFromSystemPhotoLibrary(modelContext: modelContext)
+            _ = try? await ChekiTrashManager.shared.purgeExpiredItems(in: modelContext)
+            ChekiMirrorDeletionManager.shared.startListeningForRemoteChanges(modelContext: modelContext)
+            let autoSync = UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary")
+            _ = await ChekiMirrorDeletionManager.shared.reconcileMirrorDeletions(in: modelContext, autoDeleteFromPhotos: autoSync)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, hasCompletedOnboarding else { return }
             Task {
                 _ = await PhotoLibraryManager.shared.syncAllExternalEditsFromSystemPhotoLibrary(modelContext: modelContext)
+                _ = try? await ChekiTrashManager.shared.purgeExpiredItems(in: modelContext)
+                let autoSync = UserDefaults.standard.bool(forKey: "autoSyncToPhotosLibrary")
+                _ = await ChekiMirrorDeletionManager.shared.reconcileMirrorDeletions(in: modelContext, autoDeleteFromPhotos: autoSync)
             }
         }
     }

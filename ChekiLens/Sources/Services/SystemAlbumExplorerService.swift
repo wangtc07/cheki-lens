@@ -15,15 +15,20 @@ nonisolated struct SystemPhotoAlbumNode: Identifiable, Equatable, Hashable, Send
     var parentFolderID: String?
     /// 所屬父資料夾名稱（預設對應團體名稱 `IdolGroup.name`；若為根目錄獨立相簿則為 `nil`）
     var parentFolderTitle: String?
-    /// 相簿內所有影像 `PHAsset.localIdentifier`（依相簿順序排列）
+    /// 相簿內所有影像 `PHAsset.localIdentifier`（依相簿順序排列；初始輕量掃描階段可為空，待進入工作台時延遲解析）
     var assetIdentifiers: [String]
     /// 封面預覽縮圖使用的 `PHAsset.localIdentifier`
     var coverAssetIdentifier: String?
     /// 此相簿匯入時是否執行拍立得四角邊緣偵測與透視裁切（預設 `true`；若原圖已裁切可關閉）
     var enableEdgeDetection: Bool
+    /// 相簿內影像總數（若已載入 assetIdentifiers 則以其實際長度為準，否則以初次輕量掃描計數為準）
+    private var explicitAssetCount: Int?
 
     var assetCount: Int {
-        assetIdentifiers.count
+        if !assetIdentifiers.isEmpty {
+            return assetIdentifiers.count
+        }
+        return explicitAssetCount ?? 0
     }
 
     init(
@@ -33,7 +38,8 @@ nonisolated struct SystemPhotoAlbumNode: Identifiable, Equatable, Hashable, Send
         parentFolderTitle: String? = nil,
         assetIdentifiers: [String] = [],
         coverAssetIdentifier: String? = nil,
-        enableEdgeDetection: Bool = true
+        enableEdgeDetection: Bool = true,
+        assetCount: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -42,6 +48,7 @@ nonisolated struct SystemPhotoAlbumNode: Identifiable, Equatable, Hashable, Send
         self.assetIdentifiers = assetIdentifiers
         self.coverAssetIdentifier = coverAssetIdentifier ?? assetIdentifiers.first
         self.enableEdgeDetection = enableEdgeDetection
+        self.explicitAssetCount = assetCount ?? (assetIdentifiers.isEmpty ? nil : assetIdentifiers.count)
     }
 }
 
@@ -206,6 +213,15 @@ final class SystemAlbumExplorerService: Sendable {
 
     init() {}
 
+    private final class CancelToken: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _isCancelled = false
+        var isCancelled: Bool {
+            get { lock.withLock { _isCancelled } }
+            set { lock.withLock { _isCancelled = newValue } }
+        }
+    }
+
     // MARK: - 1. 取得系統資料夾與相簿階層樹狀結構
 
     /// 掃描使用者系統相簿中的頂層資料夾與獨立相簿，建構 `SystemPhotoLibraryHierarchy`
@@ -218,26 +234,43 @@ final class SystemAlbumExplorerService: Sendable {
         } else {
             hasPermission = await PhotoLibraryManager.shared.requestAuthorization()
         }
-        guard hasPermission else {
+        guard hasPermission, !Task.isCancelled else {
             return SystemPhotoLibraryHierarchy()
         }
 
-        return await Task.detached(priority: .userInitiated) {
-            Self.buildHierarchySynchronously(includeEmptyAlbums: includeEmptyAlbums)
-        }.value
+        let token = CancelToken()
+        return await withTaskCancellationHandler {
+            await Task.detached(priority: .userInitiated) {
+                Self.buildHierarchySynchronously(
+                    includeEmptyAlbums: includeEmptyAlbums,
+                    shouldCancel: { token.isCancelled }
+                )
+            }.value
+        } onCancel: {
+            token.isCancelled = true
+        }
     }
 
-    private static func buildHierarchySynchronously(includeEmptyAlbums: Bool) -> SystemPhotoLibraryHierarchy {
+    private static func buildHierarchySynchronously(
+        includeEmptyAlbums: Bool,
+        shouldCancel: (() -> Bool)? = nil
+    ) -> SystemPhotoLibraryHierarchy {
+        if shouldCancel?() == true { return SystemPhotoLibraryHierarchy() }
         let topLevelCollections = PHCollectionList.fetchTopLevelUserCollections(with: nil)
         var folders: [SystemPhotoFolderNode] = []
         var standaloneAlbums: [SystemPhotoAlbumNode] = []
 
-        topLevelCollections.enumerateObjects { collection, _, _ in
+        topLevelCollections.enumerateObjects { collection, _, stop in
+            if shouldCancel?() == true {
+                stop.pointee = true
+                return
+            }
             if let folder = collection as? PHCollectionList {
                 if let folderNode = parseFolder(
                     folder,
                     inheritedGroupName: nil,
-                    includeEmptyAlbums: includeEmptyAlbums
+                    includeEmptyAlbums: includeEmptyAlbums,
+                    shouldCancel: shouldCancel
                 ) {
                     folders.append(folderNode)
                 }
@@ -253,6 +286,8 @@ final class SystemAlbumExplorerService: Sendable {
             }
         }
 
+        if shouldCancel?() == true { return SystemPhotoLibraryHierarchy() }
+
         return SystemPhotoLibraryHierarchy(
             folders: folders,
             standaloneAlbums: standaloneAlbums
@@ -262,8 +297,10 @@ final class SystemAlbumExplorerService: Sendable {
     private static func parseFolder(
         _ folder: PHCollectionList,
         inheritedGroupName: String?,
-        includeEmptyAlbums: Bool
+        includeEmptyAlbums: Bool,
+        shouldCancel: (() -> Bool)? = nil
     ) -> SystemPhotoFolderNode? {
+        if shouldCancel?() == true { return nil }
         let rawTitle = (folder.localizedTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let folderTitle = rawTitle.isEmpty ? L10n.tr("未命名資料夾", "名称未設定フォルダ") : rawTitle
 
@@ -279,12 +316,17 @@ final class SystemAlbumExplorerService: Sendable {
         var childAlbums: [SystemPhotoAlbumNode] = []
         var childSubfolders: [SystemPhotoFolderNode] = []
 
-        childCollections.enumerateObjects { child, _, _ in
+        childCollections.enumerateObjects { child, _, stop in
+            if shouldCancel?() == true {
+                stop.pointee = true
+                return
+            }
             if let subfolder = child as? PHCollectionList {
                 if let subNode = parseFolder(
                     subfolder,
                     inheritedGroupName: effectiveGroupTitle,
-                    includeEmptyAlbums: includeEmptyAlbums
+                    includeEmptyAlbums: includeEmptyAlbums,
+                    shouldCancel: shouldCancel
                 ) {
                     childSubfolders.append(subNode)
                 }
@@ -325,26 +367,62 @@ final class SystemAlbumExplorerService: Sendable {
         fetchOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
 
         let assetsResult = PHAsset.fetchAssets(in: album, options: fetchOptions)
-        var assetIDs: [String] = []
-        assetIDs.reserveCapacity(assetsResult.count)
+        let count = assetsResult.count
 
-        assetsResult.enumerateObjects { asset, _, _ in
-            assetIDs.append(asset.localIdentifier)
-        }
-
-        if !includeEmptyAlbums && assetIDs.isEmpty {
+        if !includeEmptyAlbums && count == 0 {
             return nil
         }
+
+        // 極速輕量掃描：僅取得封面小圖之 localIdentifier，不在此處枚舉數千張 Asset
+        let coverID = assetsResult.lastObject?.localIdentifier ?? assetsResult.firstObject?.localIdentifier
 
         return SystemPhotoAlbumNode(
             id: album.localIdentifier,
             title: albumTitle,
             parentFolderID: parentFolderID,
             parentFolderTitle: parentFolderTitle,
-            assetIdentifiers: assetIDs,
-            coverAssetIdentifier: assetIDs.last ?? assetIDs.first,
-            enableEdgeDetection: true
+            assetIdentifiers: [],
+            coverAssetIdentifier: coverID,
+            enableEdgeDetection: true,
+            assetCount: count
         )
+    }
+
+    // MARK: - 延遲解析選定相簿之相片 Identifiers
+
+    /// 根據相簿 Collection ID 查詢並取得其內部所有影像之 localIdentifier 清單
+    static func resolveAssetIdentifiers(for albumID: String) -> [String] {
+        guard !albumID.isEmpty,
+              let collection = PHAssetCollection.fetchAssetCollections(
+                withLocalIdentifiers: [albumID],
+                options: nil
+              ).firstObject else {
+            return []
+        }
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        let assetsResult = PHAsset.fetchAssets(in: collection, options: fetchOptions)
+        var assetIDs: [String] = []
+        assetIDs.reserveCapacity(assetsResult.count)
+        assetsResult.enumerateObjects { asset, _, _ in
+            assetIDs.append(asset.localIdentifier)
+        }
+        return assetIDs
+    }
+
+    /// 若相簿的 `assetIdentifiers` 尚未載入（延遲模式），為其補齊完整清單
+    static func populateAssetIdentifiers(for albums: [SystemPhotoAlbumNode]) -> [SystemPhotoAlbumNode] {
+        albums.map { album in
+            var node = album
+            if node.assetIdentifiers.isEmpty && node.assetCount > 0 {
+                let resolvedIDs = resolveAssetIdentifiers(for: node.id)
+                node.assetIdentifiers = resolvedIDs
+                if node.coverAssetIdentifier == nil {
+                    node.coverAssetIdentifier = resolvedIDs.last ?? resolvedIDs.first
+                }
+            }
+            return node
+        }
     }
 
     // MARK: - 2. 載入縮圖與完整影像資料

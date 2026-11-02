@@ -273,9 +273,26 @@ final class PhotoLibraryManager {
                 albumChangeRequest?.addAssets([asset] as NSArray)
             }
         }
-        Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
+        let updatedAsset = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil).firstObject
+        Self.recordAssetSyncedTimestamp(for: asset.localIdentifier, modificationDate: updatedAsset?.modificationDate ?? Date())
     }
     
+    /// 只改既有照片的拍攝時間，不重寫影像。重新裁切其中一面時，用來讓另一面日期跟著判斷日。
+    func updateAssetCreationDate(identifier: String, to date: Date) async {
+        guard !identifier.isEmpty else { return }
+        guard await requestAuthorization() else { return }
+        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject else { return }
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                let changeRequest = PHAssetChangeRequest(for: asset)
+                changeRequest.creationDate = date
+            }
+            Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
+        } catch {
+            // 日期寫回失敗時，App 內已裁切的影像仍保留
+        }
+    }
+
     /// 將既有 `PHAsset` 加入指定相簿（不複製或新建照片）
     func addExistingAsset(identifier: String, creationDate: Date? = nil, to album: PHAssetCollection) async throws {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject else { return }
@@ -510,9 +527,9 @@ final class PhotoLibraryManager {
     }
 
     /// 非同步安全刪除指定的 `ChekiItem` 陣列：
-    /// 1. 先向 iOS 系統相簿 (`Photos.app`) 請求刪除對應的 `PHAsset`（確保系統相簿確實刪除且視圖狀態穩定不閃退）。
+    /// 1. 先向 iOS 系統相簿 (`Photos.app`) 請求刪除對應的 `PHAsset`（移入系統相簿最近刪除）。
     /// 2. 執行 `onBeforeContextDelete` 讓單張檢視器先行切換上/下一張或關閉頁面，徹底脫離被刪除物件之引用。
-    /// 3. 最後再解除關聯並從 SwiftData `modelContext` 刪除與儲存。
+    /// 3. 將項目移入 App 內建「最近刪除」相冊（保留 30 天，可隨時復原）。
     @MainActor
     func deleteItemsAsync(
         _ items: [ChekiItem],
@@ -533,18 +550,10 @@ final class PhotoLibraryManager {
         onBeforeContextDelete?()
         await Task.yield()
 
-        for item in liveItems where !item.isDeleted && item.modelContext != nil {
-            if let memo = item.memo {
-                item.memo = nil
-                modelContext.delete(memo)
-            }
-            item.idolMember = nil
-            modelContext.delete(item)
-        }
-        try? modelContext.save()
+        try? ChekiTrashManager.shared.softDelete(liveItems, in: modelContext)
     }
 
-    /// 刪除指定的 `ChekiItem` 陣列，並一併自 iOS 系統相簿 (`Photos.app`) 刪除對應的正反面照片
+    /// 刪除指定的 `ChekiItem` 陣列（移入「最近刪除」），並一併自 iOS 系統相簿 (`Photos.app`) 刪除對應的正反面照片
     @MainActor
     func deleteItems(
         _ items: [ChekiItem],
@@ -554,6 +563,15 @@ final class PhotoLibraryManager {
         Task { @MainActor in
             await self.deleteItemsAsync(items, modelContext: modelContext)
         }
+    }
+
+    /// 永久硬刪除指定之 `ChekiItem` 陣列（徹底自資料庫與快取抹除）
+    @MainActor
+    func permanentlyDeleteItems(
+        _ items: [ChekiItem],
+        modelContext: ModelContext
+    ) async throws {
+        try await ChekiTrashManager.shared.permanentlyDelete(items, in: modelContext)
     }
 
     /// 取消（解除）單張拍立得的背面綁定（不刪除照片）：
@@ -675,7 +693,8 @@ final class PhotoLibraryManager {
             let changeRequest = PHAssetChangeRequest(for: asset)
             changeRequest.revertAssetContentToOriginal()
         }
-        Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
+        let updatedAsset = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil).firstObject
+        Self.recordAssetSyncedTimestamp(for: asset.localIdentifier, modificationDate: updatedAsset?.modificationDate ?? Date())
     }
     
     private func requestContentEditingInput(for asset: PHAsset) async throws -> PHContentEditingInput {
@@ -716,6 +735,25 @@ final class PhotoLibraryManager {
         return UserDefaults.standard.double(forKey: key)
     }
 
+    /// 讀取 `PHAsset` 原始未經任何裁切或調色的相片資料（`.version = .unadjusted`，確保二次進入手動編輯器時永遠載入最乾淨的未裁切底圖）
+    func requestRawUnadjustedImageData(for asset: PHAsset) async -> Data? {
+        await withCheckedContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.version = .unadjusted
+            options.deliveryMode = .highQualityFormat
+            options.isNetworkAccessAllowed = true
+            options.isSynchronous = false
+            var didResume = false
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, info in
+                guard !didResume else { return }
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if isDegraded { return }
+                didResume = true
+                continuation.resume(returning: data)
+            }
+        }
+    }
+
     /// 讀取 `PHAsset` 在 iOS 系統相簿中最新渲染後的影像資料（`.version = .current`，包含系統相簿內所有調色、色溫、濾鏡與曝光修改）
     private func requestCurrentRenderedImageData(for asset: PHAsset) async -> Data? {
         await withCheckedContinuation { continuation in
@@ -741,10 +779,10 @@ final class PhotoLibraryManager {
         let currentModTime = asset.modificationDate?.timeIntervalSince1970 ?? 0
 
         if let lastKnown = Self.lastKnownSyncedTimestamp(for: assetID) {
-            return currentModTime > lastKnown + 0.5
+            guard currentModTime > lastKnown + 0.5 else { return false }
         }
 
-        // 若為舊項目尚未紀錄 timestamp，檢查該 PHAsset 是否含有非 ChekiLens 寫入之系統調色 (.adjustmentData)
+        // 檢查該 PHAsset 是否含有非 ChekiLens 寫入之系統調色 (.adjustmentData)
         let resources = PHAssetResource.assetResources(for: asset)
         let hasAdjustmentResource = resources.contains { $0.type == .adjustmentData }
         guard hasAdjustmentResource else {
@@ -762,11 +800,9 @@ final class PhotoLibraryManager {
             }
             asset.requestContentEditingInput(with: options) { _, _ in
                 if let formatID = detectedFormatID {
-                    // 若 formatIdentifier 不是 ChekiLens 寫入的（例如 com.apple.photo 原生相簿調色），代表在系統相簿有調色修改
+                    // 若 formatIdentifier 是 ChekiLens 寫入的（如 wangtc07.ChekiLens.crop），代表為 App 自身非外部編輯
                     let isExternal = !formatID.hasPrefix("wangtc07.ChekiLens")
-                    if !isExternal {
-                        Self.recordAssetSyncedTimestamp(for: assetID, modificationDate: asset.modificationDate)
-                    }
+                    Self.recordAssetSyncedTimestamp(for: assetID, modificationDate: asset.modificationDate)
                     continuation.resume(returning: isExternal)
                 } else {
                     continuation.resume(returning: true)
@@ -806,8 +842,8 @@ final class PhotoLibraryManager {
                 if distToOrig + 8.0 < distToCrop {
                     isRenderedUncroppedOriginal = true
                 }
-            } else if !Self.isProLifetimeUnlocked {
-                isRenderedUncroppedOriginal = true
+            } else {
+                isRenderedUncroppedOriginal = false
             }
 
             if isRenderedUncroppedOriginal {

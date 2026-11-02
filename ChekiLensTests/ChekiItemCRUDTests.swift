@@ -41,6 +41,36 @@ final class ChekiItemCRUDTests: XCTestCase {
         XCTAssertFalse(saved.hasBothSides, "預設無背面資料")
         XCTAssertNil(saved.ocrDate, "預設無 OCR 日期")
         XCTAssertEqual(saved.borderInsetRatio, 0.0, accuracy: 0.001, "預設邊界偏移為 0")
+        XCTAssertNil(saved.cloudIdentifier, "預設無雲端識別碼")
+        XCTAssertNil(saved.backCloudIdentifier, "預設無背面雲端識別碼")
+        XCTAssertNil(saved.deletedAt, "預設未刪除")
+        XCTAssertFalse(saved.isDeleted, "預設 isDeleted 為 false")
+        XCTAssertEqual(saved.daysRemainingUntilPermanentDeletion, 30, "未刪除或剛刪除剩餘天數為 30")
+    }
+
+    func test_softDelete_andRestoreFromTrash() throws {
+        // Arrange
+        let item = ChekiItem()
+        context.insert(item)
+        try context.save()
+
+        // Act 1: Soft delete
+        let deleteTime = Date(timeIntervalSince1970: 1_700_000_000)
+        item.softDelete(at: deleteTime)
+        try context.save()
+
+        // Assert 1
+        XCTAssertTrue(item.isDeleted)
+        XCTAssertEqual(item.deletedAt, deleteTime)
+        XCTAssertEqual(item.lastModifiedAt, deleteTime)
+
+        // Act 2: Restore from trash
+        item.restoreFromTrash()
+        try context.save()
+
+        // Assert 2
+        XCTAssertFalse(item.isDeleted)
+        XCTAssertNil(item.deletedAt)
     }
 
     func test_createChekiItem_withAllFields() throws {
@@ -179,6 +209,62 @@ final class ChekiItemCRUDTests: XCTestCase {
         item.applyAutomaticJudgedDate(handwritten, preservingTimeFrom: shutter)
         XCTAssertEqual(item.displayDate, corrected, "手動鎖定後背景 OCR 不得覆寫")
         XCTAssertEqual(item.appOriginalCaptureDate, shutter)
+    }
+
+    func test_pairedSystemAlbumDates_backFollowsFront() {
+        let judged = Date(timeIntervalSince1970: 1_600_000_000)
+        let item = ChekiItem(capturedAt: judged, ocrDate: judged)
+
+        let sameSecond = item.pairedSystemAlbumDates(timelineStrategy: "sameSecond")
+        XCTAssertEqual(sameSecond.front, judged)
+        XCTAssertEqual(sameSecond.back, judged, "背面應與正面同一秒")
+
+        let plusOne = item.pairedSystemAlbumDates(timelineStrategy: "plusOneSecond")
+        XCTAssertEqual(plusOne.front, judged)
+        XCTAssertEqual(plusOne.back, judged.addingTimeInterval(1), "背面應比正面晚一秒")
+    }
+
+    func test_originalImageData_notDefaultedToCropped_whenPointsPresent() {
+        let dummyCroppedData = Data([0x01, 0x02, 0x03])
+        let points = [
+            CGPoint(x: 0.1, y: 0.1),
+            CGPoint(x: 0.9, y: 0.1),
+            CGPoint(x: 0.9, y: 0.9),
+            CGPoint(x: 0.1, y: 0.9)
+        ]
+        let json = ChekiItem.encodeNormalizedCorners(points)
+
+        // When item is initialized with a cropped image and perspective points,
+        // originalFrontImageData should remain nil rather than being set to the cropped image!
+        let item = ChekiItem(
+            frontImageData: dummyCroppedData,
+            perspectivePointsJSON: json
+        )
+        XCTAssertNil(item.originalFrontImageData, "已裁切之照片不應將裁切成品誤寫為 originalFrontImageData")
+    }
+
+    func test_originalImageData_preservesRawWhenExplicitlyProvided() {
+        let rawData = Data([0xAA, 0xBB, 0xCC])
+        let croppedData = Data([0x11, 0x22, 0x33])
+        let points = [
+            CGPoint(x: 0.15, y: 0.15),
+            CGPoint(x: 0.85, y: 0.15),
+            CGPoint(x: 0.85, y: 0.85),
+            CGPoint(x: 0.15, y: 0.85)
+        ]
+        let json = ChekiItem.encodeNormalizedCorners(points)
+
+        let item = ChekiItem(
+            frontImageData: croppedData,
+            originalFrontImageData: rawData,
+            perspectivePointsJSON: json
+        )
+        XCTAssertEqual(item.originalFrontImageData, rawData, "原始底圖應永遠完整保留")
+        XCTAssertEqual(item.frontImageData, croppedData)
+
+        let decoded = ChekiItem.decodeNormalizedCorners(from: item.perspectivePointsJSON)
+        XCTAssertEqual(decoded?.count, 4)
+        XCTAssertEqual(decoded?[0].x, 0.15)
     }
 
     // MARK: - Delete Tests

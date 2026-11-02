@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import StoreKit
+import CloudKit
 
 // MARK: - 設定選項列舉定義 (Task 4.7)
 
@@ -185,6 +186,12 @@ struct SettingsView: View {
     @State private var alertTitle: String = ""
     @State private var alertMessage: String? = nil
 
+    // MARK: iCloud 多裝置同步與快取狀態 (Phase 7.5)
+    @State private var cloudKitSyncManager: CloudKitSyncManager = .shared
+    @State private var formattedCacheSize: String = "0 KB"
+    @State private var isClearingCache: Bool = false
+    @State private var showingClearCacheConfirmation: Bool = false
+
     private var appVersionString: String {
         let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
@@ -276,7 +283,197 @@ struct SettingsView: View {
                     )
                 }
 
-                // 2. 第 2 組：匯入與 OCR 手寫日期辨識偏好 (Import & Recognition)
+                // 2. 第 2 組：iCloud 多裝置同步與快取 (Multi-Device iCloud Sync & Cache)
+                Section {
+                    // 1. iCloud 帳號狀態指示燈
+                    HStack {
+                        SettingsRowLabel(
+                            title: L10n.tr("iCloud 帳號狀態", "iCloud アカウント"),
+                            subtitle: nil,
+                            systemImage: "person.crop.circle.badge.checkmark",
+                            iconColor: .cyan
+                        )
+                        Spacer()
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(accountStatusIndicatorColor)
+                                .frame(width: 8, height: 8)
+                            Text(cloudKitSyncManager.accountStatusDescription)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    // 2. Pro 權益狀態與解鎖引導
+                    if isProLifetimeUnlocked {
+                        HStack {
+                            SettingsRowLabel(
+                                title: L10n.tr("Pro 權益狀態", "Pro ステータス"),
+                                subtitle: nil,
+                                systemImage: "crown.fill",
+                                iconColor: .orange
+                            )
+                            Spacer()
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .foregroundStyle(.green)
+                                    .font(.caption)
+                                Text(L10n.tr("已解鎖", "アンロック済み"))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            showingProPurchaseSheet = true
+                        } label: {
+                            HStack {
+                                SettingsRowLabel(
+                                    title: L10n.tr("Pro 權益狀態", "Pro ステータス"),
+                                    subtitle: L10n.tr("多裝置同步需解鎖 Pro", "複数端末同期にはProが必要"),
+                                    systemImage: "crown.fill",
+                                    iconColor: .orange
+                                )
+                                Spacer()
+                                HStack(spacing: 4) {
+                                    Text(L10n.tr("升級 Pro", "Proにアップグレード"))
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.blue)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // 3. 同步總開關 Toggle
+                    Toggle(isOn: Binding(
+                        get: { cloudKitSyncManager.isICloudSyncEnabled },
+                        set: { newValue in
+                            if newValue && !isProLifetimeUnlocked {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                showingProPurchaseSheet = true
+                                cloudKitSyncManager.isICloudSyncEnabled = false
+                            } else {
+                                cloudKitSyncManager.isICloudSyncEnabled = newValue
+                            }
+                        }
+                    )) {
+                        SettingsRowLabel(
+                            title: L10n.tr("iCloud 雲端同步", "iCloud 同期"),
+                            subtitle: !CloudKitEntitlementChecker.isCloudKitEntitled
+                                ? L10n.tr("本機憑證未配置 CloudKit 權限", "現在のプロファイルではCloudKitが無効です")
+                                : (isProLifetimeUnlocked
+                                    ? L10n.tr("多裝置自動同步拍立得資料與標籤", "複数端末でチェキデータとタグを自動同期")
+                                    : L10n.tr("需 ChekiLens Pro 買斷版", "ChekiLens Pro 買い切り版が必要")),
+                            systemImage: "icloud.fill",
+                            iconColor: .blue
+                        )
+                    }
+                    .accessibilityIdentifier("settings.toggle.iCloudSync")
+
+                    // 4. 同步狀態描述與最後同步時間
+                    HStack {
+                        SettingsRowLabel(
+                            title: L10n.tr("同步狀態", "同期ステータス"),
+                            subtitle: nil,
+                            systemImage: "arrow.triangle.2.circlepath",
+                            iconColor: .indigo
+                        )
+                        Spacer()
+                        if cloudKitSyncManager.syncState.isSyncing {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(L10n.tr("正在同步...", "同期中..."))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Text(cloudKitSyncManager.syncStateDescription)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    // 5. 手動「立即同步」按鈕與旋轉進度指示
+                    Button {
+                        Task {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            await cloudKitSyncManager.triggerSync()
+                        }
+                    } label: {
+                        HStack {
+                            SettingsRowLabel(
+                                title: L10n.tr("立即同步", "今すぐ同期"),
+                                subtitle: nil,
+                                systemImage: "arrow.clockwise",
+                                iconColor: .blue
+                            )
+                            Spacer()
+                            if cloudKitSyncManager.syncState.isSyncing {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!cloudKitSyncManager.canSync || cloudKitSyncManager.syncState.isSyncing)
+                    .accessibilityIdentifier("settings.row.syncNow")
+
+                    // 6. 本機暫存快取容量顯示
+                    HStack {
+                        SettingsRowLabel(
+                            title: L10n.tr("暫存快取容量", "キャッシュ容量"),
+                            subtitle: nil,
+                            systemImage: "internaldrive",
+                            iconColor: .gray
+                        )
+                        Spacer()
+                        Text(formattedCacheSize)
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    // 7. 清除暫存快取按鈕
+                    Button {
+                        showingClearCacheConfirmation = true
+                    } label: {
+                        HStack {
+                            SettingsRowLabel(
+                                title: L10n.tr("清除暫存快取", "キャッシュを消去"),
+                                subtitle: nil,
+                                systemImage: "trash",
+                                iconColor: .red
+                            )
+                            Spacer()
+                            if isClearingCache {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isClearingCache)
+                    .accessibilityIdentifier("settings.row.clearCache")
+                } header: {
+                    Text(L10n.tr("iCloud 多裝置同步", "iCloud マルチデバイス同期"))
+                } footer: {
+                    Text(L10n.tr("啟用後，拍立得紀錄、成員標籤與備忘將透過私人 iCloud 資料庫於 iPhone 與 iPad 間即時同步。", "有効にすると、チェキ記録、メンバータグ、メモが個人のiCloudプライベートDBを通じてiPhoneとiPad間で自動同期されます。"))
+                }
+
+                // 3. 第 3 組：匯入與 OCR 手寫日期辨識偏好 (Import & Recognition)
                 Section {
                     Toggle(isOn: $autoRecognizeOCRDateOnImport) {
                         SettingsRowLabel(
@@ -568,8 +765,28 @@ struct SettingsView: View {
             } message: {
                 Text(alertMessage ?? "")
             }
+            .confirmationDialog(
+                L10n.tr("清除暫存快取", "キャッシュを消去"),
+                isPresented: $showingClearCacheConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button(L10n.tr("清除暫存快取", "キャッシュを消去"), role: .destructive) {
+                    Task {
+                        isClearingCache = true
+                        defer { isClearingCache = false }
+                        try? await ChekiImageCacheManager.shared.clearAll()
+                        formattedCacheSize = await ChekiImageCacheManager.shared.formattedDiskUsage()
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    }
+                }
+                Button(L10n.tr("取消", "キャンセル"), role: .cancel) { }
+            } message: {
+                Text(L10n.tr("將刪除本機已快取的預覽縮圖。已同步的拍立得與系統相簿原圖不受影響，需要時會自動重新下載。", "端末内のプレビューキャッシュを削除します。同期済みのチェキや写真アプリの元画像には影響せず、必要時に再ダウンロードされます。"))
+            }
             .task {
                 await StoreKitManager.shared.initializeStore()
+                await cloudKitSyncManager.refreshAccountStatus()
+                formattedCacheSize = await ChekiImageCacheManager.shared.formattedDiskUsage()
             }
             .onChange(of: autoSyncToPhotos) { _, isEnabled in
                 guard isEnabled else { return }
@@ -597,6 +814,25 @@ struct SettingsView: View {
             }
         }
         .applyAppAppearanceAndLocale()
+    }
+
+    // MARK: - iCloud 帳號狀態指示燈色彩
+    private var accountStatusIndicatorColor: Color {
+        guard CloudKitEntitlementChecker.isCloudKitEntitled else {
+            return .secondary
+        }
+        switch cloudKitSyncManager.accountStatus {
+        case .available:
+            return .green
+        case .noAccount:
+            return .secondary
+        case .restricted, .temporarilyUnavailable:
+            return .orange
+        case .couldNotDetermine:
+            return .gray
+        @unknown default:
+            return .gray
+        }
     }
 
     @MainActor

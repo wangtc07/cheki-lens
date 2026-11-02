@@ -172,4 +172,35 @@ final class SystemAlbumExplorerServiceTests: XCTestCase {
             .wide
         )
     }
+
+    // MARK: - Lazy Asset Count & Population Tests
+
+    func testSystemPhotoAlbumNodeExplicitAssetCount() {
+        // 模擬延遲解析節點：assetIdentifiers 為空，但明確指定掃描計數
+        let deferredAlbum = SystemPhotoAlbumNode(
+            id: "album-deferred",
+            title: "遠藤さくら",
+            assetIdentifiers: [],
+            coverAssetIdentifier: "cover-1",
+            assetCount: 150
+        )
+        XCTAssertEqual(deferredAlbum.assetCount, 150)
+        XCTAssertEqual(deferredAlbum.coverAssetIdentifier, "cover-1")
+
+        // 模擬已載入節點：以實際 assetIdentifiers 優先
+        var loadedAlbum = deferredAlbum
+        loadedAlbum.assetIdentifiers = ["p1", "p2", "p3"]
+        XCTAssertEqual(loadedAlbum.assetCount, 3)
+    }
+
+    func testPopulateAssetIdentifiersPreservesExisting() {
+        let node = SystemPhotoAlbumNode(
+            id: "album-test",
+            title: "測試相簿",
+            assetIdentifiers: ["img-1", "img-2"]
+        )
+        let result = SystemAlbumExplorerService.populateAssetIdentifiers(for: [node])
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].assetIdentifiers, ["img-1", "img-2"])
+    }
 }

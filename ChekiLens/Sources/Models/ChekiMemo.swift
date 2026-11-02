@@ -13,27 +13,30 @@ final class ChekiMemo {
     // MARK: Properties
 
     /// 唯一識別 UUID
-    var id: UUID
+    var id: UUID = UUID()
 
     /// 特典會 / 見面會活動名稱（如「日向坂46 個人握手会 幕張メッセ」）
-    var eventName: String?
+    var eventName: String? = nil
 
     /// 會話筆記文字（自由文字，顯示於 Info Sheet 的 Caption 區塊）
-    var noteText: String?
+    var noteText: String? = nil
 
     /// # 標籤清單（如 `["#日向坂46", "#推し", "#握手会"]`）
-    var hashtags: [String]
+    var hashtags: [String] = []
 
     /// 備忘建立時間
-    var createdAt: Date
+    var createdAt: Date = Date()
 
     /// 最後修改時間
-    var updatedAt: Date
+    var updatedAt: Date = Date()
+
+    /// 最後修改時間戳記（用於多裝置 CloudKit 同步）
+    var lastModifiedAt: Date = Date()
 
     // MARK: Relations
 
     /// 所屬拍立得（反向關聯，由 `ChekiItem.memo` 驅動）
-    var chekiItem: ChekiItem?
+    var chekiItem: ChekiItem? = nil
 
     // MARK: Init
 
@@ -44,6 +47,7 @@ final class ChekiMemo {
         hashtags: [String] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
+        lastModifiedAt: Date = Date(),
         chekiItem: ChekiItem? = nil
     ) {
         self.id = id
@@ -52,6 +56,7 @@ final class ChekiMemo {
         self.hashtags = hashtags
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.lastModifiedAt = lastModifiedAt
         self.chekiItem = chekiItem
     }
 }
@@ -77,6 +82,22 @@ extension ChekiMemo {
         if let eventName { self.eventName = eventName }
         if let noteText { self.noteText = noteText }
         if let hashtags { self.hashtags = hashtags }
-        self.updatedAt = Date()
+        let now = Date()
+        self.updatedAt = now
+        self.lastModifiedAt = now
+    }
+
+    /// 以 Last-Write-Wins (LWW) 規則合併另一版本備忘錄
+    @discardableResult
+    func mergeLWW(with incoming: ChekiMemo) -> Bool {
+        guard incoming.lastModifiedAt > self.lastModifiedAt else {
+            return false
+        }
+        self.eventName = incoming.eventName
+        self.noteText = incoming.noteText
+        self.hashtags = incoming.hashtags
+        self.updatedAt = incoming.updatedAt
+        self.lastModifiedAt = incoming.lastModifiedAt
+        return true
     }
 }

@@ -16,7 +16,7 @@ final class AlbumImportCommitEngineTests: XCTestCase {
             IdolMember.self,
             ChekiMemo.self
         ])
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         modelContainer = try ModelContainer(for: schema, configurations: [config])
         modelContext = modelContainer.mainContext
     }

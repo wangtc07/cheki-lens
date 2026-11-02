@@ -16,73 +16,83 @@ final class ChekiItem {
     // MARK: Identity
 
     /// 唯一識別 UUID（供 Photos Album 寫入時作為附帶 metadata）
-    var id: UUID
+    var id: UUID = UUID()
 
     // MARK: Image Data
 
     /// 正面照片（透視裁切後之拍立得影像）壓縮後 JPEG 二進位，nil 表示尚未掃描
     @Attribute(.externalStorage)
-    var frontImageData: Data?
+    var frontImageData: Data? = nil
 
     /// 背面照片（透視裁切後之手寫日期/簽名面）壓縮後 JPEG 二進位，nil 表示僅有正面
     @Attribute(.externalStorage)
-    var backImageData: Data?
+    var backImageData: Data? = nil
 
     /// 正面原始未裁切照片（供事後重新手動調整四個頂點與透視裁切使用）
     @Attribute(.externalStorage)
-    var originalFrontImageData: Data?
+    var originalFrontImageData: Data? = nil
 
     /// 背面原始未裁切照片（供事後重新手動調整背面四個頂點與透視裁切使用）
     @Attribute(.externalStorage)
-    var originalBackImageData: Data?
+    var originalBackImageData: Data? = nil
+
+    /// 輕量縮圖資料（長邊約 300px，約 20KB），供多裝置秒開預覽
+    @Attribute(.externalStorage)
+    var thumbnailData: Data? = nil
 
     // MARK: Timestamp
 
     /// 對外展示、以及寫入系統相簿的判斷日期（OCR 或手動修正後會覆寫這裡）
-    var capturedAt: Date
+    var capturedAt: Date = Date()
 
     /// OCR 從底部白邊手寫日期解析出的真實拍攝日期（nil 表示尚未辨識或辨識失敗）
-    var ocrDate: Date?
+    var ocrDate: Date? = nil
 
     /// 手機實際按下快門或匯入當下的時間。只存在 App 內，不寫入系統相簿。
     /// 舊資料沒有此欄時，排序會退回 `capturedAt`。
-    var originalCapturedAt: Date?
+    var originalCapturedAt: Date? = nil
 
     /// 使用者已手動指定判斷日期。背景 OCR 不得再覆寫 `capturedAt`／`ocrDate`。
     var isJudgedDateManuallySet: Bool = false
 
     /// 是否已以 ocrDate 回寫系統相簿的 creationDate
-    var isDateWrittenToAlbum: Bool
+    var isDateWrittenToAlbum: Bool = false
+
+    /// 軟刪除時間（nil 表示正常卡片；非 nil 表示移入「最近刪除」相冊，保留 30 天）
+    var deletedAt: Date? = nil
+
+    /// 最後修改時間戳記（用於多裝置 CloudKit LWW 衝突解決）
+    var lastModifiedAt: Date = Date()
 
     // MARK: Film Format & Geometry
 
     /// 相紙規格（影響透視校正時的比例鎖定）
-    var filmFormat: FilmFormat
+    var filmFormat: FilmFormat = FilmFormat.mini
 
     /// 實際偵測到的影像長寬比（短邊 / 長邊），作為自動識別參考
-    var detectedAspectRatio: Double
+    var detectedAspectRatio: Double = FilmFormat.mini.aspectRatio
 
     /// 邊界偏移率 -0.03 ~ +0.03
     /// - 負值：向內裁切（去除白邊陰影）
     /// - 正值：向外保留（確保完整保留相紙邊緣）
-    var borderInsetRatio: Double
+    var borderInsetRatio: Double = 0.0
 
     // MARK: Vision Metadata
 
     /// 正面 Vision 透視校正時所偵測或手動調整的四角錨點（JSON 編碼的 [CGPoint] x4）
     /// 格式：`[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]`（已正規化至 0.0~1.0，順序：TL, TR, BR, BL）
-    var perspectivePointsJSON: String?
+    var perspectivePointsJSON: String? = nil
 
     /// 背面 Vision 透視校正時所偵測或手動調整的四角錨點（JSON 編碼的 [CGPoint] x4，已正規化至 0.0~1.0）
-    var backPerspectivePointsJSON: String?
+    var backPerspectivePointsJSON: String? = nil
 
     /// Vision 使用了哪一層偵測策略
-    var detectionMethod: DetectionMethod
+    var detectionMethod: DetectionMethod = DetectionMethod.pending
 
     // MARK: State
 
     /// 處理狀態持久化字串（供 SwiftData Predicate 查詢，如 #Predicate { $0.processingStateRaw == target }）
-    var processingStateRaw: String
+    var processingStateRaw: String = "unprocessed"
 
     /// 處理狀態（掃描流程）
     @Transient
@@ -92,25 +102,31 @@ final class ChekiItem {
     }
 
     /// 是否已同步至 iOS 系統相簿
-    var isSyncedToPhotoLibrary: Bool
+    var isSyncedToPhotoLibrary: Bool = false
 
-    /// 正面照片對應之 iOS 系統相簿 `PHAsset.localIdentifier`（直接修改原圖不新增重複照片，並支援復原原圖）
-    var frontAssetIdentifier: String?
+    /// 正面照片對應之 iOS 系統相簿 `PHAsset.localIdentifier`（本機專屬，直接修改原圖不新增重複照片，並支援復原原圖）
+    var frontAssetIdentifier: String? = nil
 
-    /// 背面照片對應之 iOS 系統相簿 `PHAsset.localIdentifier`
-    var backAssetIdentifier: String?
+    /// 背面照片對應之 iOS 系統相簿 `PHAsset.localIdentifier`（本機專屬）
+    var backAssetIdentifier: String? = nil
+
+    /// 正面照片對應之 iOS 系統相簿跨裝置通用 `PHCloudIdentifier`
+    var cloudIdentifier: String? = nil
+
+    /// 背面照片對應之 iOS 系統相簿跨裝置通用 `PHCloudIdentifier`
+    var backCloudIdentifier: String? = nil
 
     /// 多成員歸檔 ID 清單 JSON（支援一張拍立得同時歸檔至多位成員，與 `idolMember` 主關聯保持相容）
-    var assignedMemberIDsJSON: String?
+    var assignedMemberIDsJSON: String? = nil
 
     // MARK: Relations
 
     /// 所屬主偶像成員（可為 nil，表示尚未分類；當指派多位成員時為第一位成員）
-    var idolMember: IdolMember?
+    var idolMember: IdolMember? = nil
 
     /// 附屬的備忘錄（若無則為 nil，懶加載）
     @Relationship(deleteRule: .cascade, inverse: \ChekiMemo.chekiItem)
-    var memo: ChekiMemo?
+    var memo: ChekiMemo? = nil
 
     // MARK: Init
 
@@ -120,11 +136,14 @@ final class ChekiItem {
         backImageData: Data? = nil,
         originalFrontImageData: Data? = nil,
         originalBackImageData: Data? = nil,
+        thumbnailData: Data? = nil,
         capturedAt: Date = Date(),
         ocrDate: Date? = nil,
         originalCapturedAt: Date? = nil,
         isJudgedDateManuallySet: Bool = false,
         isDateWrittenToAlbum: Bool = false,
+        deletedAt: Date? = nil,
+        lastModifiedAt: Date = Date(),
         filmFormat: FilmFormat = .mini,
         detectedAspectRatio: Double = FilmFormat.mini.aspectRatio,
         borderInsetRatio: Double = 0.0,
@@ -135,6 +154,8 @@ final class ChekiItem {
         isSyncedToPhotoLibrary: Bool = false,
         frontAssetIdentifier: String? = nil,
         backAssetIdentifier: String? = nil,
+        cloudIdentifier: String? = nil,
+        backCloudIdentifier: String? = nil,
         idolMember: IdolMember? = nil,
         assignedMembers: [IdolMember]? = nil,
         memo: ChekiMemo? = nil
@@ -142,13 +163,16 @@ final class ChekiItem {
         self.id = id
         self.frontImageData = frontImageData
         self.backImageData = backImageData
-        self.originalFrontImageData = originalFrontImageData ?? frontImageData
-        self.originalBackImageData = originalBackImageData ?? backImageData
+        self.originalFrontImageData = originalFrontImageData ?? (perspectivePointsJSON != nil ? nil : frontImageData)
+        self.originalBackImageData = originalBackImageData ?? (backPerspectivePointsJSON != nil ? nil : backImageData)
+        self.thumbnailData = thumbnailData
         self.capturedAt = capturedAt
         self.ocrDate = ocrDate
         self.originalCapturedAt = originalCapturedAt ?? capturedAt
         self.isJudgedDateManuallySet = isJudgedDateManuallySet
         self.isDateWrittenToAlbum = isDateWrittenToAlbum
+        self.deletedAt = deletedAt
+        self.lastModifiedAt = lastModifiedAt
         self.filmFormat = filmFormat
         self.detectedAspectRatio = detectedAspectRatio
         self.borderInsetRatio = borderInsetRatio
@@ -159,6 +183,8 @@ final class ChekiItem {
         self.isSyncedToPhotoLibrary = isSyncedToPhotoLibrary
         self.frontAssetIdentifier = frontAssetIdentifier
         self.backAssetIdentifier = backAssetIdentifier
+        self.cloudIdentifier = cloudIdentifier
+        self.backCloudIdentifier = backCloudIdentifier
         let resolvedMembers: [IdolMember] = {
             if let assignedMembers, !assignedMembers.isEmpty {
                 return assignedMembers
@@ -216,6 +242,15 @@ extension ChekiItem {
         ocrDate ?? capturedAt
     }
 
+    /// 正反面寫入系統相簿的時間。`plusOneSecond` 時背面比正面晚一秒，其餘與正面同一秒。
+    func pairedSystemAlbumDates(timelineStrategy: String) -> (front: Date, back: Date) {
+        let front = displayDate
+        if timelineStrategy == "plusOneSecond" {
+            return (front, front.addingTimeInterval(1))
+        }
+        return (front, front)
+    }
+
     /// App 內「原始拍攝日期」排序用。只代表按下快門或匯入的當下，不寫入系統相簿。
     var appOriginalCaptureDate: Date {
         originalCapturedAt ?? capturedAt
@@ -248,6 +283,94 @@ extension ChekiItem {
     /// 是否具有背面資料
     var hasBothSides: Bool {
         backImageData != nil
+    }
+
+    /// 是否為已移入「最近刪除」的項目
+    var isDeleted: Bool {
+        deletedAt != nil
+    }
+
+    /// 「最近刪除」保留期限（30 天）之剩餘天數（>= 0）
+    var daysRemainingUntilPermanentDeletion: Int {
+        daysRemaining(relativeTo: Date(), expirationDays: 30)
+    }
+
+    /// 計算相對基準日之剩餘保留天數
+    func daysRemaining(relativeTo referenceDate: Date = Date(), expirationDays: Int = 30) -> Int {
+        guard let deletedAt else { return expirationDays }
+        let expirationDate = Calendar.current.date(byAdding: .day, value: expirationDays, to: deletedAt) ?? deletedAt
+        let remaining = Calendar.current.dateComponents([.day], from: referenceDate, to: expirationDate).day ?? 0
+        return max(0, remaining)
+    }
+
+    /// 判斷是否已達自動硬刪除過期標準
+    func isExpired(relativeTo referenceDate: Date = Date(), expirationDays: Int = 30) -> Bool {
+        guard let deletedAt else { return false }
+        guard let expirationDate = Calendar.current.date(byAdding: .day, value: expirationDays, to: deletedAt) else {
+            return false
+        }
+        return referenceDate >= expirationDate
+    }
+
+    /// 移入「最近刪除」
+    func softDelete(at date: Date = Date()) {
+        deletedAt = date
+        lastModifiedAt = date
+    }
+
+    /// 從「最近刪除」復原
+    func restoreFromTrash() {
+        deletedAt = nil
+        lastModifiedAt = Date()
+    }
+
+    /// 查詢有效（未刪除）項目的 SwiftData Predicate
+    static var activePredicate: Predicate<ChekiItem> {
+        #Predicate<ChekiItem> { $0.deletedAt == nil }
+    }
+
+    /// 查詢移入最近刪除項目的 SwiftData Predicate
+    static var deletedPredicate: Predicate<ChekiItem> {
+        #Predicate<ChekiItem> { $0.deletedAt != nil }
+    }
+
+    /// 以 Last-Write-Wins (LWW) 規則合併另一個版本的屬性
+    /// 若 `incoming.lastModifiedAt > self.lastModifiedAt`，則以 `incoming` 之屬性覆寫本機屬性並回傳 true
+    @discardableResult
+    func mergeLWW(with incoming: ChekiItem) -> Bool {
+        guard incoming.lastModifiedAt > self.lastModifiedAt else {
+            return false
+        }
+
+        self.deletedAt = incoming.deletedAt
+        self.lastModifiedAt = incoming.lastModifiedAt
+        self.capturedAt = incoming.capturedAt
+        self.ocrDate = incoming.ocrDate
+        self.originalCapturedAt = incoming.originalCapturedAt
+        self.isJudgedDateManuallySet = incoming.isJudgedDateManuallySet
+        self.isDateWrittenToAlbum = incoming.isDateWrittenToAlbum
+        self.filmFormat = incoming.filmFormat
+        self.detectedAspectRatio = incoming.detectedAspectRatio
+        self.borderInsetRatio = incoming.borderInsetRatio
+        self.perspectivePointsJSON = incoming.perspectivePointsJSON
+        self.backPerspectivePointsJSON = incoming.backPerspectivePointsJSON
+        self.detectionMethod = incoming.detectionMethod
+        self.processingStateRaw = incoming.processingStateRaw
+        self.cloudIdentifier = incoming.cloudIdentifier
+        self.backCloudIdentifier = incoming.backCloudIdentifier
+        self.assignedMemberIDsJSON = incoming.assignedMemberIDsJSON
+
+        if let incomingFront = incoming.frontImageData {
+            self.frontImageData = incomingFront
+        }
+        if let incomingBack = incoming.backImageData {
+            self.backImageData = incomingBack
+        }
+        if let incomingThumb = incoming.thumbnailData {
+            self.thumbnailData = incomingThumb
+        }
+
+        return true
     }
 
     /// 已指派的所有成員 UUID 陣列（去重且保序，並包含主 `idolMember`）

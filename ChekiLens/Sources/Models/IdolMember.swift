@@ -10,35 +10,38 @@ final class IdolMember {
     // MARK: Properties
 
     /// 唯一識別 UUID
-    var id: UUID
+    var id: UUID = UUID()
 
     /// 藝名 / 舞台名（如「與田祐希」、「齋藤飛鳥」）
-    var stageName: String
+    var stageName: String = ""
 
     /// 本名（可選，用於備忘搜尋；nil 表示不公開或未填寫）
-    var realName: String?
+    var realName: String? = nil
 
     /// 頭像圖片壓縮後 JPEG 資料（nil 表示使用系統預設人像圖示）
     @Attribute(.externalStorage)
-    var avatarImageData: Data?
+    var avatarImageData: Data? = nil
 
     /// 自訂標籤陣列（如 `["推し", "最推", "センター"]`）
-    var tags: [String]
+    var tags: [String] = []
 
     /// 創建時間
-    var createdAt: Date
+    var createdAt: Date = Date()
 
     /// 顯示排序權重（在所屬團體內的排序，越小越靠前）
-    var sortOrder: Int
+    var sortOrder: Int = 0
+
+    /// 最後修改時間戳記（用於多裝置 CloudKit 同步）
+    var lastModifiedAt: Date = Date()
 
     // MARK: Relations
 
     /// 所屬團體（nil 表示未分類成員）
-    var group: IdolGroup?
+    var group: IdolGroup? = nil
 
     /// 此成員擁有的全部拍立得
     @Relationship(deleteRule: .cascade, inverse: \ChekiItem.idolMember)
-    var chekiItems: [ChekiItem]
+    var chekiItems: [ChekiItem] = []
 
     // MARK: Init
 
@@ -50,6 +53,7 @@ final class IdolMember {
         tags: [String] = [],
         createdAt: Date = Date(),
         sortOrder: Int = 0,
+        lastModifiedAt: Date = Date(),
         group: IdolGroup? = nil,
         chekiItems: [ChekiItem] = []
     ) {
@@ -60,6 +64,7 @@ final class IdolMember {
         self.tags = tags
         self.createdAt = createdAt
         self.sortOrder = sortOrder
+        self.lastModifiedAt = lastModifiedAt
         self.group = group
         self.chekiItems = chekiItems
     }
