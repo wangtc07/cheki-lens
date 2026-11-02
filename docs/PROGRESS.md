@@ -8,11 +8,16 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-11-02
-- **進行中的修正**：已完成 feat/multi-device-icloud-sync 分支合併至 main 分支。
-- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)（階段 7.5 進行中）/ Phase 6.5 UX 體驗精修完成
-- **當前分支**：`main`
-- **當前進行中任務**：完成 **feat/multi-device-icloud-sync 分支合併至 main**（包含 Phase 7 多裝置 iCloud 同步、30 天最近刪除軟硬刪除管線、雙軌圖片快取 LRU 管理、SettingsView 控制面板、系統相簿導入優化、單張預覽手勢返回、二次編輯雙重邊框修復與即時 120fps 邊界微調反應；全量單元測試通過）。
-- **最新穩定 Git Commit**：merge: 合併 feat/multi-device-icloud-sync 到 main
+- **進行中的修正**：已完成 Task 6.8（UI/UX 統一與邊界微調滑桿即時預覽）。
+- **當前所屬階段**：Phase 6.8 UI/UX 體驗精修 / Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)
+- **當前分支**：`fix/uiux`
+- **當前進行中任務**：完成 **Task 6.8（UI/UX 統一與邊界微調滑桿即時預覽）**：
+  1. 放大單張預覽底部「規格與日期」簡化為純圓形日曆 icon（`Image(systemName: "calendar")`），外觀與尺寸對齊 44 pt 玻璃圓鈕。
+  2. 邊界微調升級：全域預設保留於 `SettingsView`，單張照片 (`StagingChekiPhoto`) 與 `ChekiItem` 支援個別設定專屬 `borderInsetPercentage` / `borderInsetRatio`。
+  3. 雙裁切編輯器 UI 全面統一：`ChekiDetailView` 的 `ChekiQuadCropEditorView` 統一採用 `BatchPairingView` 的浮動液態玻璃膠囊風格（移除底部平鋪深黑條與扁平按鈕，相紙規格與動作按鈕統一採用液態玻璃膠囊）。
+  4. 邊界微調即時預覽滑桿：點選「邊界微調」後畫布平滑漸變切換為透視校正裁切後的即時畫面，底部出現 -3.0% ~ +3.0% 浮動玻璃滑桿與即時百分比標籤，滑動時以 GPU 120fps 即時預覽往外/往內邊界調整，最右端提供 ✓ 按鈕確認套用。
+  5. 撰寫 `BorderInsetAdjustmentTests` 單元測試，全量單元測試全數通過。
+- **最新穩定 Git Commit**：待提交 feat(ui): 完成 Task 6.8 邊界微調滑桿即時預覽與雙編輯器液態玻璃風格統一
 - **下一動執行指示**：接續執行 **Task 7.5.2**（多語系字串補齊至 `Localizable.xcstrings`（繁體中文與日文）與 iPad / 多裝置佈局適配）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
@@ -365,6 +370,7 @@
 - [x] **Task 6.7.5**: 實作 `AlbumImportCommitEngine`（步驟 4：最終確認正式匯入，自動合併既有同名團體與成員並將未分類同名成員晉升歸入團體、略過已匯入的重複相片 Asset ID、寫入 SwiftData 並顯示雙語結果摘要；5 項單元測試全數通過）
 - [x] **Task 6.7.6**: 掛載全處進入點（實作 `SystemAlbumBatchImportFlowSheet` 與 `SystemAlbumBatchImportFlowState` 總流程狀態機，並串接 Onboarding 第 3 頁完成後引導提示、相簿庫空狀態按鈕、相冊頁漢堡選單／空狀態與設定頁常駐匯入入口；4 項流程狀態機測試與 Phase 6.7 全數 39 項單元測試通過）
 - [x] **Task 6.7.7**: 系統相簿批次導入體驗優化（1. 資料夾預設全收合；2. 掃描加速：僅讀取首圖與相簿名稱，不在探索階段枚舉數千張 Asset，並在載入畫面提供取消中斷機制；3. 延遲解析 Asset ID 至工作台階段；4. 工作台相片卡片右上角提供 ✕ 快速排除、支援多選批次排除、全選/取消全選、放大預覽一鍵排除、以及相冊卡片排除；全量 120+ 項單元測試通過並成功安裝至 iPad 實機）
+- [x] **Task 6.8**: UI/UX 統一與邊界微調滑桿即時預覽（1. 放大單張預覽底部「規格與日期」簡化為圓形日曆 icon，外觀與尺寸對齊 44 pt 玻璃圓鈕；2. 邊界微調全域預設保留於 SettingsView，單張照片與 ChekiItem 支援個別設定專屬獨立微調程度；3. 雙裁切編輯器 UI 全面統一為浮動液態玻璃風格，移除 ChekiDetailView 底部平鋪深黑條與扁平按鈕；4. 點選「邊界微調」後畫布平滑漸變切換為裁切後透視校正之即時畫面，底部出現 -3.0%~+3.0% 玻璃滑桿微調與最右側 ✓ 確認鈕；新增 BorderInsetAdjustmentTests 驗證個別微調持久化與幾何可逆性，全量單元測試通過）
 
 ---
 

@@ -101,6 +101,8 @@ struct StagingChekiPhoto: Identifiable, Equatable {
     var shutterDate: Date = Date()
     /// 旋轉或替換影像後遞增，讓卡片即使 JPEG 大小相近也會重繪。
     var contentRevision: Int = 0
+    /// 單張照片專屬邊界微調百分比（若為 nil 則使用全域預設 defaultBorderInsetPercentage）
+    var borderInsetPercentage: Double? = nil
 
     /// 已有可顯示的原圖（含快速預覽）。空白占位圖的尺寸為 0。
     var hasVisibleImage: Bool {
@@ -151,6 +153,7 @@ struct StagingChekiPhoto: Identifiable, Equatable {
         lhs.resolvedFilmFormat == rhs.resolvedFilmFormat &&
         lhs.hasManuallyModifiedFormat == rhs.hasManuallyModifiedFormat &&
         lhs.croppedImageData?.count == rhs.croppedImageData?.count &&
+        lhs.borderInsetPercentage == rhs.borderInsetPercentage &&
         lhs.contentRevision == rhs.contentRevision
     }
 }
@@ -658,7 +661,7 @@ struct BatchPairingView: View {
            let photo = findPhoto(by: targetPhotoID) {
             StagingPhotoQuadCropEditorView(
                 photo: photo,
-                onApplyManualCrop: { croppedData, croppedImage, cornersJSON, ocrDate, resolvedFormat, rotatedOriginalImage in
+                onApplyManualCrop: { croppedData, croppedImage, cornersJSON, ocrDate, resolvedFormat, rotatedOriginalImage, borderInsetPercentage in
                     applyManualCropToStagingPhoto(
                         photoID: targetPhotoID,
                         croppedData: croppedData,
@@ -666,7 +669,8 @@ struct BatchPairingView: View {
                         cornersJSON: cornersJSON,
                         ocrDate: ocrDate,
                         resolvedFormat: resolvedFormat,
-                        rotatedOriginalImage: rotatedOriginalImage
+                        rotatedOriginalImage: rotatedOriginalImage,
+                        borderInsetPercentage: borderInsetPercentage
                     )
                 },
                 onClose: {
@@ -1870,23 +1874,13 @@ struct BatchPairingView: View {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             editingSlotForFormatAndDateID = slot.id
                         } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "calendar")
-                                    .font(.system(size: 14, weight: .semibold))
-                                Text(L10n.tr("規格與日期", "サイズと日付"))
-                                    .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .foregroundStyle(.white)
-                            .liquidGlassCapsule(
-                                height: ChromeMetrics.capsuleHeight,
-                                horizontalPadding: ChromeMetrics.capsuleHPadding,
-                                ink: .white,
-                                fallbackStroke: .white
-                            )
+                            Image(systemName: "calendar")
+                                .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(L10n.tr("規格與日期", "サイズと日付"))
                         .accessibilityIdentifier("chrome.preview.date")
 
                         Button {
@@ -2724,7 +2718,7 @@ struct BatchPairingView: View {
         }
     }
 
-    /// 在放大預覽中執行「手動調整邊界」完成後，即時更新 StagingChekiPhoto 的預裁切影像、四頂點座標、相紙規格與 OCR 日期
+    /// 在放大預覽中執行「手動調整邊界」完成後，即時更新 StagingChekiPhoto 的預裁切影像、四頂點座標、相紙規格、微調比例與 OCR 日期
     @MainActor
     private func applyManualCropToStagingPhoto(
         photoID: UUID,
@@ -2733,7 +2727,8 @@ struct BatchPairingView: View {
         cornersJSON: String,
         ocrDate: Date?,
         resolvedFormat: FilmFormat,
-        rotatedOriginalImage: UIImage?
+        rotatedOriginalImage: UIImage?,
+        borderInsetPercentage: Double?
     ) {
         withAnimation(ChekiMotion.toggle) {
             if let idx = allPhotos.firstIndex(where: { $0.id == photoID }) {
@@ -2750,6 +2745,9 @@ struct BatchPairingView: View {
                 allPhotos[idx].isRevertedToOriginal = false
                 allPhotos[idx].isDetectingBoundary = false
                 allPhotos[idx].hasCompletedBoundaryDetection = true
+                if let borderInsetPercentage {
+                    allPhotos[idx].borderInsetPercentage = borderInsetPercentage
+                }
                 if !allPhotos[idx].hasManuallyModifiedDate, let ocrDate {
                     allPhotos[idx].detectedOCRDate = ocrDate
                 }
@@ -2769,6 +2767,9 @@ struct BatchPairingView: View {
                     slots[i].frontPhoto.isRevertedToOriginal = false
                     slots[i].frontPhoto.isDetectingBoundary = false
                     slots[i].frontPhoto.hasCompletedBoundaryDetection = true
+                    if let borderInsetPercentage {
+                        slots[i].frontPhoto.borderInsetPercentage = borderInsetPercentage
+                    }
                     if !slots[i].frontPhoto.hasManuallyModifiedDate, let ocrDate {
                         slots[i].frontPhoto.detectedOCRDate = ocrDate
                     }
@@ -2787,6 +2788,9 @@ struct BatchPairingView: View {
                     slots[i].backPhoto?.isRevertedToOriginal = false
                     slots[i].backPhoto?.isDetectingBoundary = false
                     slots[i].backPhoto?.hasCompletedBoundaryDetection = true
+                    if let borderInsetPercentage {
+                        slots[i].backPhoto?.borderInsetPercentage = borderInsetPercentage
+                    }
                     if !(slots[i].backPhoto?.hasManuallyModifiedDate ?? false), let ocrDate {
                         slots[i].backPhoto?.detectedOCRDate = ocrDate
                     }
@@ -3479,11 +3483,13 @@ struct BatchPairingView: View {
                 if let frontAssetId = slot.frontPhoto.assetIdentifier {
                     targetItem.frontAssetIdentifier = frontAssetId
                 }
+                let effectiveInsetRatio = (slot.frontPhoto.borderInsetPercentage ?? defaultBorderInsetPercentage) / 100.0
                 targetItem.filmFormat = concreteFormat
                 targetItem.detectedAspectRatio = concreteFormat.aspectRatio
-                targetItem.borderInsetRatio = defaultInsetRatio
+                targetItem.borderInsetRatio = effectiveInsetRatio
                 targetItem.setAssignedMembers(effectiveMembers)
             } else {
+                let effectiveInsetRatio = (slot.frontPhoto.borderInsetPercentage ?? defaultBorderInsetPercentage) / 100.0
                 let newItem = ChekiItem(
                     frontImageData: initialFrontData,
                     backImageData: initialBackData,
@@ -3493,7 +3499,7 @@ struct BatchPairingView: View {
                     originalCapturedAt: slot.frontPhoto.shutterDate,
                     filmFormat: concreteFormat,
                     detectedAspectRatio: concreteFormat.aspectRatio,
-                    borderInsetRatio: defaultInsetRatio,
+                    borderInsetRatio: effectiveInsetRatio,
                     perspectivePointsJSON: slot.frontPhoto.isRevertedToOriginal ? nil : slot.frontPhoto.normalizedCornersJSON,
                     backPerspectivePointsJSON: (slot.backPhoto?.isRevertedToOriginal == true) ? nil : slot.backPhoto?.normalizedCornersJSON,
                     processingState: .completed,
@@ -3940,7 +3946,7 @@ private struct SlotFormatAndDateEditorSheet: View {
 
 private struct StagingPhotoQuadCropEditorView: View {
     let photo: StagingChekiPhoto
-    let onApplyManualCrop: (Data, UIImage, String, Date?, FilmFormat, UIImage?) -> Void
+    let onApplyManualCrop: (Data, UIImage, String, Date?, FilmFormat, UIImage?, Double?) -> Void
     let onClose: () -> Void
 
     @AppStorage("defaultBorderInsetPercentage") private var defaultBorderInsetPercentage: Double = 0.0
@@ -3958,15 +3964,22 @@ private struct StagingPhotoQuadCropEditorView: View {
     @State private var panOffset: CGSize = .zero
     @State private var activePanDelta: CGSize = .zero
 
+    // 單張邊界微調狀態
+    @State private var borderInsetPercentage: Double
+    @State private var isAdjustingBorderInset: Bool = false
+    @State private var currentInsetPercentage: Double = 0.0
+    @State private var baseCornersForInset: [CGPoint] = []
+    @State private var insetPreviewUIImage: UIImage? = nil
+    @State private var insetRenderTask: Task<Void, Never>? = nil
+
     @State private var isProcessingCrop: Bool = false
     @State private var statusBannerText: String? = nil
-    @State private var showingSettingsSheet: Bool = false
 
     private let cornerNames = ["左上", "右上", "右下", "左下"]
 
     init(
         photo: StagingChekiPhoto,
-        onApplyManualCrop: @escaping (Data, UIImage, String, Date?, FilmFormat, UIImage?) -> Void,
+        onApplyManualCrop: @escaping (Data, UIImage, String, Date?, FilmFormat, UIImage?, Double?) -> Void,
         onClose: @escaping () -> Void
     ) {
         self.photo = photo
@@ -3975,6 +3988,9 @@ private struct StagingPhotoQuadCropEditorView: View {
         _sourceUIImage = State(initialValue: photo.uiImage)
         _displayProxyUIImage = State(initialValue: Self.makeDisplayProxy(from: photo.uiImage))
         _selectedFormat = State(initialValue: photo.resolvedFilmFormat.concreteFormat)
+        let initialInset = photo.borderInsetPercentage ?? UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage")
+        _borderInsetPercentage = State(initialValue: initialInset)
+        _currentInsetPercentage = State(initialValue: initialInset)
     }
 
     private static func makeDisplayProxy(from image: UIImage, maxDimension: CGFloat = 1400) -> UIImage {
@@ -3999,8 +4015,17 @@ private struct StagingPhotoQuadCropEditorView: View {
             VStack(spacing: 0) {
                 topNavigationToolbar
 
-                cropCanvasArea
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZStack {
+                    if isAdjustingBorderInset {
+                        croppedBorderInsetPreviewCanvas
+                            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    } else {
+                        cropCanvasArea
+                            .transition(.opacity)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(.easeInOut(duration: 0.25), value: isAdjustingBorderInset)
 
                 bottomAdjustmentToolbar
             }
@@ -4025,9 +4050,6 @@ private struct StagingPhotoQuadCropEditorView: View {
         }
         .preferredColorScheme(.dark)
         .statusBarHidden(true)
-        .sheet(isPresented: $showingSettingsSheet) {
-            SettingsView()
-        }
         .onAppear {
             loadInitialCorners()
         }
@@ -4051,7 +4073,7 @@ private struct StagingPhotoQuadCropEditorView: View {
 
             Spacer()
 
-            if effectiveZoom > 1.02 {
+            if effectiveZoom > 1.02 && !isAdjustingBorderInset {
                 Button {
                     withAnimation(ChekiMotion.small) {
                         resetZoomAndPan()
@@ -4082,7 +4104,8 @@ private struct StagingPhotoQuadCropEditorView: View {
                         fallbackStroke: .white
                     )
             }
-            .disabled(isProcessingCrop)
+            .disabled(isProcessingCrop || isAdjustingBorderInset)
+            .opacity(isAdjustingBorderInset ? 0 : 1)
             .accessibilityLabel(L10n.tr("完成", "完了"))
             .accessibilityIdentifier("chrome.crop.confirm")
         }
@@ -4384,46 +4407,160 @@ private struct StagingPhotoQuadCropEditorView: View {
     // MARK: - 3. 底部控制面板
 
     private var bottomAdjustmentToolbar: some View {
-        VStack(spacing: 12) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(FilmFormat.concreteFormats, id: \.rawValue) { format in
-                        formatPillButton(for: format)
+        Group {
+            if isAdjustingBorderInset {
+                borderInsetAdjustmentBottomBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                VStack(spacing: 12) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(FilmFormat.concreteFormats, id: \.rawValue) { format in
+                                formatPillButton(for: format)
+                            }
+                        }
+                        .padding(.horizontal, 20)
                     }
-                }
-                .padding(.horizontal, 20)
-            }
 
-            HStack(spacing: ChromeMetrics.groupSpacing) {
-                cropToolCapsule(systemName: "viewfinder.rectangular", title: L10n.tr("自動", "自動"), identifier: "chrome.crop.auto") {
-                    Task { await runAutoDetectCorners() }
-                }
-                cropToolCapsule(systemName: "rotate.left", title: L10n.tr("旋轉", "回転"), identifier: "chrome.crop.rotate") {
-                    rotateSourceImage90DegreesCounterClockwise()
-                }
-                cropToolCapsule(systemName: "arrow.up.left.and.arrow.down.right", title: L10n.tr("展開", "展開"), identifier: "chrome.crop.expand") {
-                    withAnimation(ChekiMotion.toggle) {
-                        normalizedCorners = [
-                            CGPoint(x: 0.04, y: 0.04),
-                            CGPoint(x: 0.96, y: 0.04),
-                            CGPoint(x: 0.96, y: 0.96),
-                            CGPoint(x: 0.04, y: 0.96)
-                        ]
+                    HStack(spacing: ChromeMetrics.groupSpacing) {
+                        cropToolCapsule(systemName: "viewfinder.rectangular", title: L10n.tr("自動", "自動"), identifier: "chrome.crop.auto") {
+                            Task { await runAutoDetectCorners() }
+                        }
+                        cropToolCapsule(systemName: "rotate.left", title: L10n.tr("旋轉", "回転"), identifier: "chrome.crop.rotate") {
+                            rotateSourceImage90DegreesCounterClockwise()
+                        }
+                        cropToolCapsule(systemName: "arrow.up.left.and.arrow.down.right", title: L10n.tr("展開", "展開"), identifier: "chrome.crop.expand") {
+                            withAnimation(ChekiMotion.toggle) {
+                                normalizedCorners = [
+                                    CGPoint(x: 0.04, y: 0.04),
+                                    CGPoint(x: 0.96, y: 0.04),
+                                    CGPoint(x: 0.96, y: 0.96),
+                                    CGPoint(x: 0.04, y: 0.96)
+                                ]
+                            }
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }
+                        cropToolCapsule(
+                            systemName: "slider.horizontal.below.square.and.square.filled",
+                            title: abs(borderInsetPercentage) > 0.05 ? String(format: "%+.1f%%", borderInsetPercentage) : L10n.tr("邊界", "余白"),
+                            identifier: "chrome.crop.inset"
+                        ) {
+                            startBorderInsetAdjustment()
+                        }
                     }
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    .padding(.horizontal, ChromeMetrics.edgeHorizontal)
+                    .padding(.bottom, ChromeMetrics.edgeBottom)
                 }
-                cropToolCapsule(
-                    systemName: "slider.horizontal.below.square.and.square.filled",
-                    title: abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "%+.1f%%", defaultBorderInsetPercentage) : L10n.tr("邊界", "余白"),
-                    identifier: "chrome.crop.inset"
-                ) {
-                    showingSettingsSheet = true
-                }
+                .padding(.top, 10)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .padding(.horizontal, ChromeMetrics.edgeHorizontal)
-            .padding(.bottom, ChromeMetrics.edgeBottom)
         }
+        .animation(.easeInOut(duration: 0.25), value: isAdjustingBorderInset)
+    }
+
+    private var borderInsetAdjustmentBottomBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                cancelBorderInsetAdjustment()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("取消微調", "キャンセル"))
+            .accessibilityIdentifier("chrome.crop.inset.cancel")
+
+            HStack(spacing: 10) {
+                Text(String(format: "%+.1f%%", currentInsetPercentage))
+                    .font(.subheadline.monospacedDigit().weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 54, alignment: .leading)
+
+                Slider(
+                    value: Binding(
+                        get: { currentInsetPercentage },
+                        set: { newVal in
+                            let rounded = (newVal * 10).rounded() / 10
+                            if rounded != currentInsetPercentage {
+                                currentInsetPercentage = rounded
+                                scheduleInsetPreviewUpdate(percentage: rounded)
+                            }
+                        }
+                    ),
+                    in: -3.0...3.0,
+                    step: 0.1
+                )
+                .tint(.white)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: ChromeMetrics.capsuleHeight)
+            .liquidGlassCapsule(ink: .white, fallbackStroke: .white)
+
+            Button {
+                confirmBorderInsetAdjustment()
+            } label: {
+                Image(systemName: "checkmark")
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .bold))
+                    .foregroundStyle(.white)
+                    .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("確認微調", "確定"))
+            .accessibilityIdentifier("chrome.crop.inset.confirm")
+        }
+        .padding(.horizontal, ChromeMetrics.edgeHorizontal)
+        .padding(.bottom, ChromeMetrics.edgeBottom)
         .padding(.top, 10)
+    }
+
+    private var croppedBorderInsetPreviewCanvas: some View {
+        GeometryReader { geo in
+            ZStack {
+                RadialGradient(
+                    colors: [Color(white: 0.16), Color.black],
+                    center: .center,
+                    startRadius: 20,
+                    endRadius: max(geo.size.width, geo.size.height) * 0.72
+                )
+                .ignoresSafeArea()
+
+                if let preview = insetPreviewUIImage {
+                    Image(uiImage: preview)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(
+                            maxWidth: max(1, geo.size.width - 48),
+                            maxHeight: max(1, geo.size.height - 48)
+                        )
+                        .shadow(color: Color.black.opacity(0.65), radius: 18, x: 0, y: 8)
+                        .transition(.opacity)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                }
+
+                VStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "slider.horizontal.below.square.and.square.filled")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(L10n.tr("滑動微調邊界 · 即時預覽", "スライダーで余白を微調整 · リアルタイム"))
+                            .font(.caption2.weight(.medium))
+                    }
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.55), in: Capsule())
+                    .padding(.top, 6)
+
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     private func cropToolCapsule(systemName: String, title: String, identifier: String, action: @escaping () -> Void) -> some View {
@@ -4543,12 +4680,118 @@ private struct StagingPhotoQuadCropEditorView: View {
         }
     }
 
+    // MARK: - 邊界微調滑桿與即時預覽控制
+
+    private func startBorderInsetAdjustment() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        baseCornersForInset = Self.baseCornersFromCurrent(corners: normalizedCorners, percentage: borderInsetPercentage)
+        currentInsetPercentage = borderInsetPercentage
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isAdjustingBorderInset = true
+        }
+        scheduleInsetPreviewUpdate(percentage: currentInsetPercentage)
+    }
+
+    private func cancelBorderInsetAdjustment() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        insetRenderTask?.cancel()
+        currentInsetPercentage = borderInsetPercentage
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isAdjustingBorderInset = false
+        }
+    }
+
+    private func confirmBorderInsetAdjustment() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        insetRenderTask?.cancel()
+        borderInsetPercentage = currentInsetPercentage
+        normalizedCorners = Self.cornersWithInset(baseCorners: baseCornersForInset, percentage: currentInsetPercentage)
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isAdjustingBorderInset = false
+        }
+    }
+
+    private func scheduleInsetPreviewUpdate(percentage: Double) {
+        insetRenderTask?.cancel()
+        let img = displayProxyUIImage ?? sourceUIImage
+        guard let cgImage = img.cgImage else { return }
+        let base = baseCornersForInset
+        let format = selectedFormat
+
+        insetRenderTask = Task {
+            let adjustedNorm = Self.cornersWithInset(baseCorners: base, percentage: percentage)
+            let imgW = CGFloat(cgImage.width)
+            let imgH = CGFloat(cgImage.height)
+            let pixelCorners = adjustedNorm.map { pt in
+                CGPoint(x: pt.x * imgW, y: pt.y * imgH)
+            }
+            let chekiFormat: ChekiFilmFormat = {
+                switch format {
+                case .mini: return .mini
+                case .square: return .square
+                case .wide: return .wide
+                case .auto: return .mini
+                }
+            }()
+            let manualDetection = DetectionResult(
+                corners: pixelCorners,
+                method: .visionNative,
+                confidence: 1.0,
+                imageSize: CGSize(width: imgW, height: imgH)
+            )
+            let visionManager = VisionManager()
+            if let cropResult = try? await visionManager.perspectiveCorrect(
+                image: cgImage,
+                corners: pixelCorners,
+                detection: manualDetection,
+                format: chekiFormat,
+                preserveCornerOrder: true
+            ) {
+                guard !Task.isCancelled else { return }
+                let rendered = UIImage(cgImage: cropResult.cgImage)
+                await MainActor.run {
+                    withAnimation(.linear(duration: 0.08)) {
+                        self.insetPreviewUIImage = rendered
+                    }
+                }
+            }
+        }
+    }
+
+    static func baseCornersFromCurrent(corners: [CGPoint], percentage: Double) -> [CGPoint] {
+        let ratio = percentage / 100.0
+        guard abs(ratio) > 1e-5 else { return corners }
+        let cx = corners.map { $0.x }.reduce(0, +) / CGFloat(corners.count)
+        let cy = corners.map { $0.y }.reduce(0, +) / CGFloat(corners.count)
+        let invScale = 1.0 / CGFloat(1.0 + ratio)
+        return corners.map { pt in
+            CGPoint(
+                x: cx + (pt.x - cx) * invScale,
+                y: cy + (pt.y - cy) * invScale
+            )
+        }
+    }
+
+    static func cornersWithInset(baseCorners: [CGPoint], percentage: Double) -> [CGPoint] {
+        let ratio = percentage / 100.0
+        guard abs(ratio) > 1e-5 else { return baseCorners }
+        let cx = baseCorners.map { $0.x }.reduce(0, +) / CGFloat(baseCorners.count)
+        let cy = baseCorners.map { $0.y }.reduce(0, +) / CGFloat(baseCorners.count)
+        let scale = CGFloat(1.0 + ratio)
+        return baseCorners.map { pt in
+            CGPoint(
+                x: cx + (pt.x - cx) * scale,
+                y: cy + (pt.y - cy) * scale
+            )
+        }
+    }
+
     @MainActor
     private func runAutoDetectCorners(silent: Bool = false) async {
         guard let cgImage = sourceUIImage.cgImage else { return }
         let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
         let visionManager = VisionManager()
-        let defaultInsetRatio = defaultBorderInsetPercentage / 100.0
+        let activeInsetRatio = borderInsetPercentage / 100.0
 
         if let detection = try? await visionManager.detectQuad(in: cgImage, imageSize: imgSize),
            detection.corners.count == 4 {
@@ -4556,7 +4799,7 @@ private struct StagingPhotoQuadCropEditorView: View {
             let adjusted = await visionManager.applyBorderInset(
                 corners: ordered,
                 imageSize: imgSize,
-                ratio: defaultInsetRatio
+                ratio: activeInsetRatio
             )
             withAnimation(ChekiMotion.small) {
                 normalizedCorners = adjusted.map { pt in
@@ -4658,7 +4901,8 @@ private struct StagingPhotoQuadCropEditorView: View {
                     encodedJSON,
                     recognizedDate,
                     resolvedFormat,
-                    didRotateSourceImage ? sourceUIImage : nil
+                    didRotateSourceImage ? sourceUIImage : nil,
+                    borderInsetPercentage
                 )
                 onClose()
             }

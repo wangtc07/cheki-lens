@@ -2572,10 +2572,16 @@ private struct ChekiQuadCropEditorView: View {
 
     // 相紙比例與設定邊界微調
     @AppStorage("defaultBorderInsetPercentage") private var defaultBorderInsetPercentage: Double = 0.0
+    @State private var borderInsetPercentage: Double
+    @State private var isAdjustingBorderInset: Bool = false
+    @State private var currentInsetPercentage: Double = 0.0
+    @State private var baseCornersForInset: [CGPoint] = []
+    @State private var insetPreviewUIImage: UIImage? = nil
+    @State private var insetRenderTask: Task<Void, Never>? = nil
+
     @State private var selectedFormat: FilmFormat
     @State private var isProcessingCrop: Bool = false
     @State private var statusBannerText: String? = nil
-    @State private var showingSettingsSheet: Bool = false
 
     private let cornerNames = ["左上", "右上", "右下", "左下"]
 
@@ -2591,6 +2597,9 @@ private struct ChekiQuadCropEditorView: View {
         self.onAppliedToast = onAppliedToast
         _editingBackside = State(initialValue: initialEditingBackside && item.hasBothSides)
         _selectedFormat = State(initialValue: item.filmFormat)
+        let initialInset = abs(item.borderInsetRatio) > 1e-4 ? (item.borderInsetRatio * 100.0) : UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage")
+        _borderInsetPercentage = State(initialValue: initialInset)
+        _currentInsetPercentage = State(initialValue: initialInset)
     }
 
     private var effectiveZoom: CGFloat {
@@ -2616,8 +2625,17 @@ private struct ChekiQuadCropEditorView: View {
             VStack(spacing: 0) {
                 topNavigationToolbar
 
-                cropCanvasArea
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ZStack {
+                    if isAdjustingBorderInset {
+                        croppedBorderInsetPreviewCanvas
+                            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    } else {
+                        cropCanvasArea
+                            .transition(.opacity)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(.easeInOut(duration: 0.25), value: isAdjustingBorderInset)
 
                 bottomAdjustmentToolbar
             }
@@ -2642,9 +2660,6 @@ private struct ChekiQuadCropEditorView: View {
         }
         .preferredColorScheme(.dark)
         .statusBarHidden(true)
-        .sheet(isPresented: $showingSettingsSheet) {
-            SettingsView()
-        }
         .onAppear {
             loadSourceImageAndCorners(forBackside: editingBackside)
         }
@@ -2663,9 +2678,9 @@ private struct ChekiQuadCropEditorView: View {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .detailLiquidGlassCircle(size: 38)
+                    .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("取消裁切")
@@ -2699,13 +2714,13 @@ private struct ChekiQuadCropEditorView: View {
                     }
                 }
                 .padding(3)
-                .detailLiquidGlassCapsule()
+                .liquidGlassCapsule(height: ChromeMetrics.capsuleHeight, horizontalPadding: 4, ink: .white, fallbackStroke: .white)
 
                 Spacer()
             }
 
             // 縮放倍率重置標籤（當雙指縮放時顯示）
-            if abs(effectiveZoom - 1.0) > 0.03 {
+            if abs(effectiveZoom - 1.0) > 0.03 && !isAdjustingBorderInset {
                 Button {
                     withAnimation(ChekiMotion.small) {
                         resetZoomAndPan()
@@ -2716,7 +2731,7 @@ private struct ChekiQuadCropEditorView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .detailLiquidGlassCapsule()
+                        .liquidGlassCapsule(ink: .white, fallbackStroke: .white)
                 }
                 .buttonStyle(.plain)
             }
@@ -2730,11 +2745,15 @@ private struct ChekiQuadCropEditorView: View {
                 Image(systemName: "checkmark")
                     .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .detailLiquidGlassCapsule()
+                    .liquidGlassCapsule(
+                        height: ChromeMetrics.capsuleHeight,
+                        horizontalPadding: ChromeMetrics.capsuleHPadding,
+                        ink: .white,
+                        fallbackStroke: .white
+                    )
             }
-            .disabled(isProcessingCrop)
+            .disabled(isProcessingCrop || isAdjustingBorderInset)
+            .opacity(isAdjustingBorderInset ? 0 : 1)
             .accessibilityLabel(L10n.tr("完成", "完了"))
             .accessibilityIdentifier("chrome.crop.confirm")
         }
@@ -3083,123 +3102,212 @@ private struct ChekiQuadCropEditorView: View {
         .allowsHitTesting(false)
     }
 
-    // MARK: - 3. 底部 Apple Photos 風格控制面板（相紙比例膠囊 + 自動吸附/旋轉/展開/設定）
+    // MARK: - 3. 底部控制面板
 
     private var bottomAdjustmentToolbar: some View {
-        VStack(spacing: 12) {
-            // (A) 相紙比例鎖定膠囊列 (Auto / Mini / Square / Wide)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(FilmFormat.allCases, id: \.self) { format in
-                        let isSelected = (selectedFormat == format)
-                        Button {
-                            withAnimation(ChekiMotion.toggle) {
-                                selectedFormat = format
+        Group {
+            if isAdjustingBorderInset {
+                borderInsetAdjustmentBottomBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                VStack(spacing: 12) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(FilmFormat.concreteFormats, id: \.rawValue) { format in
+                                formatPillButton(for: format)
                             }
-                            UISelectionFeedbackGenerator().selectionChanged()
-                        } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: format == .square ? "square" : (format == .wide ? "rectangle" : "rectangle.portrait"))
-                                    .font(.system(size: 11, weight: .semibold))
-                                Text(format.displayName)
-                                    .font(.caption.weight(.bold))
-                            }
-                            .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.78))
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 7)
-                            .background(
-                                isSelected ? Color.white : Color.white.opacity(0.16),
-                                in: Capsule()
-                            )
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
                     }
+
+                    HStack(spacing: ChromeMetrics.groupSpacing) {
+                        cropToolCapsule(systemName: "viewfinder.rectangular", title: L10n.tr("自動", "自動"), identifier: "chrome.crop.auto") {
+                            Task { await runAutoDetectCorners() }
+                        }
+                        cropToolCapsule(systemName: "rotate.left", title: L10n.tr("旋轉", "回転"), identifier: "chrome.crop.rotate") {
+                            rotateSourceImage90DegreesCounterClockwise()
+                        }
+                        cropToolCapsule(systemName: "arrow.up.left.and.arrow.down.right", title: L10n.tr("展開", "展開"), identifier: "chrome.crop.expand") {
+                            withAnimation(ChekiMotion.toggle) {
+                                normalizedCorners = [
+                                    CGPoint(x: 0.04, y: 0.04),
+                                    CGPoint(x: 0.96, y: 0.04),
+                                    CGPoint(x: 0.96, y: 0.96),
+                                    CGPoint(x: 0.04, y: 0.96)
+                                ]
+                            }
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }
+                        cropToolCapsule(
+                            systemName: "slider.horizontal.below.square.and.square.filled",
+                            title: abs(borderInsetPercentage) > 0.05 ? String(format: "%+.1f%%", borderInsetPercentage) : L10n.tr("邊界", "余白"),
+                            identifier: "chrome.crop.inset"
+                        ) {
+                            startBorderInsetAdjustment()
+                        }
+                        cropToolCapsule(systemName: "photo.badge.plus", title: L10n.tr("背面", "裏面"), identifier: "chrome.crop.backside") {
+                            onRequestBacksidePicker()
+                        }
+                    }
+                    .padding(.horizontal, ChromeMetrics.edgeHorizontal)
+                    .padding(.bottom, ChromeMetrics.edgeBottom)
                 }
-                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-
-            // (B) 底部工具動作列（Vision 自動吸附 / 旋轉 90° / 展開四點 / 邊界設定 / 補拍背面）
-            HStack(spacing: 16) {
-                Button {
-                    Task {
-                        await runAutoDetectCorners()
-                    }
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "viewfinder.rectangular")
-                            .font(.system(size: 18, weight: .semibold))
-                        Text(L10n.tr("自動", "自動"))
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                }
-
-                Button {
-                    rotateSourceImage90DegreesCounterClockwise()
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "rotate.left")
-                            .font(.system(size: 18, weight: .semibold))
-                        Text(L10n.tr("旋轉", "回転"))
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                }
-
-                Button {
-                    withAnimation(ChekiMotion.toggle) {
-                        normalizedCorners = [
-                            CGPoint(x: 0.04, y: 0.04),
-                            CGPoint(x: 0.96, y: 0.04),
-                            CGPoint(x: 0.96, y: 0.96),
-                            CGPoint(x: 0.04, y: 0.96)
-                        ]
-                    }
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 17, weight: .semibold))
-                        Text(L10n.tr("展開", "展開"))
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                }
-
-                Button {
-                    showingSettingsSheet = true
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "slider.horizontal.below.square.and.square.filled")
-                            .font(.system(size: 17, weight: .semibold))
-                        Text(abs(defaultBorderInsetPercentage) > 0.05 ? String(format: "%+.1f%%", defaultBorderInsetPercentage) : L10n.tr("邊界", "余白"))
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                }
-
-                Button {
-                    onRequestBacksidePicker()
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "photo.badge.plus")
-                            .font(.system(size: 17, weight: .semibold))
-                        Text(L10n.tr("背面", "裏面"))
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 12)
         }
+        .animation(.easeInOut(duration: 0.25), value: isAdjustingBorderInset)
+    }
+
+    private func cropToolCapsule(systemName: String, title: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: systemName)
+                    .font(.system(size: 16, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: ChromeMetrics.capsuleHeight)
+            .liquidGlassCapsule(ink: .white, fallbackStroke: .white)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func formatPillButton(for format: FilmFormat) -> some View {
+        let isSelected = (selectedFormat == format)
+        return Button {
+            withAnimation(ChekiMotion.toggle) {
+                selectedFormat = format
+            }
+            UISelectionFeedbackGenerator().selectionChanged()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: format == .square ? "square" : (format == .wide ? "rectangle" : "rectangle.portrait"))
+                    .font(.system(size: 11, weight: .semibold))
+                Text(format.displayName)
+                    .font(.caption.weight(.bold))
+            }
+            .foregroundStyle(isSelected ? Color.black : Color.white)
+            .padding(.horizontal, 13)
+            .frame(height: ChromeMetrics.capsuleHeight)
+            .background {
+                if isSelected {
+                    Capsule().fill(Color.white)
+                }
+            }
+            .modifier(OptionalLiquidGlassCapsuleModifier(isEnabled: !isSelected))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var borderInsetAdjustmentBottomBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                cancelBorderInsetAdjustment()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("取消微調", "キャンセル"))
+            .accessibilityIdentifier("chrome.crop.inset.cancel")
+
+            HStack(spacing: 10) {
+                Text(String(format: "%+.1f%%", currentInsetPercentage))
+                    .font(.subheadline.monospacedDigit().weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 54, alignment: .leading)
+
+                Slider(
+                    value: Binding(
+                        get: { currentInsetPercentage },
+                        set: { newVal in
+                            let rounded = (newVal * 10).rounded() / 10
+                            if rounded != currentInsetPercentage {
+                                currentInsetPercentage = rounded
+                                scheduleInsetPreviewUpdate(percentage: rounded)
+                            }
+                        }
+                    ),
+                    in: -3.0...3.0,
+                    step: 0.1
+                )
+                .tint(.white)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: ChromeMetrics.capsuleHeight)
+            .liquidGlassCapsule(ink: .white, fallbackStroke: .white)
+
+            Button {
+                confirmBorderInsetAdjustment()
+            } label: {
+                Image(systemName: "checkmark")
+                    .font(.system(size: ChromeMetrics.iconPointSize, weight: .bold))
+                    .foregroundStyle(.white)
+                    .liquidGlassCircle(size: ChromeMetrics.circle, ink: .white, fallbackStroke: .white)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.tr("確認微調", "確定"))
+            .accessibilityIdentifier("chrome.crop.inset.confirm")
+        }
+        .padding(.horizontal, ChromeMetrics.edgeHorizontal)
+        .padding(.bottom, ChromeMetrics.edgeBottom)
         .padding(.top, 10)
-        .background(Color(white: 0.08).opacity(0.96))
+    }
+
+    private var croppedBorderInsetPreviewCanvas: some View {
+        GeometryReader { geo in
+            ZStack {
+                RadialGradient(
+                    colors: [Color(white: 0.16), Color.black],
+                    center: .center,
+                    startRadius: 20,
+                    endRadius: max(geo.size.width, geo.size.height) * 0.72
+                )
+                .ignoresSafeArea()
+
+                if let preview = insetPreviewUIImage {
+                    Image(uiImage: preview)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(
+                            maxWidth: max(1, geo.size.width - 48),
+                            maxHeight: max(1, geo.size.height - 48)
+                        )
+                        .shadow(color: Color.black.opacity(0.65), radius: 18, x: 0, y: 8)
+                        .transition(.opacity)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                }
+
+                VStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "slider.horizontal.below.square.and.square.filled")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(L10n.tr("滑動微調邊界 · 即時預覽", "スライダーで余白を微調整 · リアルタイム"))
+                            .font(.caption2.weight(.medium))
+                    }
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.55), in: Capsule())
+                    .padding(.top, 6)
+
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     // MARK: - 4. 雙指縮放與平移手勢計算
@@ -3347,12 +3455,118 @@ private struct ChekiQuadCropEditorView: View {
         }
     }
 
+    // MARK: - 邊界微調滑桿與即時預覽控制
+
+    private func startBorderInsetAdjustment() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        baseCornersForInset = Self.baseCornersFromCurrent(corners: normalizedCorners, percentage: borderInsetPercentage)
+        currentInsetPercentage = borderInsetPercentage
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isAdjustingBorderInset = true
+        }
+        scheduleInsetPreviewUpdate(percentage: currentInsetPercentage)
+    }
+
+    private func cancelBorderInsetAdjustment() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        insetRenderTask?.cancel()
+        currentInsetPercentage = borderInsetPercentage
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isAdjustingBorderInset = false
+        }
+    }
+
+    private func confirmBorderInsetAdjustment() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        insetRenderTask?.cancel()
+        borderInsetPercentage = currentInsetPercentage
+        normalizedCorners = Self.cornersWithInset(baseCorners: baseCornersForInset, percentage: currentInsetPercentage)
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isAdjustingBorderInset = false
+        }
+    }
+
+    private func scheduleInsetPreviewUpdate(percentage: Double) {
+        insetRenderTask?.cancel()
+        let img = displayProxyUIImage ?? sourceUIImage
+        guard let uiImg = img, let cgImage = uiImg.cgImage else { return }
+        let base = baseCornersForInset
+        let format = selectedFormat
+
+        insetRenderTask = Task {
+            let adjustedNorm = Self.cornersWithInset(baseCorners: base, percentage: percentage)
+            let imgW = CGFloat(cgImage.width)
+            let imgH = CGFloat(cgImage.height)
+            let pixelCorners = adjustedNorm.map { pt in
+                CGPoint(x: pt.x * imgW, y: pt.y * imgH)
+            }
+            let chekiFormat: ChekiFilmFormat = {
+                switch format {
+                case .mini: return .mini
+                case .square: return .square
+                case .wide: return .wide
+                case .auto: return .mini
+                }
+            }()
+            let manualDetection = DetectionResult(
+                corners: pixelCorners,
+                method: .visionNative,
+                confidence: 1.0,
+                imageSize: CGSize(width: imgW, height: imgH)
+            )
+            let visionManager = VisionManager()
+            if let cropResult = try? await visionManager.perspectiveCorrect(
+                image: cgImage,
+                corners: pixelCorners,
+                detection: manualDetection,
+                format: chekiFormat,
+                preserveCornerOrder: true
+            ) {
+                guard !Task.isCancelled else { return }
+                let rendered = UIImage(cgImage: cropResult.cgImage)
+                await MainActor.run {
+                    withAnimation(.linear(duration: 0.08)) {
+                        self.insetPreviewUIImage = rendered
+                    }
+                }
+            }
+        }
+    }
+
+    static func baseCornersFromCurrent(corners: [CGPoint], percentage: Double) -> [CGPoint] {
+        let ratio = percentage / 100.0
+        guard abs(ratio) > 1e-5 else { return corners }
+        let cx = corners.map { $0.x }.reduce(0, +) / CGFloat(corners.count)
+        let cy = corners.map { $0.y }.reduce(0, +) / CGFloat(corners.count)
+        let invScale = 1.0 / CGFloat(1.0 + ratio)
+        return corners.map { pt in
+            CGPoint(
+                x: cx + (pt.x - cx) * invScale,
+                y: cy + (pt.y - cy) * invScale
+            )
+        }
+    }
+
+    static func cornersWithInset(baseCorners: [CGPoint], percentage: Double) -> [CGPoint] {
+        let ratio = percentage / 100.0
+        guard abs(ratio) > 1e-5 else { return baseCorners }
+        let cx = baseCorners.map { $0.x }.reduce(0, +) / CGFloat(baseCorners.count)
+        let cy = baseCorners.map { $0.y }.reduce(0, +) / CGFloat(baseCorners.count)
+        let scale = CGFloat(1.0 + ratio)
+        return baseCorners.map { pt in
+            CGPoint(
+                x: cx + (pt.x - cx) * scale,
+                y: cy + (pt.y - cy) * scale
+            )
+        }
+    }
+
     @MainActor
     private func runAutoDetectCorners() async {
         guard let uiImage = sourceUIImage, let cgImage = uiImage.cgImage else { return }
         let imgSize = CGSize(width: cgImage.width, height: cgImage.height)
         let visionManager = VisionManager()
-        let defaultInsetRatio = defaultBorderInsetPercentage / 100.0
+        let activeInsetRatio = borderInsetPercentage / 100.0
 
         if let detection = try? await visionManager.detectQuadFastForCamera(
             in: cgImage,
@@ -3365,7 +3579,7 @@ private struct ChekiQuadCropEditorView: View {
             let adjusted = await visionManager.applyBorderInset(
                 corners: ordered,
                 imageSize: imgSize,
-                ratio: defaultInsetRatio
+                ratio: activeInsetRatio
             )
             withAnimation(ChekiMotion.small) {
                 normalizedCorners = adjusted.map { pt in
@@ -3376,11 +3590,11 @@ private struct ChekiQuadCropEditorView: View {
                 }
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            if abs(defaultBorderInsetPercentage) > 0.05 {
+            if abs(borderInsetPercentage) > 0.05 {
                 showBanner(
                     L10n.tr(
-                        String(format: "已自動吸附 · %+.1f%%", defaultBorderInsetPercentage),
-                        String(format: "自動吸着 · %+.1f%%", defaultBorderInsetPercentage)
+                        String(format: "已自動吸附 · %+.1f%%", borderInsetPercentage),
+                        String(format: "自動吸着 · %+.1f%%", borderInsetPercentage)
                     )
                 )
             } else {
@@ -3393,7 +3607,7 @@ private struct ChekiQuadCropEditorView: View {
             let adjusted = await visionManager.applyBorderInset(
                 corners: basePixels,
                 imageSize: imgSize,
-                ratio: defaultInsetRatio
+                ratio: activeInsetRatio
             )
             withAnimation(ChekiMotion.small) {
                 normalizedCorners = adjusted.map { pt in
@@ -3521,7 +3735,7 @@ private struct ChekiQuadCropEditorView: View {
                    let ocrRes = await visionManager.recognizeDate(from: cropResult.cgImage) {
                     item.applyAutomaticJudgedDate(ocrRes.date, preservingTimeFrom: item.appOriginalCaptureDate)
                 }
-                item.borderInsetRatio = defaultBorderInsetPercentage / 100.0
+                item.borderInsetRatio = borderInsetPercentage / 100.0
                 let resolvedFormat = FilmFormat.resolvedConcreteFormat(
                     preferred: selectedFormat,
                     specName: cropResult.filmSpecification?.format.rawValue,
