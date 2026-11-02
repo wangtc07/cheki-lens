@@ -17,7 +17,7 @@
   3. 雙裁切編輯器 UI 全面統一：`ChekiDetailView` 的 `ChekiQuadCropEditorView` 統一採用 `BatchPairingView` 的浮動液態玻璃膠囊風格（移除底部平鋪深黑條與扁平按鈕，相紙規格與動作按鈕統一採用液態玻璃膠囊）。
   4. 邊界微調即時預覽滑桿：點選「邊界微調」後畫布平滑漸變切換為透視校正裁切後的即時畫面，底部出現 -3.0% ~ +3.0% 浮動玻璃滑桿與即時百分比標籤，滑動時以 GPU 120fps 即時預覽往外/往內邊界調整，最右端提供 ✓ 按鈕確認套用。
   5. 撰寫 `BorderInsetAdjustmentTests` 單元測試，全量單元測試全數通過。
-- **最新穩定 Git Commit**：待提交 feat(ui): 完成 Task 6.8 邊界微調滑桿即時預覽與雙編輯器液態玻璃風格統一
+- **最新穩定 Git Commit**：b3b2c9a (feat(ui): 完成 Task 6.8 邊界微調滑桿即時預覽與雙編輯器液態玻璃風格統一)
 - **下一動執行指示**：接續執行 **Task 7.5.2**（多語系字串補齊至 `Localizable.xcstrings`（繁體中文與日文）與 iPad / 多裝置佈局適配）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
