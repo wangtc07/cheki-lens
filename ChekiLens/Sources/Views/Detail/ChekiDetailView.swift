@@ -3458,7 +3458,10 @@ private struct ChekiQuadCropEditorView: View {
         guard max(size.width, size.height) > maxDimension, max(size.width, size.height) > 1 else { return image }
         let ratio = maxDimension / max(size.width, size.height)
         let newSize = CGSize(width: max(1, round(size.width * ratio)), height: max(1, round(size.height * ratio)))
-        let renderer = UIGraphicsImageRenderer(size: newSize)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1.0
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
         return renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: newSize))
         }
