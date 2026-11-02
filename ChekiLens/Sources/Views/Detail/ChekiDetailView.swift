@@ -3274,12 +3274,21 @@ private struct ChekiQuadCropEditorView: View {
                 .ignoresSafeArea()
 
                 if let preview = insetPreviewUIImage {
+                    let availW = max(1, geo.size.width - 48)
+                    let availH = max(1, geo.size.height - 48)
+                    let imgSize = preview.size
+                    let scale = min(availW / max(1, imgSize.width), availH / max(1, imgSize.height))
+                    let fitW = imgSize.width * scale
+                    let fitH = imgSize.height * scale
+
                     Image(uiImage: preview)
                         .resizable()
-                        .scaledToFit()
-                        .frame(
-                            maxWidth: max(1, geo.size.width - 48),
-                            maxHeight: max(1, geo.size.height - 48)
+                        .interpolation(.medium)
+                        .frame(width: fitW, height: fitH)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
                         )
                         .shadow(color: Color.black.opacity(0.65), radius: 18, x: 0, y: 8)
                         .transition(.opacity)
