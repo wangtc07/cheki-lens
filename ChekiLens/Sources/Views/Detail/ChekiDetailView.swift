@@ -2599,7 +2599,7 @@ private struct ChekiQuadCropEditorView: View {
         _selectedFormat = State(initialValue: item.filmFormat)
         let initialInset = abs(item.borderInsetRatio) > 1e-4 ? (item.borderInsetRatio * 100.0) : UserDefaults.standard.double(forKey: "defaultBorderInsetPercentage")
         _borderInsetPercentage = State(initialValue: initialInset)
-        _currentInsetPercentage = State(initialValue: initialInset)
+        _currentInsetPercentage = State(initialValue: 0.0)
     }
 
     private var effectiveZoom: CGFloat {
@@ -3220,7 +3220,7 @@ private struct ChekiQuadCropEditorView: View {
             .accessibilityIdentifier("chrome.crop.inset.cancel")
 
             HStack(spacing: 10) {
-                Text(String(format: "%+.1f%%", currentInsetPercentage))
+                Text(abs(currentInsetPercentage) < 0.05 ? "0.0%" : String(format: "%+.1f%%", currentInsetPercentage))
                     .font(.subheadline.monospacedDigit().weight(.bold))
                     .foregroundStyle(.white)
                     .frame(minWidth: 54, alignment: .leading)
@@ -3471,18 +3471,19 @@ private struct ChekiQuadCropEditorView: View {
 
     private func startBorderInsetAdjustment() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        baseCornersForInset = Self.baseCornersFromCurrent(corners: normalizedCorners, percentage: borderInsetPercentage)
-        currentInsetPercentage = borderInsetPercentage
+        // 標記點（即畫面上目前的四個角點）即為 0.0% 基準點
+        baseCornersForInset = normalizedCorners
+        currentInsetPercentage = 0.0
         withAnimation(.easeInOut(duration: 0.25)) {
             isAdjustingBorderInset = true
         }
-        scheduleInsetPreviewUpdate(percentage: currentInsetPercentage)
+        scheduleInsetPreviewUpdate(percentage: 0.0)
     }
 
     private func cancelBorderInsetAdjustment() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         insetRenderTask?.cancel()
-        currentInsetPercentage = borderInsetPercentage
+        currentInsetPercentage = 0.0
         withAnimation(.easeInOut(duration: 0.25)) {
             isAdjustingBorderInset = false
         }
@@ -3493,6 +3494,7 @@ private struct ChekiQuadCropEditorView: View {
         insetRenderTask?.cancel()
         borderInsetPercentage = currentInsetPercentage
         normalizedCorners = Self.cornersWithInset(baseCorners: baseCornersForInset, percentage: currentInsetPercentage)
+        currentInsetPercentage = 0.0
         withAnimation(.easeInOut(duration: 0.25)) {
             isAdjustingBorderInset = false
         }

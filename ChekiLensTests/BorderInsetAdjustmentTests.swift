@@ -81,6 +81,26 @@ final class BorderInsetAdjustmentTests: XCTestCase {
         }
     }
 
+    func test_markedPoints_areZeroBaseline_andPreserveOriginalCrop() {
+        let markedPoints: [CGPoint] = [
+            CGPoint(x: 0.12, y: 0.08),
+            CGPoint(x: 0.88, y: 0.08),
+            CGPoint(x: 0.88, y: 0.92),
+            CGPoint(x: 0.12, y: 0.92)
+        ]
+
+        // 標記點即為 0.0% 基準點：進入微調時 percentage 為 0.0，輸出必須與標記點 100% 完全相同
+        let atZero = BatchPairingViewCornersMath.cornersWithInset(baseCorners: markedPoints, percentage: 0.0)
+        XCTAssertEqual(atZero, markedPoints, "在 0.0% 基準下，裁切點必須與當前標記點完全一致，保證預覽與一般顯示 100% 相同且無外擴露出桌面")
+
+        // 向內收縮 -0.5% 時，四頂點往中心靠攏
+        let atMinusHalf = BatchPairingViewCornersMath.cornersWithInset(baseCorners: markedPoints, percentage: -0.5)
+        XCTAssertGreaterThan(atMinusHalf[0].x, markedPoints[0].x, "負值必須向內收縮（左頂點往右內縮）")
+        XCTAssertGreaterThan(atMinusHalf[0].y, markedPoints[0].y, "負值必須向內收縮（頂部頂點往下內縮）")
+        XCTAssertLessThan(atMinusHalf[2].x, markedPoints[2].x, "負值必須向內收縮（右底頂點往左內縮）")
+        XCTAssertLessThan(atMinusHalf[2].y, markedPoints[2].y, "負值必須向內收縮（底邊頂點往上內縮，徹底消除桌面）")
+    }
+
     // MARK: - 3. ChekiItem 個別 borderInsetRatio 持久化測試
 
     func test_chekiItem_borderInsetRatio_persistence() {
