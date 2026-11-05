@@ -171,6 +171,63 @@ final class ChekiAlignmentTelemetryServiceTests: XCTestCase {
         XCTAssertNil(store.activeModelVersion())
     }
 
+    func testApplyRemoteManifestVerifiesSHA256AndSkipsSameVersion() async throws {
+        let otaDir = tempDirURL.appendingPathComponent("RemoteOTA", isDirectory: true)
+        let store = ChekiOTAModelStore(modelsDirectoryURL: otaDir)
+
+        let unpackedSource = tempDirURL.appendingPathComponent("UnpackedRemote.mlmodelc", isDirectory: true)
+        try FileManager.default.createDirectory(at: unpackedSource, withIntermediateDirectories: true)
+        let archiveBytes = Data("remote-compiled-model-archive-v1".utf8)
+        try archiveBytes.write(to: unpackedSource.appendingPathComponent("model.mil"))
+
+        let validHash = ChekiOTAModelStore.sha256Hex(of: archiveBytes)
+        let manifestV1 = ChekiOTAManifest(
+            version: "2026.11.05.1",
+            sha256: validHash,
+            downloadURL: "https://example.com/ChekiPoseNet.mlmodelc.zip",
+            promotedAtISO8601: "2026-11-05T03:30:00Z",
+            goldenMeanCornerErrorPx: 3.10
+        )
+
+        var downloadCallCount = 0
+        let appliedFirst = try await store.applyRemoteManifestIfNeeded(manifest: manifestV1) { _ in
+            downloadCallCount += 1
+            return (archiveBytes, unpackedSource)
+        }
+        XCTAssertTrue(appliedFirst)
+        XCTAssertEqual(downloadCallCount, 1)
+        XCTAssertEqual(store.activeModelVersion(), "2026.11.05.1")
+
+        // Second check with same version must be an idempotent no-op without downloading
+        let appliedSecond = try await store.applyRemoteManifestIfNeeded(manifest: manifestV1) { _ in
+            downloadCallCount += 1
+            return (archiveBytes, unpackedSource)
+        }
+        XCTAssertFalse(appliedSecond)
+        XCTAssertEqual(downloadCallCount, 1)
+
+        // Corrupted download with wrong SHA256 must be rejected and preserve v1
+        let badManifest = ChekiOTAManifest(
+            version: "2026.11.05.2",
+            sha256: String(repeating: "0", count: 64),
+            downloadURL: "https://example.com/ChekiPoseNet.mlmodelc.zip",
+            promotedAtISO8601: "2026-11-05T04:00:00Z",
+            goldenMeanCornerErrorPx: 2.95
+        )
+        do {
+            _ = try await store.applyRemoteManifestIfNeeded(manifest: badManifest) { _ in
+                (archiveBytes, unpackedSource)
+            }
+            XCTFail("Expected checksumMismatch error")
+        } catch let error as ChekiOTAUpdateError {
+            if case .checksumMismatch = error {
+            } else {
+                XCTFail("Expected checksumMismatch, got \(error)")
+            }
+        }
+        XCTAssertEqual(store.activeModelVersion(), "2026.11.05.1")
+    }
+
     private func makeSyntheticImage(width: Int, height: Int) throws -> CGImage {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let ctx = try XCTUnwrap(

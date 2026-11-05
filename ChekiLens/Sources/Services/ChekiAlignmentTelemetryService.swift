@@ -72,7 +72,20 @@ nonisolated struct URLSessionTelemetryTransport: ChekiAlignmentTelemetryTranspor
     }
 }
 
-// MARK: - OTA Model Store
+// MARK: - OTA Model Manifest & Store
+
+nonisolated struct ChekiOTAManifest: Codable, Equatable, Sendable {
+    let version: String
+    let sha256: String
+    let downloadURL: String
+    let promotedAtISO8601: String
+    let goldenMeanCornerErrorPx: Double?
+}
+
+nonisolated enum ChekiOTAUpdateError: Error, Equatable, Sendable {
+    case checksumMismatch(expected: String, actual: String)
+    case invalidManifestVersion
+}
 
 nonisolated struct ChekiOTAModelStore: Sendable {
     let modelsDirectoryURL: URL
@@ -106,6 +119,39 @@ nonisolated struct ChekiOTAModelStore: Sendable {
         }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    static func sha256Hex(of data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func verifyChecksum(data: Data, expectedSHA256: String) throws {
+        let actual = sha256Hex(of: data).lowercased()
+        let expected = expectedSHA256.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard actual == expected else {
+            throw ChekiOTAUpdateError.checksumMismatch(expected: expected, actual: actual)
+        }
+    }
+
+    /// Checks if the remote manifest offers a newer version than currently installed, verifies SHA256
+    /// integrity on the downloaded payload, and atomically installs the unpacked model.
+    @discardableResult
+    func applyRemoteManifestIfNeeded(
+        manifest: ChekiOTAManifest,
+        downloadArchive: (String) async throws -> (archiveData: Data, unpackedModelURL: URL)
+    ) async throws -> Bool {
+        let targetVersion = manifest.version.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetVersion.isEmpty else {
+            throw ChekiOTAUpdateError.invalidManifestVersion
+        }
+        if activeModelVersion() == targetVersion, activeCompiledModelURL() != nil {
+            return false
+        }
+
+        let (archiveData, unpackedModelURL) = try await downloadArchive(manifest.downloadURL)
+        try Self.verifyChecksum(data: archiveData, expectedSHA256: manifest.sha256)
+        _ = try await installModel(from: unpackedModelURL, version: targetVersion)
+        return true
     }
 
     /// Idempotently installs a compiled `.mlmodelc` or uncompiled `.mlpackage` / `.mlmodel` into the OTA directory.

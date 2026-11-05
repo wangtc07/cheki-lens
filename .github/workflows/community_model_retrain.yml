@@ -1,0 +1,66 @@
+name: Community Model Retrain and OTA Release
+
+on:
+  schedule:
+    - cron: '0 18 * * 0'
+  workflow_dispatch:
+    inputs:
+      force_compile_ota:
+        description: 'Compile and publish OTA bundle even if no new incoming samples'
+        required: false
+        default: 'true'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  retrain-and-publish-ota:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install training dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          if [ -f scripts/requirements.txt ]; then
+            pip install -r scripts/requirements.txt
+          fi
+
+      - name: Verify ingestion and regression gate self-test
+        run: |
+          python3 scripts/ingest_community_annotations.py --self-test
+
+      - name: Ingest community telemetry and build OTA release bundle
+        id: build_ota
+        run: |
+          VERSION_TAG="$(date -u +'%Y.%m.%d').${GITHUB_RUN_NUMBER}"
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/model-latest/ChekiPoseNet.mlmodelc.zip"
+          python3 scripts/ingest_community_annotations.py \
+            --incoming-dir incoming_telemetry \
+            --compile-ota \
+            --output-dir dist_ota \
+            --version "${VERSION_TAG}" \
+            --download-url "${DOWNLOAD_URL}"
+          echo "version=${VERSION_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish OTA bundle to model-latest GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view model-latest >/dev/null 2>&1; then
+            gh release create model-latest \
+              --title "ChekiPoseNet OTA Model (Latest)" \
+              --notes "Automated Mode C OTA CoreML model release."
+          fi
+          gh release upload model-latest \
+            dist_ota/ChekiPoseNet.mlmodelc.zip \
+            dist_ota/ota_manifest.json \
+            --clobber

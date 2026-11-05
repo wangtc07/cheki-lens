@@ -8,16 +8,15 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-11-05
-- **進行中的修正**：從 `main` 建立 `feat/community-model-opt` 分支，並完成 Task 8.4（`SettingsView`「社群模型優化 · 半價 Pro」設定區塊、端側去識別化即時預覽 Sheet 與雙裁切編輯器儲存觸發掛載）。
-- **當前所屬階段**：Phase 8 — 社群模型優化與隱私共享計畫 (Community Model Optimization & Privacy Telemetry)
+- **進行中的修正**：從 `main` 建立 `feat/community-model-opt` 分支，全數完成 Phase 8（Task 8.1 至 Task 8.5：端側隱私去識別化、四角微調回傳佇列、社群半價 Pro 狀態機與鎖定、設定與隱私預覽 UI、以及模式 C GitHub Actions 全自動排程訓練與 OTA 模型熱更新管線）。
+- **當前所屬階段**：Phase 8 — 社群模型優化與隱私共享計畫 (Community Model Optimization & Privacy Telemetry)（全數完成）
 - **當前分支**：`feat/community-model-opt`
-- **當前進行中任務**：完成 **Task 8.4（實作 `SettingsView`「社群模型優化與半價 Pro」設定區塊、端側去識別化即時預覽 Sheet 與裁切儲存觸發掛載）**：
-  1. 在 `SettingsView` 新增「社群模型優化 · 半價 Pro」Section（包含共享開關、半價綁定後永久禁用關閉控制、端側隱私遮蔽效果預覽入口與待上傳樣本計數）。
-  2. 在 `ProLifetimePaywallSheet` 整合「共享微調結果 · 享半價優惠」開關卡片，開啟後即時切換購買按鈕為半價（`NT$60 / ¥300`），且頂部關閉按鈕統一採用 `CloseToolbarButton`。
-  3. 實作 `CommunityPrivacyPreviewSheet`，現場以 `ChekiPrivacyMaskService` 生成去識別化前後對照圖（中央 76% 肖像遮蔽、僅保留外圍 12% 邊框與背景），讓使用者親眼驗證照片隱私保護。
-  4. 於 `ChekiDetailView` 與 `BatchPairingView` 四頂點手動裁切儲存時掛載非阻塞背景回傳入列呼叫。
-- **最新穩定 Git Commit**：1680e9a (feat(storekit): 完成 Task 8.3 社群貢獻半價 Pro 授權鎖定狀態機與 StoreKitManager 擴充)
-- **下一動執行指示**：接續執行 **Task 8.5**（撰寫後端共享樣本清洗匯入與 YOLO11-Pose 增量微調腳本 `scripts/ingest_community_annotations.py`）。
+- **當前進行中任務**：完成 **Task 8.5（實作模式 C 全自動訓練與 OTA 發布管線：`scripts/ingest_community_annotations.py`、`.github/workflows/community_model_retrain.yml` 與 `ChekiOTAModelStore` 遠端 Manifest SHA256 校驗熱更新）**：
+  1. 撰寫 `scripts/ingest_community_annotations.py`，內建幾何凸多邊形與長寬比清洗守門員、重複樣本冪等過濾、YOLO11-Pose 增量微調、黃金測試集防退步門檻（Golden Regression Gate）、以及 `ChekiPoseNet.mlmodelc.zip` + `ota_manifest.json` 打包器（通過 `--self-test` 驗證）。
+  2. 建立 `.github/workflows/community_model_retrain.yml`（於 `macos-14` Apple Silicon Runner 每週排程執行並自動將通過防退步驗證的 OTA 模型發布至 `model-latest` GitHub Release）。
+  3. 在 `ChekiOTAModelStore` 實作 `applyRemoteManifestIfNeeded(manifest:downloadArchive:)`，支援遠端版本比對、SHA256 完整性驗證與原子化安裝，並新增 `testApplyRemoteManifestVerifiesSHA256AndSkipsSameVersion` 單元測試通過。
+- **最新穩定 Git Commit**：eb80342 (feat(UI): 完成 Task 8.4 社群模型優化與半價 Pro 設定面板、隱私預覽與雙裁切儲存掛載)
+- **下一動執行指示**：Phase 8 全數完成，可合併回 `main` 或接續執行 **Task 7.5.2**（多語系字串補齊與 iPad / 多裝置佈局適配）。
 
 ---
 
@@ -413,7 +412,7 @@
 - [x] **Task 8.2**: 實作四角調整回傳與本機佇列服務 (`ChekiAlignmentTelemetryService.swift`) 與 OTA 模型熱更新載入介面（背景上傳佇列、JSONL 格式相容封包與 `VisionManager+Fallback.swift` 優先載入 `Application Support/ChekiModels/` 動態編譯模型；3 項單元測試全數通過）。
 - [x] **Task 8.3**: 擴充 `StoreKitManager.swift` 與社群貢獻半價 Pro 授權鎖定狀態機 (`CommunityContributionPolicy.swift`)（支援 `com.chekilens.pro.contributor` 半價買斷商品、UserDefaults 永久鎖定共享開關不可關閉、Restore Purchases 自動還原綁定狀態与 4 項單元測試通過）。
 - [x] **Task 8.4**: 實作 `SettingsView`「社群模型優化與半價 Pro」設定區塊、端側去識別化即時預覽 Sheet 與裁切儲存觸發掛載（整合 `ChekiDetailView` 與 `BatchPairingView` 四角儲存回傳、中日雙語字串與 `UI_AGENT_GUIDELINES` 稽核通過）。
-- [ ] **Task 8.5**: 撰寫後端共享樣本清洗匯入與 YOLO11-Pose 增量微調腳本 (`scripts/ingest_community_annotations.py`)。
+- [x] **Task 8.5**: 撰寫後端共享樣本清洗匯入與 YOLO11-Pose 增量微調腳本 (`scripts/ingest_community_annotations.py`)、GitHub Actions 全自動排程訓練與 OTA 發布 Workflow (`.github/workflows/community_model_retrain.yml`) 與 `ChekiOTAModelStore` 遠端 Manifest SHA256 校驗熱更新（`--self-test` 與全量 12 項 Phase 8 單元測試通過）。
 
 ---
 
