@@ -62,6 +62,7 @@ extension VisionManager {
         
         // 2. 執行 Vision 推論
         var bestBox: CGRect? = nil
+        var bestKeypointQuad: [CGPoint]? = nil
         var highestConf: Float = 0.0
         
         let request = VNCoreMLRequest(model: vnModel) { req, err in
@@ -71,6 +72,7 @@ extension VisionManager {
                   let multiArray = feature.multiArrayValue else { return }
             
             // YOLO-Pose 輸出 shape: [1, 17, 8400]
+            let channelCount = multiArray.shape.count >= 2 ? multiArray.shape[1].intValue : 0
             let anchorCount = multiArray.shape.last?.intValue ?? 8400
             let rowStride = multiArray.strides[1].intValue
             let anchorStride = multiArray.strides[2].intValue
@@ -118,12 +120,44 @@ extension VisionManager {
                 let normX2 = min(1.0, Double(xc + w / 2.0) / 640.0)
                 let normY2 = min(1.0, Double(yc + h / 2.0) / 640.0)
                 
-                bestBox = CGRect(
+                let box = CGRect(
                     x: normX1 * Double(imageSize.width),
                     y: normY1 * Double(imageSize.height),
                     width: (normX2 - normX1) * Double(imageSize.width),
                     height: (normY2 - normY1) * Double(imageSize.height)
                 )
+                bestBox = box
+                
+                if channelCount >= 17 {
+                    var kpts: [CGPoint] = []
+                    var allConfident = true
+                    for k in 0..<4 {
+                        let kx = Double(ptr[(5 + k * 3) * rowStride + bestAnchor * anchorStride]) / 640.0
+                        let ky = Double(ptr[(6 + k * 3) * rowStride + bestAnchor * anchorStride]) / 640.0
+                        let kc = ptr[(7 + k * 3) * rowStride + bestAnchor * anchorStride]
+                        if kc < 0.35 || kx < -0.05 || kx > 1.05 || ky < -0.05 || ky > 1.05 {
+                            allConfident = false
+                            break
+                        }
+                        kpts.append(
+                            CGPoint(
+                                x: min(max(0.0, kx), 1.0) * Double(imageSize.width),
+                                y: min(max(0.0, ky), 1.0) * Double(imageSize.height)
+                            )
+                        )
+                    }
+                    if allConfident, kpts.count == 4 {
+                        let orderedKpts = VisionManager.orderPoints(kpts)
+                        let kptArea = VisionManager.quadArea(orderedKpts)
+                        let boxArea = Double(box.width * box.height)
+                        if boxArea > 0,
+                           kptArea >= 0.80 * boxArea,
+                           kptArea <= 1.18 * boxArea,
+                           VisionManager.isChekiRatio(orderedKpts) {
+                            bestKeypointQuad = orderedKpts
+                        }
+                    }
+                }
             }
         }
         
@@ -134,7 +168,7 @@ extension VisionManager {
         guard let box = bestBox else { return nil }
         
         // 3. 幾何重建 4 頂點並依標準比例校正保護
-        let rawCorners = [
+        let rawCorners = bestKeypointQuad ?? [
             CGPoint(x: box.minX, y: box.minY),
             CGPoint(x: box.maxX, y: box.minY),
             CGPoint(x: box.maxX, y: box.maxY),
@@ -212,6 +246,16 @@ extension VisionManager {
                     CGPoint(x: x1, y: box.maxY)
                 ]
             }
+        }
+        
+        // 5. 第二階段（Coarse-to-Fine）：在原圖解析度下執行四邊 1D 亞像素 Sobel 階躍與 RANSAC 直線交點吸附
+        let stage2Snapped = VisionManager.snapQuadToFullResEdges(
+            corners: finalCorners,
+            image: image,
+            imageSize: imageSize
+        )
+        if stage2Snapped.wasSnapped {
+            finalCorners = stage2Snapped.corners
         }
         
         return DetectionResult(

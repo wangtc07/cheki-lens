@@ -48,6 +48,7 @@ flowchart TD
         VerifySHA -->|"雜湊不符（損毀或遭竄改）"| DiscardZip["拋出 sha256Mismatch 並保留舊版模型"]
         VerifySHA -->|"雜湊驗證通過"| AtomicInstall["ChekiOTAModelStore 原子替換 Application Support/ChekiModels/ChekiPoseNet.mlmodelc"]
         AtomicInstall --> VisionLoad["VisionManager.resolvePoseModelURL 優先載入熱更新模型（失敗自動退回 Bundle 內建模型）"]
+        VisionLoad --> Stage2Snap["★ 階段 2 精修：VisionManager.snapQuadToFullResEdges 原圖 4K 亞像素邊緣吸附 + RANSAC 四線交點"]
     end
 ```
 
@@ -88,4 +89,5 @@ sequenceDiagram
 | **階段 1：UI 整合** | 設定頁開關、去識別化即時預覽 Sheet、單張與批次裁切儲存掛載 | [`SettingsView.swift`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Views/Settings/SettingsView.swift)、[`ChekiDetailView.swift`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Views/Detail/ChekiDetailView.swift)、[`BatchPairingView.swift`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Views/Pairing/BatchPairingView.swift) |
 | **階段 2：自動化訓練管線** | 後端樣本清洗、冪等合併、訓練觸發、黃金測試集守門與 OTA 清單打包 | [`ingest_community_annotations.py`](file:///Users/tcwang/Documents/ChekiLens/scripts/ingest_community_annotations.py) |
 | **階段 2：CI/CD 排程** | 每週於 `macos-14` 自動重訓、編譯 `.mlmodelc` 並發布至 GitHub Release | [`community_model_retrain.yml`](file:///Users/tcwang/Documents/ChekiLens/.github/workflows/community_model_retrain.yml) |
-| **階段 3：推理引擎熱載入** | 優先載入 `Application Support/ChekiModels/ChekiPoseNet.mlmodelc`，失敗時自動退回 Bundle 模型 | [`VisionManager+Fallback.swift`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Services/VisionManager+Fallback.swift) |
+| **階段 3：推理引擎熱載入** | 優先載入 `Application Support/ChekiModels/ChekiPoseNet.mlmodelc`，解析 4 關鍵點並銜接原圖邊緣吸附 | [`VisionManager+Fallback.swift`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Services/VisionManager+Fallback.swift) |
+| **階段 3：原圖局部邊緣吸附 (Coarse-to-Fine)** | 在滿血原圖解析度沿四邊法向量執行 1D 亞像素 Sobel 階躍搜尋、內側白邊平台微收緊与 RANSAC 直線交點精修 | [`VisionManager+Refinement.swift`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Services/VisionManager+Refinement.swift)、[`VisionManager+AntiGlare.swift`](file:///Users/tcwang/Documents/ChekiLens/ChekiLens/Sources/Services/VisionManager+AntiGlare.swift) |

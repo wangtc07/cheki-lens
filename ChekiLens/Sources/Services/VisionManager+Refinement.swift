@@ -204,6 +204,20 @@ extension VisionManager {
                 }
                 sobelShifted = true
             }
+            
+            // 第二階段（Coarse-to-Fine）：自適應對比度 1D 亞像素 Sobel + RANSAC 邊緣內側平台吸附
+            let stage2 = snapQuadToFullResEdges(
+                corners: currentCorners,
+                image: image,
+                imageSize: imageSize
+            )
+            if stage2.wasSnapped {
+                let maxStage2Shift = zip(stage2.corners, currentCorners).map { hypot($0.0.x - $0.1.x, $0.0.y - $0.1.y) }.max() ?? 0.0
+                currentCorners = stage2.corners
+                if maxStage2Shift >= 0.5 {
+                    sobelShifted = true
+                }
+            }
         }
         
         // 座標邊界安全 Clamp
@@ -644,5 +658,372 @@ extension VisionManager {
         }
         
         return ordered
+    }
+    
+    // MARK: - Stage 2: Full-Resolution Coarse-to-Fine Sub-pixel Local Edge Snapping
+    
+    /// 第二階段原圖局部邊緣吸附結果
+    nonisolated struct FullResEdgeSnapResult: Sendable, Equatable {
+        /// 吸附並求交點後的四個頂點 `[TL, TR, BR, BL]`（原圖像素座標）
+        let corners: [CGPoint]
+        /// 成功吸附的邊數（0 ~ 4）
+        let snappedEdgeCount: Int
+        /// 各邊平均法向量位移量（像素，正值代表向外擴張、負值代表向內收縮）
+        let meanNormalShifts: [Double]
+        
+        var wasSnapped: Bool {
+            snappedEdgeCount > 0
+        }
+    }
+    
+    /// 第二階段（Coarse-to-Fine）：在滿血原圖解析度下，沿著第一階段粗定位四邊的法向量進行
+    /// 1D 亞像素（Sub-pixel）Sobel 階躍搜尋 + RANSAC 抗塗鴉干擾直線擬合 + 內側白邊平台微收緊，
+    /// 徹底消除 640px/1280px 降採樣造成的「裁切後背景外露縫隙」。
+    ///
+    /// - Parameters:
+    ///   - corners: 第一階段粗定位四角點（原圖像素尺度）
+    ///   - image: 原始滿血解析度 CGImage
+    ///   - imageSize: 原始影像尺寸
+    ///   - maxSearchRadiusRatio: 法向量搜尋半徑佔邊長比例（預設 2.2%，自動夾限於 10~42px）
+    ///   - inwardPlateauTightenPx: 找到邊緣階躍反曲點後向相紙白邊內側微收緊的像素量（預設 1.5px，消除鏡頭模糊過渡帶造成的背景細縫）
+    nonisolated static func snapQuadToFullResEdges(
+        corners: [CGPoint],
+        image: CGImage,
+        imageSize: CGSize,
+        maxSearchRadiusRatio: Double = 0.022,
+        inwardPlateauTightenPx: Double = 1.5
+    ) -> FullResEdgeSnapResult {
+        let ordered = VisionManager.orderPoints(corners)
+        guard ordered.count == 4 else {
+            return FullResEdgeSnapResult(corners: corners, snappedEdgeCount: 0, meanNormalShifts: [0, 0, 0, 0])
+        }
+        
+        let w = image.width
+        let h = image.height
+        guard w >= 64, h >= 64,
+              let data = image.dataProvider?.data,
+              let ptr = CFDataGetBytePtr(data) else {
+            return FullResEdgeSnapResult(corners: ordered, snappedEdgeCount: 0, meanNormalShifts: [0, 0, 0, 0])
+        }
+        
+        let bpr = image.bytesPerRow
+        let bpp = image.bitsPerPixel / 8
+        guard bpp >= 3 else {
+            return FullResEdgeSnapResult(corners: ordered, snappedEdgeCount: 0, meanNormalShifts: [0, 0, 0, 0])
+        }
+        
+        let byteOrder = image.bitmapInfo.intersection(.byteOrderMask)
+        let alphaInfo = image.alphaInfo
+        let isBGRA = (byteOrder == .byteOrder32Little) &&
+                     (alphaInfo == .premultipliedFirst || alphaInfo == .first || alphaInfo == .noneSkipFirst)
+        let isARGB = (byteOrder != .byteOrder32Little) &&
+                     (alphaInfo == .premultipliedFirst || alphaInfo == .first || alphaInfo == .noneSkipFirst)
+        
+        @inline(__always)
+        func lum(x: Int, y: Int) -> Double {
+            let cx = max(0, min(w - 1, x))
+            let cy = max(0, min(h - 1, y))
+            let o = cy * bpr + cx * bpp
+            let r: Double
+            let g: Double
+            let b: Double
+            if isBGRA {
+                b = Double(ptr[o])
+                g = Double(ptr[o + 1])
+                r = Double(ptr[o + 2])
+            } else if isARGB && bpp >= 4 {
+                r = Double(ptr[o + 1])
+                g = Double(ptr[o + 2])
+                b = Double(ptr[o + 3])
+            } else {
+                r = Double(ptr[o])
+                g = Double(ptr[o + 1])
+                b = Double(ptr[o + 2])
+            }
+            return 0.299 * r + 0.587 * g + 0.114 * b
+        }
+        
+        struct FittedEdgeLine {
+            let a: Double
+            let b: Double
+            let c: Double
+            let snapped: Bool
+            let meanShift: Double
+        }
+        
+        struct SampledEdgePoint {
+            let point: CGPoint
+            let normalOffset: Double
+        }
+        
+        let stationCount = 15
+        let stationFractions: [Double] = (0..<stationCount).map {
+            0.14 + Double($0) * (0.72 / Double(stationCount - 1))
+        }
+        
+        var fittedLines: [FittedEdgeLine] = []
+        var maxEdgeSearchRadius: Double = 12.0
+        let cosMaxAngleDelta = cos(4.0 * .pi / 180.0)
+        
+        for i in 0..<4 {
+            let p1 = ordered[i]
+            let p2 = ordered[(i + 1) % 4]
+            let dx = Double(p2.x - p1.x)
+            let dy = Double(p2.y - p1.y)
+            let edgeLen = hypot(dx, dy)
+            guard edgeLen >= 32.0 else {
+                return FullResEdgeSnapResult(corners: ordered, snappedEdgeCount: 0, meanNormalShifts: [0, 0, 0, 0])
+            }
+            
+            let tx = dx / edgeLen
+            let ty = dy / edgeLen
+            // 順時針頂點 [TL, TR, BR, BL] 下，(ty, -tx) 恆為指向卡片外側之單位法向量
+            let nx = ty
+            let ny = -tx
+            let origC = -(nx * Double(p1.x) + ny * Double(p1.y))
+            let defaultLine = FittedEdgeLine(a: nx, b: ny, c: origC, snapped: false, meanShift: 0.0)
+            
+            let searchR = max(10, min(42, Int(round(edgeLen * maxSearchRadiusRatio))))
+            maxEdgeSearchRadius = max(maxEdgeSearchRadius, Double(searchR))
+            let profileExtent = searchR + 10
+            let totalSamples = 2 * profileExtent + 1
+            
+            var candidates: [SampledEdgePoint] = []
+            candidates.reserveCapacity(stationCount)
+            
+            for s in stationFractions {
+                let sx = Double(p1.x) + s * dx
+                let sy = Double(p1.y) + s * dy
+                
+                // 邊界檢查：若採樣站點太貼近影像物理邊框（<= 4px），跳過該站點避免假邊界
+                if sx < 4.0 || sx > Double(w - 5) || sy < 4.0 || sy > Double(h - 5) {
+                    continue
+                }
+                
+                var profile = [Double](repeating: 0.0, count: totalSamples)
+                for idx in 0..<totalSamples {
+                    let d = Double(idx - profileExtent)
+                    let px = Int(round(sx + d * nx))
+                    let py = Int(round(sy + d * ny))
+                    profile[idx] = lum(x: px, y: py)
+                }
+                
+                @inline(__always)
+                func prof(_ d: Int) -> Double {
+                    profile[d + profileExtent]
+                }
+                
+                @inline(__always)
+                func stepGradient(_ d: Int) -> Double {
+                    let lIn = 0.5 * (prof(d - 2) + prof(d - 1))
+                    let lOut = 0.5 * (prof(d + 1) + prof(d + 2))
+                    return lIn - lOut
+                }
+                
+                var bestScore = 0.0
+                var bestD: Int? = nil
+                var bestInMean = 0.0
+                var bestOutMean = 0.0
+                
+                for d in -searchR...searchR {
+                    let g = stepGradient(d)
+                    guard g >= 16.0 else { continue }
+                    
+                    var inSum = 0.0
+                    var outSum = 0.0
+                    for u in 3...9 {
+                        inSum += prof(d - u)
+                        outSum += prof(d + u)
+                    }
+                    let inMean = inSum / 7.0
+                    let outMean = outSum / 7.0
+                    let plateauContrast = inMean - outMean
+                    
+                    // 相紙內側白邊平台需具備足夠亮度 (>= 108) 且顯著亮於外側背景 (>= 15)
+                    guard inMean >= 108.0, plateauContrast >= 15.0 else { continue }
+                    
+                    let proximityWeight = 1.0 - 0.15 * (abs(Double(d)) / Double(max(1, searchR)))
+                    let contrastWeight = min(1.6, plateauContrast / 24.0)
+                    let score = g * contrastWeight * proximityWeight
+                    if score > bestScore {
+                        bestScore = score
+                        bestD = d
+                        bestInMean = inMean
+                        bestOutMean = outMean
+                    }
+                }
+                
+                if let dPeak = bestD {
+                    let gMinus = stepGradient(dPeak - 1)
+                    let gCenter = stepGradient(dPeak)
+                    let gPlus = stepGradient(dPeak + 1)
+                    let denom = gMinus - 2.0 * gCenter + gPlus
+                    var subpixelDelta = 0.0
+                    if abs(denom) > 1e-4 && gCenter >= gMinus && gCenter >= gPlus {
+                        subpixelDelta = max(-0.5, min(0.5, 0.5 * (gMinus - gPlus) / denom))
+                    }
+                    
+                    // 沿內法向量搜尋真正進入純白相紙平台（>= 85% 平台對比度）的起始點，徹底跨過鏡頭 PSF 模糊過渡帶
+                    let plateauThreshold = bestOutMean + 0.85 * (bestInMean - bestOutMean)
+                    var plateauEntryD = Double(dPeak) + subpixelDelta
+                    for stepIn in 0...5 {
+                        let candidateD = dPeak - stepIn
+                        if prof(candidateD) >= plateauThreshold {
+                            // 與前一點做線性內插求取跨過 85% 白邊門檻之亞像素位置
+                            let lCurr = prof(candidateD)
+                            let lOuter = prof(candidateD + 1)
+                            if lCurr > lOuter && lOuter < plateauThreshold {
+                                let frac = (plateauThreshold - lOuter) / (lCurr - lOuter)
+                                plateauEntryD = Double(candidateD + 1) - frac
+                            } else {
+                                plateauEntryD = min(plateauEntryD, Double(candidateD))
+                            }
+                            break
+                        }
+                    }
+                    
+                    // 再往內側白邊平台微收緊 inwardPlateauTightenPx，確保裁切線 100% 落在純白相紙上
+                    let refinedD = plateauEntryD - inwardPlateauTightenPx
+                    let qx = sx + refinedD * nx
+                    let qy = sy + refinedD * ny
+                    candidates.append(SampledEdgePoint(point: CGPoint(x: qx, y: qy), normalOffset: refinedD))
+                }
+            }
+            
+            guard candidates.count >= 5 else {
+                fittedLines.append(defaultLine)
+                continue
+            }
+            
+            // RANSAC 篩選抗塗鴉/手指干擾之共線內點
+            let inlierTol = max(1.8, min(4.0, edgeLen * 0.0022))
+            var bestInliers: [SampledEdgePoint] = []
+            var bestResidualSum = Double.infinity
+            
+            for aIdx in 0..<(candidates.count - 1) {
+                for bIdx in (aIdx + 1)..<candidates.count {
+                    let pa = candidates[aIdx].point
+                    let pb = candidates[bIdx].point
+                    let segDX = Double(pb.x - pa.x)
+                    let segDY = Double(pb.y - pa.y)
+                    let segLen = hypot(segDX, segDY)
+                    guard segLen >= edgeLen * 0.18 else { continue }
+                    
+                    var la = segDY / segLen
+                    var lb = -segDX / segLen
+                    if la * nx + lb * ny < 0 {
+                        la = -la
+                        lb = -lb
+                    }
+                    // 角度保護：候選直線與第一階段粗邊夾角不得超過 4.0°
+                    guard la * nx + lb * ny >= cosMaxAngleDelta else { continue }
+                    let lc = -(la * Double(pa.x) + lb * Double(pa.y))
+                    
+                    var currentInliers: [SampledEdgePoint] = []
+                    var residualSum = 0.0
+                    for cand in candidates {
+                        let dist = abs(la * Double(cand.point.x) + lb * Double(cand.point.y) + lc)
+                        if dist <= inlierTol {
+                            currentInliers.append(cand)
+                            residualSum += dist
+                        }
+                    }
+                    
+                    if currentInliers.count > bestInliers.count ||
+                       (currentInliers.count == bestInliers.count && residualSum < bestResidualSum) {
+                        bestInliers = currentInliers
+                        bestResidualSum = residualSum
+                    }
+                }
+            }
+            
+            guard bestInliers.count >= 5 else {
+                fittedLines.append(defaultLine)
+                continue
+            }
+            
+            // 使用全最小平方法 (Orthogonal PCA) 對內點擬合精確直線
+            let nInliers = Double(bestInliers.count)
+            let meanX = bestInliers.reduce(0.0) { $0 + Double($1.point.x) } / nInliers
+            let meanY = bestInliers.reduce(0.0) { $0 + Double($1.point.y) } / nInliers
+            var sxx = 0.0, sxy = 0.0, syy = 0.0
+            for item in bestInliers {
+                let dX = Double(item.point.x) - meanX
+                let dY = Double(item.point.y) - meanY
+                sxx += dX * dX
+                sxy += dX * dY
+                syy += dY * dY
+            }
+            let tangentAngle = 0.5 * atan2(2.0 * sxy, sxx - syy)
+            var la = -sin(tangentAngle)
+            var lb = cos(tangentAngle)
+            if la * nx + lb * ny < 0 {
+                la = -la
+                lb = -lb
+            }
+            
+            guard la * nx + lb * ny >= cosMaxAngleDelta else {
+                fittedLines.append(defaultLine)
+                continue
+            }
+            
+            let lc = -(la * meanX + lb * meanY)
+            let meanShift = bestInliers.reduce(0.0) { $0 + $1.normalOffset } / nInliers
+            guard abs(meanShift) <= Double(searchR) + 3.0 else {
+                fittedLines.append(defaultLine)
+                continue
+            }
+            
+            fittedLines.append(FittedEdgeLine(a: la, b: lb, c: lc, snapped: true, meanShift: meanShift))
+        }
+        
+        let snappedCount = fittedLines.filter(\.snapped).count
+        let shifts = fittedLines.map(\.meanShift)
+        guard snappedCount > 0 else {
+            return FullResEdgeSnapResult(corners: ordered, snappedEdgeCount: 0, meanNormalShifts: shifts)
+        }
+        
+        // 四線兩兩求交點：(L3 ∩ L0 -> TL), (L0 ∩ L1 -> TR), (L1 ∩ L2 -> BR), (L2 ∩ L3 -> BL)
+        var intersected: [CGPoint] = []
+        intersected.reserveCapacity(4)
+        let maxCornerShift = maxEdgeSearchRadius * 1.75
+        
+        for i in 0..<4 {
+            let l1 = fittedLines[(i + 3) % 4]
+            let l2 = fittedLines[i]
+            let det = l1.a * l2.b - l2.a * l1.b
+            guard abs(det) > 1e-4 else {
+                return FullResEdgeSnapResult(corners: ordered, snappedEdgeCount: 0, meanNormalShifts: [0, 0, 0, 0])
+            }
+            let ix = (l1.b * l2.c - l2.b * l1.c) / det
+            let iy = (l2.a * l1.c - l1.a * l2.c) / det
+            guard ix.isFinite, iy.isFinite else {
+                return FullResEdgeSnapResult(corners: ordered, snappedEdgeCount: 0, meanNormalShifts: [0, 0, 0, 0])
+            }
+            let rawPt = CGPoint(
+                x: max(0.0, min(imageSize.width, ix)),
+                y: max(0.0, min(imageSize.height, iy))
+            )
+            let shiftDist = hypot(Double(rawPt.x - ordered[i].x), Double(rawPt.y - ordered[i].y))
+            guard shiftDist <= maxCornerShift else {
+                return FullResEdgeSnapResult(corners: ordered, snappedEdgeCount: 0, meanNormalShifts: [0, 0, 0, 0])
+            }
+            intersected.append(rawPt)
+        }
+        
+        // 幾何不變量守門（面積變動 <= 12% 且符合拍立得長寬比）
+        let origArea = VisionManager.quadArea(ordered)
+        let newArea = VisionManager.quadArea(intersected)
+        guard origArea > 0,
+              abs(newArea - origArea) / origArea <= 0.12,
+              VisionManager.isChekiRatio(intersected) else {
+            return FullResEdgeSnapResult(corners: ordered, snappedEdgeCount: 0, meanNormalShifts: [0, 0, 0, 0])
+        }
+        
+        return FullResEdgeSnapResult(
+            corners: intersected,
+            snappedEdgeCount: snappedCount,
+            meanNormalShifts: shifts
+        )
     }
 }

@@ -121,8 +121,11 @@ extension VisionManager {
             let fullResCorners = cleanCornersOnProxy.map {
                 CGPoint(x: $0.x * scaleBackX, y: $0.y * scaleBackY)
             }
+            let refinedCorners = allowHeavyFallbacks
+                ? VisionManager.snapQuadToFullResEdges(corners: fullResCorners, image: image, imageSize: imageSize).corners
+                : fullResCorners
             return DetectionResult(
-                corners: fullResCorners,
+                corners: refinedCorners,
                 method: .visionNative,
                 confidence: 0.96,
                 imageSize: imageSize
@@ -135,8 +138,11 @@ extension VisionManager {
                 CGPoint(x: $0.x * imageSize.width, y: $0.y * imageSize.height)
             })
             if !allowHeavyFallbacks || VisionManager.isChekiRatio(fullResCorners) {
+                let refinedCorners = allowHeavyFallbacks
+                    ? VisionManager.snapQuadToFullResEdges(corners: fullResCorners, image: image, imageSize: imageSize).corners
+                    : fullResCorners
                 return DetectionResult(
-                    corners: fullResCorners,
+                    corners: refinedCorners,
                     method: .visionNative,
                     confidence: 0.90,
                     imageSize: imageSize
@@ -154,8 +160,13 @@ extension VisionManager {
             let fullResCorners = outerCorners.map {
                 CGPoint(x: $0.x * scaleBackX, y: $0.y * scaleBackY)
             }
-            return DetectionResult(
+            let snappedCorners = VisionManager.snapQuadToFullResEdges(
                 corners: fullResCorners,
+                image: image,
+                imageSize: imageSize
+            ).corners
+            return DetectionResult(
+                corners: snappedCorners,
                 method: .visionNative,
                 confidence: 0.88,
                 imageSize: imageSize
@@ -166,8 +177,13 @@ extension VisionManager {
             let fullResCorners = poseRes.corners.map {
                 CGPoint(x: $0.x * scaleBackX, y: $0.y * scaleBackY)
             }
-            return DetectionResult(
+            let snappedCorners = VisionManager.snapQuadToFullResEdges(
                 corners: fullResCorners,
+                image: image,
+                imageSize: imageSize
+            ).corners
+            return DetectionResult(
+                corners: snappedCorners,
                 method: poseRes.method,
                 confidence: poseRes.confidence,
                 imageSize: imageSize
@@ -178,8 +194,13 @@ extension VisionManager {
         let fullResCorners = fallbackDetection.corners.map {
             CGPoint(x: $0.x * scaleBackX, y: $0.y * scaleBackY)
         }
-        return DetectionResult(
+        let snappedCorners = VisionManager.snapQuadToFullResEdges(
             corners: fullResCorners,
+            image: image,
+            imageSize: imageSize
+        ).corners
+        return DetectionResult(
+            corners: snappedCorners,
             method: fallbackDetection.method,
             confidence: fallbackDetection.confidence,
             imageSize: imageSize

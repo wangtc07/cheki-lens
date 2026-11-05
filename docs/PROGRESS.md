@@ -8,15 +8,14 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-11-05
-- **進行中的修正**：從 `main` 建立 `feat/community-model-opt` 分支，全數完成 Phase 8（Task 8.1 至 Task 8.5：端側隱私去識別化、四角微調回傳佇列、社群半價 Pro 狀態機與鎖定、設定與隱私預覽 UI、以及模式 C GitHub Actions 全自動排程訓練與 OTA 模型熱更新管線）。
+- **進行中的修正**：從 `main` 建立 `feat/community-model-opt` 分支，全數完成 Phase 8（Task 8.1 至 Task 8.6：端側隱私去識別化、四角微調回傳佇列、社群半價 Pro 狀態機與鎖定、設定與隱私預覽 UI、模式 C GitHub Actions 全自動排程訓練與 OTA 模型熱更新管線、以及第二階段 Coarse-to-Fine 原圖局部亞像素邊緣吸附引擎）。
 - **當前所屬階段**：Phase 8 — 社群模型優化與隱私共享計畫 (Community Model Optimization & Privacy Telemetry)（全數完成）
 - **當前分支**：`feat/community-model-opt`
-- **當前進行中任務**：完成 **Task 8.5（實作模式 C 全自動訓練與 OTA 發布管線：`scripts/ingest_community_annotations.py`、`.github/workflows/community_model_retrain.yml` 與 `ChekiOTAModelStore` 遠端 Manifest SHA256 校驗熱更新）** 及 **社群模型上傳、訓練與 OTA 更新架構流程圖文件（`docs/COMMUNITY_MODEL_PIPELINE.md`）**：
-  1. 撰寫 `scripts/ingest_community_annotations.py`，內建幾何凸多邊形與長寬比清洗守門員、重複樣本冪等過濾、YOLO11-Pose 增量微調、黃金測試集防退步門檻（Golden Regression Gate）、以及 `ChekiPoseNet.mlmodelc.zip` + `ota_manifest.json` 打包器（通過 `--self-test` 驗證）。
-  2. 建立 `.github/workflows/community_model_retrain.yml`（於 `macos-14` Apple Silicon Runner 每週排程執行並自動將通過防退步驗證的 OTA 模型發布至 `model-latest` GitHub Release）。
-  3. 在 `ChekiOTAModelStore` 實作 `applyRemoteManifestIfNeeded(manifest:downloadArchive:)`，支援遠端版本比對、SHA256 完整性驗證與原子化安裝，並新增 `testApplyRemoteManifestVerifiesSHA256AndSkipsSameVersion` 單元測試通過。
-  4. 建立 `docs/COMMUNITY_MODEL_PIPELINE.md` 並在 `docs/PROGRESS.md` 補齊完整端到端流程圖。
-- **最新穩定 Git Commit**：75c87bc (feat(mlops): 完成 Task 8.5 模式 C 全自動訓練與 OTA 模型熱更新管線)
+- **當前進行中任務**：完成 **Task 8.6（實作第二階段 Coarse-to-Fine 原圖局部亞像素邊緣吸附：`VisionManager.snapQuadToFullResEdges`、YOLO11-Pose 4 關鍵點解碼與全管線整合）**：
+  1. 在 `VisionManager+Refinement.swift` 實作 `VisionManager.snapQuadToFullResEdges`，於滿血原圖解析度下沿四邊法向量進行 15 站點 1D Sobel 階躍搜尋、3 點拋物線亞像素內插、內側白邊平台微收緊（`inwardPlateauTightenPx = 1.5` 消除模糊過渡帶縫隙）、RANSAC 抗跨邊塗鴉離群值過濾與全最小平方法（PCA）四線交點求解。
+  2. 整合至 `VisionManager+AntiGlare.swift`（`detectQuadFastForCamera` 放大回原圖後的終端精修）、`VisionManager+Fallback.swift`（解析 YOLO11-Pose 4 關鍵點並執行原圖邊緣吸附）與 `VisionManager+Refinement.swift`（`refineQuadrilateral` 自適應對比度精修）。
+  3. 新增 `ChekiLensTests/FullResEdgeSnapperTests.swift` 驗證中亮度桌面消縫隙、跨邊麥克筆塗鴉 RANSAC 防護與白底安全回退。
+- **最新穩定 Git Commit**：365a967 (docs(mlops): 新增社群模型上傳、自動訓練與 OTA 熱更新完整流程圖)
 - **下一動執行指示**：Phase 8 全數完成，可合併回 `main` 或接續執行 **Task 7.5.2**（多語系字串補齊與 iPad / 多裝置佈局適配）。
 
 ---
@@ -467,6 +466,13 @@
       │
       ▼
 [VisionManager.resolvePoseModelURL 優先載入熱更新模型（異常時自動退回 Bundle 內建模型）]
+      │
+      ▼
+[階段 4：Coarse-to-Fine 第二階段原圖 4K 局部邊緣吸附 (VisionManager.snapQuadToFullResEdges)]
+  ├─ 1. 避開圓角於四邊 14%~86% 區段採樣 15 組法向量剖面
+  ├─ 2. 自適應平台對比度 + 1D Sobel 階躍搜尋 + 3 點拋物線亞像素內插
+  ├─ 3. 向相紙白邊內側微收緊 1.5px（消除鏡頭模糊過渡帶造成的背景外露縫隙）
+  └─ 4. RANSAC 剔除跨邊塗鴉/手指遮擋離群點 + PCA 正交直線擬合求四線交點
 ```
 
 - [x] **Task 8.1**: 實作端側隱私去識別化與幾何檢驗引擎 (`ChekiPrivacyMaskService.swift`) 與單元測試（`QuadCornerGeometry` 四角凸多邊形與長寬比邊界檢驗、640px 降採樣、內部 76% 肖像與簽名區遮蔽並保留外圍 12% 邊框、Vision 人臉遮罩、EXIF/GPS 抹除與 4 項單元測試通過）。
@@ -474,6 +480,7 @@
 - [x] **Task 8.3**: 擴充 `StoreKitManager.swift` 與社群貢獻半價 Pro 授權鎖定狀態機 (`CommunityContributionPolicy.swift`)（支援 `com.chekilens.pro.contributor` 半價買斷商品、UserDefaults 永久鎖定共享開關不可關閉、Restore Purchases 自動還原綁定狀態与 4 項單元測試通過）。
 - [x] **Task 8.4**: 實作 `SettingsView`「社群模型優化與半價 Pro」設定區塊、端側去識別化即時預覽 Sheet 與裁切儲存觸發掛載（整合 `ChekiDetailView` 與 `BatchPairingView` 四角儲存回傳、中日雙語字串與 `UI_AGENT_GUIDELINES` 稽核通過）。
 - [x] **Task 8.5**: 撰寫後端共享樣本清洗匯入與 YOLO11-Pose 增量微調腳本 (`scripts/ingest_community_annotations.py`)、GitHub Actions 全自動排程訓練與 OTA 發布 Workflow (`.github/workflows/community_model_retrain.yml`) 與 `ChekiOTAModelStore` 遠端 Manifest SHA256 校驗熱更新（`--self-test` 與全量 12 項 Phase 8 單元測試通過）。
+- [x] **Task 8.6**: 實作第二階段 Coarse-to-Fine 原圖局部亞像素邊緣吸附 (`VisionManager.snapQuadToFullResEdges`) 與 YOLO11-Pose 4 關鍵點解碼整合（消除 640px/1280px 降採樣裁切縫隙、支援中亮度桌面與跨邊塗鴉 RANSAC 防護；新增 `FullResEdgeSnapperTests` 3 項單元測試全數通過）。
 
 ---
 
