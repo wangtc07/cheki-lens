@@ -21,10 +21,21 @@ final class StoreKitManager {
     /// 正式 Non-Consumable 終身買斷商品 ID
     nonisolated static let proLifetimeProductID = "com.chekilens.pro.lifetime"
 
+    /// 社群貢獻者半價 Non-Consumable 終身買斷商品 ID（開啟模型共享時可選購，購買後鎖定共享開關）
+    nonisolated static let proContributorProductID = "com.chekilens.pro.contributor"
+
+    /// 社群貢獻版候選商品 ID 清單
+    nonisolated static let contributorProductIDs: Set<String> = [
+        "com.chekilens.pro.contributor",
+        "wangtc07.ChekiLens.pro.contributor"
+    ]
+
     /// 相容 Bundle ID 前綴之候選商品 ID 清單
     nonisolated static let supportedProductIDs: Set<String> = [
         "com.chekilens.pro.lifetime",
-        "wangtc07.ChekiLens.pro.lifetime"
+        "wangtc07.ChekiLens.pro.lifetime",
+        "com.chekilens.pro.contributor",
+        "wangtc07.ChekiLens.pro.contributor"
     ]
 
     /// 購買結果狀態
@@ -39,11 +50,17 @@ final class StoreKitManager {
 
     // MARK: - Observable State
 
-    /// 從 App Store / StoreKit Configuration 載入的終身買斷商品
+    /// 從 App Store / StoreKit Configuration 載入的標準終身買斷商品
     private(set) var proProduct: Product?
+
+    /// 從 App Store / StoreKit Configuration 載入的社群貢獻半價終身買斷商品
+    private(set) var contributorProProduct: Product?
 
     /// 目前是否已解鎖 ChekiLens Pro 終身買斷版
     private(set) var isProUnlocked: Bool
+
+    /// 社群模型共享與 Pro 授權等級狀態機
+    private(set) var contributionState: CommunityContributionState
 
     /// 今日已使用的免費高畫質無浮水印額度張數（跨日自動歸零）
     private(set) var dailyFreeQuotaUsedCount: Int = 0
@@ -60,6 +77,9 @@ final class StoreKitManager {
     /// 最近一次錯誤訊息
     var lastErrorMessage: String?
 
+    @ObservationIgnored
+    private let contributionStore = CommunityContributionStore()
+
     /// 背景交易監聽任務 (`Transaction.updates`)
     @ObservationIgnored
     private var updatesListenerTask: Task<Void, Never>?
@@ -70,7 +90,9 @@ final class StoreKitManager {
     // MARK: - Initialization
 
     private init() {
-        self.isProUnlocked = UserDefaults.standard.bool(forKey: Self.proUnlockedStorageKey)
+        let initialContribution = CommunityContributionStore().loadState()
+        self.contributionState = initialContribution
+        self.isProUnlocked = initialContribution.isProUnlocked
         self.dailyFreeQuotaUsedCount = 0
         self.refreshDailyFreeQuotaIfNeeded()
         self.updatesListenerTask = listenForTransactionUpdates()
@@ -92,8 +114,14 @@ final class StoreKitManager {
         isProUnlocked || remainingDailyFreeQuota > 0
     }
 
-    /// 顯示用在地化價格字串（優先使用 StoreKit 2 `Product.displayPrice`，未連線時回退至 `¥600 / NT$120`）
+    /// 顯示用在地化價格字串（若開啟模型共享且為免費版，優先顯示半價社群貢獻商品價格 `NT$60 / ¥300`）
     var displayPrice: String {
+        if contributionState.isEligibleForHalfPricePro {
+            if let contributorProduct = contributorProProduct {
+                return contributorProduct.displayPrice
+            }
+            return contributionState.fallbackDisplayPrice
+        }
         if let product = proProduct {
             return product.displayPrice
         }
@@ -102,10 +130,28 @@ final class StoreKitManager {
 
     /// 橫幅按鈕顯示文字
     var bannerUnlockButtonTitle: String {
+        if contributionState.isEligibleForHalfPricePro {
+            let price = contributorProProduct?.displayPrice ?? "¥300 / NT$60"
+            return L10n.tr("\(price) 半價永久解鎖", "\(price) 半額で永久ロック解除")
+        }
         if let product = proProduct {
             return L10n.tr("\(product.displayPrice) 永久解鎖", "\(product.displayPrice) で永久ロック解除")
         }
         return L10n.tr("¥600 / NT$120 永久解鎖", "¥600 / NT$120 で永久ロック解除")
+    }
+
+    /// 更新社群模型共享開關（若已透過半價社群版解鎖 Pro，狀態機將維持鎖定開啟，不允許關閉）
+    func setCommunitySharingEnabled(_ enabled: Bool) {
+        let next = contributionStore.apply(.setSharingPreference(enabled))
+        contributionState = next
+        isProUnlocked = next.isProUnlocked
+    }
+
+    /// 從儲存層重新同步 `contributionState` 與 `isProUnlocked`
+    func reloadContributionStateFromStorage() {
+        let loaded = contributionStore.loadState()
+        contributionState = loaded
+        isProUnlocked = loaded.isProUnlocked
     }
 
     // MARK: - Store Initialization & Product Loading
@@ -178,7 +224,7 @@ final class StoreKitManager {
         dailyFreeQuotaUsedCount = 0
     }
 
-    /// 透過 StoreKit 2 查詢 Non-Consumable 終身買斷商品
+    /// 透過 StoreKit 2 查詢 Non-Consumable 終身買斷商品（包含標準版與社群貢獻半價版）
     func loadProducts() async {
         guard !isLoadingProducts else { return }
         isLoadingProducts = true
@@ -186,9 +232,13 @@ final class StoreKitManager {
 
         do {
             let products = try await Product.products(for: Self.supportedProductIDs)
-            if let match = products.first(where: { $0.id == Self.proLifetimeProductID }) ?? products.first {
-                self.proProduct = match
-                logger.info("已成功載入 StoreKit 商品: \(match.id, privacy: .public) (\(match.displayPrice, privacy: .public))")
+            if let standardMatch = products.first(where: { $0.id == Self.proLifetimeProductID || !Self.contributorProductIDs.contains($0.id) }) {
+                self.proProduct = standardMatch
+                logger.info("已成功載入標準版 StoreKit 商品: \(standardMatch.id, privacy: .public) (\(standardMatch.displayPrice, privacy: .public))")
+            }
+            if let contributorMatch = products.first(where: { Self.contributorProductIDs.contains($0.id) }) {
+                self.contributorProProduct = contributorMatch
+                logger.info("已成功載入社群半價版 StoreKit 商品: \(contributorMatch.id, privacy: .public) (\(contributorMatch.displayPrice, privacy: .public))")
             }
         } catch {
             logger.warning("無法從 StoreKit 載入商品清單: \(error.localizedDescription, privacy: .public)")
@@ -197,25 +247,29 @@ final class StoreKitManager {
 
     // MARK: - Purchase Flow (Product.purchase)
 
-    /// 執行 `ChekiLens Pro` 終身買斷購買流程
+    /// 執行 `ChekiLens Pro` 終身買斷購買流程（若免費版使用者已開啟社群模型共享，則執行半價社群貢獻版購買並鎖定共享狀態）
     func purchaseProLifetime() async -> PurchaseOutcome {
         guard !isPurchasing else { return .userCancelled }
         isPurchasing = true
         lastErrorMessage = nil
         defer { isPurchasing = false }
 
-        if proProduct == nil {
+        if proProduct == nil && contributorProProduct == nil {
             await loadProducts()
         }
 
+        let useHalfPriceTier = contributionState.isEligibleForHalfPricePro
+        let targetProduct = useHalfPriceTier ? (contributorProProduct ?? proProduct) : proProduct
+
         // 1. 若 StoreKit 商品已就緒（實機 App Store / Xcode StoreKit Testing），執行原生 StoreKit 2 購買驗證
-        if let product = proProduct {
+        if let product = targetProduct {
             do {
                 let result = try await product.purchase()
                 switch result {
                 case .success(let verification):
                     let transaction = try checkVerified(verification)
-                    setProUnlocked(true)
+                    let isContributorTx = Self.contributorProductIDs.contains(transaction.productID) || useHalfPriceTier
+                    applyPurchaseEntitlement(isContributorTier: isContributorTx)
                     await transaction.finish()
                     logger.info("成功完成 ChekiLens Pro 終身買斷交易: \(transaction.id)")
                     return .purchased
@@ -243,8 +297,12 @@ final class StoreKitManager {
         #if DEBUG
         try? await Task.sleep(for: .milliseconds(300))
         let nextState = !isProUnlocked
-        setProUnlocked(nextState)
-        logger.info("DEBUG 模擬器模式切換 ChekiLens Pro 狀態: \(nextState)")
+        if nextState {
+            applyPurchaseEntitlement(isContributorTier: useHalfPriceTier)
+        } else {
+            setProUnlocked(false)
+        }
+        logger.info("DEBUG 模擬器模式切換 ChekiLens Pro 狀態: \(nextState) (contributorTier: \(useHalfPriceTier))")
         return .simulatedToggle(isUnlocked: nextState)
         #else
         let err = "目前無法連線至 App Store 取得商品資訊，請稍後再試。"
@@ -274,35 +332,47 @@ final class StoreKitManager {
 
     /// 檢查 `Transaction.currentEntitlements` 中的所有有效 Non-Consumable 購買憑證
     func refreshPurchasedEntitlements() async {
-        var hasValidProEntitlement = false
+        var hasStandardEntitlement = false
+        var hasContributorEntitlement = false
 
         for await verificationResult in Transaction.currentEntitlements {
             guard case .verified(let transaction) = verificationResult else {
                 continue
             }
-            // 確認未遭退款撤銷 (revocationDate == nil) 且屬於 Pro 終身買斷商品
-            if transaction.revocationDate == nil,
-               (Self.supportedProductIDs.contains(transaction.productID) || transaction.productID.lowercased().contains("pro")) {
-                hasValidProEntitlement = true
-                break
+            guard transaction.revocationDate == nil else { continue }
+            if Self.contributorProductIDs.contains(transaction.productID) {
+                hasContributorEntitlement = true
+            } else if Self.supportedProductIDs.contains(transaction.productID) || transaction.productID.lowercased().contains("pro") {
+                hasStandardEntitlement = true
             }
         }
 
-        if hasValidProEntitlement {
-            setProUnlocked(true)
+        if hasStandardEntitlement {
+            applyPurchaseEntitlement(isContributorTier: false)
+        } else if hasContributorEntitlement {
+            applyPurchaseEntitlement(isContributorTier: true)
         } else {
-            // 同步 UserDefaults 目前狀態（保留開發環境手動切換或離線快取狀態）
-            let cached = UserDefaults.standard.bool(forKey: Self.proUnlockedStorageKey)
-            if isProUnlocked != cached {
-                isProUnlocked = cached
-            }
+            reloadContributionStateFromStorage()
         }
+    }
+
+    func applyPurchaseEntitlement(isContributorTier: Bool) {
+        let next = contributionStore.apply(isContributorTier ? .unlockContributorPro : .unlockStandardPro)
+        contributionState = next
+        isProUnlocked = next.isProUnlocked
     }
 
     /// 更新 Pro 解鎖狀態並寫入 `UserDefaults`（觸發 `@AppStorage("isProLifetimeUnlocked")` 即時更新 UI）
     func setProUnlocked(_ unlocked: Bool) {
-        isProUnlocked = unlocked
-        UserDefaults.standard.set(unlocked, forKey: Self.proUnlockedStorageKey)
+        let action: CommunityContributionAction
+        if unlocked {
+            action = contributionState.isEligibleForHalfPricePro ? .unlockContributorPro : .unlockStandardPro
+        } else {
+            action = .revokeAllProEntitlements
+        }
+        let next = contributionStore.apply(action)
+        contributionState = next
+        isProUnlocked = next.isProUnlocked
     }
 
     // MARK: - Background Transaction Listener
@@ -314,12 +384,17 @@ final class StoreKitManager {
                 guard let self else { return }
                 if case .verified(let transaction) = verificationResult {
                     let isRevoked = (transaction.revocationDate != nil)
+                    let isContributorProduct = StoreKitManager.contributorProductIDs.contains(transaction.productID)
                     let isProProduct = StoreKitManager.supportedProductIDs.contains(transaction.productID)
                         || transaction.productID.lowercased().contains("pro")
 
                     if isProProduct {
                         await MainActor.run {
-                            self.setProUnlocked(!isRevoked)
+                            if isRevoked {
+                                self.setProUnlocked(false)
+                            } else {
+                                self.applyPurchaseEntitlement(isContributorTier: isContributorProduct)
+                            }
                         }
                     }
                     await transaction.finish()
