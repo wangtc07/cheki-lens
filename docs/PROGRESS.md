@@ -8,16 +8,16 @@
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
 - **最後更新時間**：2026-11-05
-- **進行中的修正**：從 `main` 建立 `feat/community-model-opt` 分支，並完成 Task 8.3（擴充 `StoreKitManager` 與社群貢獻半價 Pro 授權鎖定狀態機 `CommunityContributionPolicy`）。
+- **進行中的修正**：從 `main` 建立 `feat/community-model-opt` 分支，並完成 Task 8.4（`SettingsView`「社群模型優化 · 半價 Pro」設定區塊、端側去識別化即時預覽 Sheet 與雙裁切編輯器儲存觸發掛載）。
 - **當前所屬階段**：Phase 8 — 社群模型優化與隱私共享計畫 (Community Model Optimization & Privacy Telemetry)
 - **當前分支**：`feat/community-model-opt`
-- **當前進行中任務**：完成 **Task 8.3（擴充 `StoreKitManager.swift` 與社群貢獻半價 Pro 授權鎖定狀態機 `CommunityContributionPolicy.swift`）**：
-  1. 建立 `CommunityContributionState`（`.optedOutFree`、`.optedInFree`、`.lockedByContributorPro`、`.standardPro(isSharingEnabled:)`）與純函式 Reducer `CommunityContributionPolicy`。
-  2. 實作 `CommunityContributionStore` 持久化與狀態收斂，確保一旦透過半價社群貢獻版（`com.chekilens.pro.contributor`）解鎖 Pro，共享開關即永久鎖定不可關閉（`isSharingToggleLocked == true`）；標準版全額購買者則可自由切換。
-  3. 擴充 `StoreKitManager.swift` 支援雙商品載入、半價 `NT$60 / ¥300` 顯示價格與按鈕文案、交易驗證與 Restore Purchases 自動還原社群貢獻鎖定狀態。
-  4. 撰寫 `CommunityContributionPolicyTests` 共 4 項單元測試並全數通過。
-- **最新穩定 Git Commit**：244e92a (feat(telemetry): 完成 Task 8.2 四角調整回傳佇列與 OTA 模型熱更新載入介面)
-- **下一動執行指示**：接續執行 **Task 8.4**（實作 `SettingsView`「社群模型優化與半價 Pro」設定區塊、端側去識別化即時預覽 Sheet 與裁切儲存觸發掛載）。
+- **當前進行中任務**：完成 **Task 8.4（實作 `SettingsView`「社群模型優化與半價 Pro」設定區塊、端側去識別化即時預覽 Sheet 與裁切儲存觸發掛載）**：
+  1. 在 `SettingsView` 新增「社群模型優化 · 半價 Pro」Section（包含共享開關、半價綁定後永久禁用關閉控制、端側隱私遮蔽效果預覽入口與待上傳樣本計數）。
+  2. 在 `ProLifetimePaywallSheet` 整合「共享微調結果 · 享半價優惠」開關卡片，開啟後即時切換購買按鈕為半價（`NT$60 / ¥300`），且頂部關閉按鈕統一採用 `CloseToolbarButton`。
+  3. 實作 `CommunityPrivacyPreviewSheet`，現場以 `ChekiPrivacyMaskService` 生成去識別化前後對照圖（中央 76% 肖像遮蔽、僅保留外圍 12% 邊框與背景），讓使用者親眼驗證照片隱私保護。
+  4. 於 `ChekiDetailView` 與 `BatchPairingView` 四頂點手動裁切儲存時掛載非阻塞背景回傳入列呼叫。
+- **最新穩定 Git Commit**：1680e9a (feat(storekit): 完成 Task 8.3 社群貢獻半價 Pro 授權鎖定狀態機與 StoreKitManager 擴充)
+- **下一動執行指示**：接續執行 **Task 8.5**（撰寫後端共享樣本清洗匯入與 YOLO11-Pose 增量微調腳本 `scripts/ingest_community_annotations.py`）。
 
 ---
 
@@ -412,7 +412,7 @@
 - [x] **Task 8.1**: 實作端側隱私去識別化與幾何檢驗引擎 (`ChekiPrivacyMaskService.swift`) 與單元測試（`QuadCornerGeometry` 四角凸多邊形與長寬比邊界檢驗、640px 降採樣、內部 76% 肖像與簽名區遮蔽並保留外圍 12% 邊框、Vision 人臉遮罩、EXIF/GPS 抹除與 4 項單元測試通過）。
 - [x] **Task 8.2**: 實作四角調整回傳與本機佇列服務 (`ChekiAlignmentTelemetryService.swift`) 與 OTA 模型熱更新載入介面（背景上傳佇列、JSONL 格式相容封包與 `VisionManager+Fallback.swift` 優先載入 `Application Support/ChekiModels/` 動態編譯模型；3 項單元測試全數通過）。
 - [x] **Task 8.3**: 擴充 `StoreKitManager.swift` 與社群貢獻半價 Pro 授權鎖定狀態機 (`CommunityContributionPolicy.swift`)（支援 `com.chekilens.pro.contributor` 半價買斷商品、UserDefaults 永久鎖定共享開關不可關閉、Restore Purchases 自動還原綁定狀態与 4 項單元測試通過）。
-- [ ] **Task 8.4**: 實作 `SettingsView`「社群模型優化與半價 Pro」設定區塊、端側去識別化即時預覽 Sheet 與裁切儲存觸發掛載（整合 `ChekiDetailView` 與 `BatchPairingView` 四角儲存回傳、中英日多語系字串與 UI 測試驗證）。
+- [x] **Task 8.4**: 實作 `SettingsView`「社群模型優化與半價 Pro」設定區塊、端側去識別化即時預覽 Sheet 與裁切儲存觸發掛載（整合 `ChekiDetailView` 與 `BatchPairingView` 四角儲存回傳、中日雙語字串與 `UI_AGENT_GUIDELINES` 稽核通過）。
 - [ ] **Task 8.5**: 撰寫後端共享樣本清洗匯入與 YOLO11-Pose 增量微調腳本 (`scripts/ingest_community_annotations.py`)。
 
 ---

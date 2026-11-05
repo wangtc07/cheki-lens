@@ -4908,6 +4908,20 @@ private struct StagingPhotoQuadCropEditorView: View {
                     specName: cropResult.filmSpecification?.format.rawValue,
                     outputSize: cropResult.outputSize
                 )
+                let sharingEnabled = StoreKitManager.shared.contributionState.isSharingEnabled
+                let initialSnapshot = initialCornersSnapshot
+                let autoPixelCorners: [CGPoint]? = initialSnapshot.count == 4
+                    ? initialSnapshot.map { CGPoint(x: $0.x * imgSize.width, y: $0.y * imgSize.height) }
+                    : nil
+                Task.detached(priority: .utility) {
+                    _ = await ChekiAlignmentTelemetryService.shared.enqueueIfEligible(
+                        sourceImage: cgImage,
+                        userCorners: pixelCorners,
+                        autoDetectedCorners: autoPixelCorners,
+                        filmFormat: chekiFormat,
+                        isSharingEnabled: sharingEnabled
+                    )
+                }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 onApplyManualCrop(
                     croppedJPEG,

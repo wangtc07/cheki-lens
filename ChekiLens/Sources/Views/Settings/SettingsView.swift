@@ -192,6 +192,12 @@ struct SettingsView: View {
     @State private var isClearingCache: Bool = false
     @State private var showingClearCacheConfirmation: Bool = false
 
+    // MARK: 社群模型優化與隱私共享計畫 (Phase 8)
+    @AppStorage(CommunityContributionStore.sharingEnabledStorageKey) private var isCommunitySharingEnabled: Bool = false
+    @AppStorage(CommunityContributionStore.contributorProLockedStorageKey) private var isContributorProLocked: Bool = false
+    @State private var showingPrivacyPreviewSheet: Bool = false
+    @State private var pendingTelemetryCount: Int = 0
+
     private var appVersionString: String {
         let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
@@ -610,6 +616,71 @@ struct SettingsView: View {
                     Text(L10n.tr("負值內縮去黑邊，正值外擴保留白邊。", "負の値で黒縁を除去、正の値で白枠を保持します。"))
                 }
 
+                // 4.5 第 4.5 組：社群模型優化與隱私共享計畫 (Phase 8: Community Model Optimization & Half-Price Pro)
+                Section {
+                    Toggle(isOn: Binding(
+                        get: {
+                            isContributorProLocked || isCommunitySharingEnabled
+                        },
+                        set: { newValue in
+                            guard !isContributorProLocked else { return }
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            StoreKitManager.shared.setCommunitySharingEnabled(newValue)
+                            isCommunitySharingEnabled = StoreKitManager.shared.contributionState.isSharingEnabled
+                        }
+                    )) {
+                        SettingsRowLabel(
+                            title: L10n.tr("共享微調結果改善模型", "微調整を共有して自動判定を改善"),
+                            subtitle: communitySharingSubtitle,
+                            systemImage: "sparkles.rectangle.stack.fill",
+                            iconColor: .indigo
+                        )
+                    }
+                    .disabled(isContributorProLocked)
+                    .accessibilityIdentifier("settings.toggle.communitySharing")
+
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showingPrivacyPreviewSheet = true
+                    } label: {
+                        HStack {
+                            SettingsRowLabel(
+                                title: L10n.tr("檢視端側隱私遮蔽效果", "端末内プライバシー保護のプレビュー"),
+                                subtitle: L10n.tr("人像與簽名自動遮蔽 · 僅保留外框邊界", "人物とサインを自動マスク · 外枠境界のみ保持"),
+                                systemImage: "hand.raised.shield.fill",
+                                iconColor: .teal
+                            )
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.row.privacyPreview")
+
+                    HStack {
+                        SettingsRowLabel(
+                            title: L10n.tr("待上傳去識別化樣本", "送信待ちの匿名化サンプル"),
+                            subtitle: nil,
+                            systemImage: "tray.and.arrow.up.fill",
+                            iconColor: .blue
+                        )
+                        Spacer()
+                        Text("\(pendingTelemetryCount)")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text(L10n.tr("社群模型優化 · 半價 Pro", "モデル改善共有 · 半額 Pro"))
+                } footer: {
+                    Text(
+                        isContributorProLocked
+                            ? L10n.tr("您已啟用社群貢獻者半價 Pro 授權，共享設定已永久綁定開啟。", "コミュニティ半額 Pro が適用されているため、共有設定は常時オンに固定されています。")
+                            : L10n.tr("開啟共享後可以半價購買 Pro 終身版，購買半價方案後將永久鎖定共享且不可關閉。照片於裝置端先遮蔽中央肖像並抹除 GPS 與拍攝時間。", "共有をオンにすると Pro 買い切り版を半額で購入できます。半額プラン購入後は共有をオフにできません。写真は端末内で中央の人物をマスクし GPS と撮影日時を消去します。")
+                    )
+                }
+
                 // 5. 第 5 組：一般與關於 (General & About)
                 Section {
                     Picker(selection: $appLanguageModeRaw) {
@@ -749,6 +820,12 @@ struct SettingsView: View {
                 .presentationDragIndicator(.visible)
                 .applyAppAppearanceAndLocale()
             }
+            .sheet(isPresented: $showingPrivacyPreviewSheet) {
+                CommunityPrivacyPreviewSheet()
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+                    .applyAppAppearanceAndLocale()
+            }
             .fullScreenCover(isPresented: $showingSystemAlbumBatchImport) {
                 SystemAlbumBatchImportFlowSheet()
             }
@@ -785,8 +862,10 @@ struct SettingsView: View {
             }
             .task {
                 await StoreKitManager.shared.initializeStore()
+                StoreKitManager.shared.reloadContributionStateFromStorage()
                 await cloudKitSyncManager.refreshAccountStatus()
                 formattedCacheSize = await ChekiImageCacheManager.shared.formattedDiskUsage()
+                pendingTelemetryCount = await ChekiAlignmentTelemetryService.shared.pendingPayloads().count
             }
             .onChange(of: autoSyncToPhotos) { _, isEnabled in
                 guard isEnabled else { return }
@@ -833,6 +912,16 @@ struct SettingsView: View {
         @unknown default:
             return .gray
         }
+    }
+
+    private var communitySharingSubtitle: String {
+        if isContributorProLocked {
+            return L10n.tr("已綁定社群半價 Pro · 永久開啟", "コミュニティ半額 Pro 適用済み · 常時オン")
+        }
+        if isCommunitySharingEnabled && !isProLifetimeUnlocked {
+            return L10n.tr("已啟用 · 可享半價 NT$60 / ¥300 購買 Pro", "有効 · 半額 NT$60 / ¥300 で Pro 購入可能")
+        }
+        return L10n.tr("端側遮蔽肖像與個資 · 開啟享半價 Pro", "端末内で人物と個人情報を自動マスク · 半額 Pro 特典")
     }
 
     @MainActor
@@ -991,6 +1080,8 @@ private struct ProLifetimePaywallSheet: View {
     @Binding var isProUnlocked: Bool
     let onRestorePurchases: () async -> Void
 
+    @AppStorage(CommunityContributionStore.sharingEnabledStorageKey) private var isCommunitySharingEnabled: Bool = false
+    @AppStorage(CommunityContributionStore.contributorProLockedStorageKey) private var isContributorProLocked: Bool = false
     @State private var isPurchasing: Bool = false
     @State private var purchaseStatusNote: String? = nil
 
@@ -1078,6 +1169,36 @@ private struct ProLifetimePaywallSheet: View {
                     }
                     .padding(.horizontal, 16)
 
+                    // 社群貢獻者半價優惠卡片
+                    if !isProUnlocked {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle(isOn: Binding(
+                                get: { isContributorProLocked || isCommunitySharingEnabled },
+                                set: { newValue in
+                                    guard !isContributorProLocked else { return }
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    withAnimation(ChekiMotion.toggle) {
+                                        StoreKitManager.shared.setCommunitySharingEnabled(newValue)
+                                        isCommunitySharingEnabled = StoreKitManager.shared.contributionState.isSharingEnabled
+                                    }
+                                }
+                            )) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(L10n.tr("共享微調結果 · 享半價優惠", "微調整を共有 · 半額割引を適用"))
+                                        .font(.subheadline.weight(.bold))
+                                    Text(L10n.tr("端側自動遮蔽人物肖像 · 購買半價方案後不可關閉", "端末内で人物を自動マスク · 半額購入後はオフ不可"))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .disabled(isContributorProLocked)
+                            .accessibilityIdentifier("paywall.toggle.communityHalfPrice")
+                        }
+                        .padding(14)
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .padding(.horizontal, 16)
+                    }
+
                     if let note = purchaseStatusNote {
                         Text(note)
                             .font(.caption.weight(.medium))
@@ -1124,6 +1245,7 @@ private struct ProLifetimePaywallSheet: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(isPurchasing)
+                        .accessibilityIdentifier("paywall.button.purchase")
 
                         Button {
                             Task {
@@ -1147,12 +1269,8 @@ private struct ProLifetimePaywallSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                    CloseToolbarButton {
                         dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -1175,6 +1293,8 @@ private struct ProLifetimePaywallSheet: View {
 
         let outcome = await StoreKitManager.shared.purchaseProLifetime()
         isProUnlocked = StoreKitManager.shared.isProUnlocked
+        isContributorProLocked = StoreKitManager.shared.contributionState.isSharingToggleLocked
+        isCommunitySharingEnabled = StoreKitManager.shared.contributionState.isSharingEnabled
 
         switch outcome {
         case .purchased, .restored:
@@ -1195,6 +1315,159 @@ private struct ProLifetimePaywallSheet: View {
 
         case .failed(let message):
             purchaseStatusNote = message
+        }
+    }
+}
+
+// MARK: - 端側隱私去識別化即時預覽面板 (CommunityPrivacyPreviewSheet)
+
+private struct CommunityPrivacyPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var showRedactedResult: Bool = true
+    @State private var originalSampleImage: UIImage? = nil
+    @State private var redactedSampleImage: UIImage? = nil
+
+    private var guarantees: [(icon: String, color: Color, title: String, desc: String)] {
+        [
+            (
+                "person.crop.rectangle.fill",
+                .indigo,
+                L10n.tr("中央肖像與簽名區實體遮蔽", "中央の人物とサイン領域を塗りつぶし"),
+                L10n.tr("裝置端直接將內部 76% 成像與手寫區域替換為純色遮罩，僅保留外圍 12% 邊框與背景", "端末内で内側 76% の写真とサイン領域を単色マスクに置換し、外周 12% の枠と背景のみを残します")
+            ),
+            (
+                "face.dashed.fill",
+                .teal,
+                L10n.tr("Apple Vision 端側人臉偵測打碼", "Apple Vision による顔検出マスク"),
+                L10n.tr("即便背景或手指邊緣出現人臉，也會在本地端自動覆蓋遮蔽", "背景や端に顔が写り込んだ場合も端末内で自動的にマスクします")
+            ),
+            (
+                "location.slash.fill",
+                .orange,
+                L10n.tr("徹底抹除 GPS 與拍攝時間 EXIF", "GPS と撮影日時 EXIF を完全消去"),
+                L10n.tr("重新編碼為純像素縮圖，不包含任何位置、時間或設備識別碼", "位置情報、撮影日時、端末識別子を一切含まない画像に再エンコードします")
+            )
+        ]
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 18) {
+                    Picker(
+                        L10n.tr("預覽模式", "プレビュー"),
+                        selection: $showRedactedResult
+                    ) {
+                        Text(L10n.tr("實際上傳畫面 · 已遮蔽", "送信される画像 · マスク済み")).tag(true)
+                        Text(L10n.tr("原始拍立得示意", "元のチェキ画像イメージ")).tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
+                    Group {
+                        if let displayed = showRedactedResult ? redactedSampleImage : originalSampleImage {
+                            Image(uiImage: displayed)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxHeight: 260)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                                )
+                                .padding(.horizontal, 16)
+                        } else {
+                            ProgressView()
+                                .frame(height: 220)
+                        }
+                    }
+
+                    VStack(spacing: 12) {
+                        ForEach(guarantees, id: \.title) { item in
+                            HStack(alignment: .top, spacing: 14) {
+                                Image(systemName: item.icon)
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 34, height: 34)
+                                    .background(item.color.gradient, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.title)
+                                        .font(.subheadline.weight(.bold))
+                                    Text(item.desc)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(12)
+                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle(L10n.tr("端側隱私保護預覽", "プライバシー保護プレビュー"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    ConfirmToolbarButton {
+                        dismiss()
+                    }
+                }
+            }
+            .task {
+                generatePreviewSamplesIfNeeded()
+            }
+        }
+    }
+
+    private func generatePreviewSamplesIfNeeded() {
+        guard originalSampleImage == nil else { return }
+        let width = 640
+        let height = 480
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height))
+        let syntheticUIImage = renderer.image { ctx in
+            let cg = ctx.cgContext
+            // Wooden desk background
+            cg.setFillColor(UIColor(red: 0.22, green: 0.18, blue: 0.15, alpha: 1.0).cgColor)
+            cg.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+            // White Cheki card outer border
+            let cardRect = CGRect(x: 170, y: 40, width: 300, height: 400)
+            cg.setFillColor(UIColor(red: 0.97, green: 0.97, blue: 0.98, alpha: 1.0).cgColor)
+            cg.fill(cardRect)
+
+            // Inner photo subject illustration
+            let innerRect = CGRect(x: 196, y: 68, width: 248, height: 290)
+            cg.setFillColor(UIColor(red: 0.88, green: 0.45, blue: 0.58, alpha: 1.0).cgColor)
+            cg.fill(innerRect)
+
+            // Simple portrait silhouette inside photo
+            cg.setFillColor(UIColor.white.withAlphaComponent(0.85).cgColor)
+            cg.fillEllipse(in: CGRect(x: 285, y: 125, width: 70, height: 70))
+            cg.fillEllipse(in: CGRect(x: 255, y: 205, width: 130, height: 110))
+        }
+
+        originalSampleImage = syntheticUIImage
+        guard let cgImg = syntheticUIImage.cgImage else { return }
+        let corners = [
+            CGPoint(x: 170, y: 40),
+            CGPoint(x: 470, y: 40),
+            CGPoint(x: 470, y: 440),
+            CGPoint(x: 170, y: 440)
+        ]
+        let service = ChekiPrivacyMaskService(targetMaxLongEdge: 640, borderPreserveInsetRatio: 0.12)
+        if case .success(let sample) = service.redactForTelemetry(
+            sourceImage: cgImg,
+            corners: corners,
+            additionalFaceRects: []
+        ) {
+            redactedSampleImage = UIImage(cgImage: sample.redactedImage)
         }
     }
 }
