@@ -7,18 +7,17 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-- **最後更新時間**：2026-11-07
-- **進行中的修正**：修復拍立得修改日期後未同步更新至系統相簿 (Photos.app) 之問題，並實作即時同步防抖與全量啟動自動修復機制。
-- **當前所屬階段**：Phase 6.8 UI/UX 體驗精修 / Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)
-- **當前分支**：`fix/uiux`
-- **當前進行中任務**：完成 **拍立得日期即時同步系統相簿修復**：
-  1. `ChekiInfoView` 日期與時間修改切換為 `item.lockJudgedDate(merged)`，並加入 400ms 防抖排程即時同步 `PhotoLibraryManager.shared.syncItemDateToPhotoLibrary`，面板關閉時立即 flush 確保相簿時間軸即時更新。
-  2. `PhotoLibraryManager` 新增 `syncItemDateToPhotoLibrary` 與 `syncItemDateToPhotoLibraryIfNeeded`，直接以 `PHAssetChangeRequest.creationDate` 原地更新系統相簿照片拍攝時間，兼顧正面與背面時間軸策略（`sameSecond` / `plusOneSecond`）與相簿歸屬。
-  3. 啟動與檢視自動修復：於 `ContentView` 前景恢復與 `ChekiDetailView` 檢視時自動比對 `PHAsset.creationDate` 與 `displayDate`，若存在差異自動排程修復（使手機上既有如「室井ゆう」等已改日期之拍立得無須重複編輯即可於啟動時自動同步更新）。
-  4. 強化 `addExistingAsset` 容錯：若有限相簿權限無法加入自訂成員相簿，自動退回單純更新 `creationDate`，確保時間軸 100% 成功同步。
-  5. 撰寫 `PhotoLibraryDateSyncTests` 單元測試，全量單元測試全數通過。
-- **最新穩定 Git Commit**：d765cac (fix(sync): 修正拍立得修改日期後即時更新系統相簿，並支援自動修復既有未同步項目)
-- **下一動執行指示**：接續執行 **Task 7.5.2**（多語系字串補齊至 `Localizable.xcstrings`（繁體中文與日文）與 iPad / 多裝置佈局適配）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
+- **最後更新時間**：2026-11-05
+- **進行中的修正**：從 `main` 建立 `feat/community-model-opt` 分支，並完成 Task 8.1（端側隱私去識別化與幾何檢驗引擎 `ChekiPrivacyMaskService`）。
+- **當前所屬階段**：Phase 8 — 社群模型優化與隱私共享計畫 (Community Model Optimization & Privacy Telemetry)
+- **當前分支**：`feat/community-model-opt`
+- **當前進行中任務**：完成 **Task 8.1（實作端側隱私去識別化與幾何檢驗引擎 `ChekiPrivacyMaskService.swift` 與單元測試）**：
+  1. 建立 `QuadCornerGeometry` 與 `QuadValidationError` 領域模型，於系統邊界強制檢驗四角凸多邊形、面積佔比（≥ 2%）、長寬比範圍（0.85 ~ 2.60）與自動順時針排序 `[TL, TR, BR, BL]`。
+  2. 實作 `isMeaningfullyAdjusted(from:minimumPixelDelta:)`，僅在使用者手動修正位移超過閾值（預設 4.0 px）時才觸發回傳。
+  3. 實作 `ChekiPrivacyMaskService.redactForTelemetry`，在裝置端將影像等比例縮至長邊 640px、利用雙線性內縮多邊形（保留外圍 12% 邊框與背景供角落學習，將內部 76%×76% 肖像與簽名區完全遮蔽）、結合 `VNDetectFaceRectanglesRequest` 遮蔽外部人臉，並輸出完全抹除 EXIF/GPS 的乾淨 JPEG 資料。
+  4. 撰寫 `ChekiPrivacyMaskServiceTests` 共 4 項單元測試驗證幾何正規化、異常攔截、像素級肖像遮蔽與邊框保留、以及 EXIF/GPS 零殘留。
+- **最新穩定 Git Commit**：Task 8.1 完成提交
+- **下一動執行指示**：接續執行 **Task 8.2**（實作四角調整回傳與本機佇列服務 `ChekiAlignmentTelemetryService.swift` 與 OTA 模型熱更新載入介面）。
 
 ---
 
@@ -405,6 +404,16 @@
 #### 階段 7.6：端到端整合驗證與實機多裝置驗收
 - [ ] **Task 7.6.1**: 單元測試與回歸測試驗證（模型架構、遷移邏輯、快取機制、CloudIdentifier 映射）。
 - [ ] **Task 7.6.2**: 模擬器與多設備真實 CloudKit 測試環境聯調驗收。
+
+---
+
+### 階段 8：社群模型優化與隱私共享計畫 (Phase 8: Community Model Optimization & Privacy Telemetry)
+
+- [x] **Task 8.1**: 實作端側隱私去識別化與幾何檢驗引擎 (`ChekiPrivacyMaskService.swift`) 與單元測試（`QuadCornerGeometry` 四角凸多邊形與長寬比邊界檢驗、640px 降採樣、內部 76% 肖像與簽名區遮蔽並保留外圍 12% 邊框、Vision 人臉遮罩、EXIF/GPS 抹除與 4 項單元測試通過）。
+- [ ] **Task 8.2**: 實作四角調整回傳與本機佇列服務 (`ChekiAlignmentTelemetryService.swift`) 與 OTA 模型熱更新載入介面（背景上傳佇列、JSONL 格式相容封包與 `VisionManager+Fallback.swift` 優先載入 `Application Support/Models/` 動態編譯模型）。
+- [ ] **Task 8.3**: 擴充 `StoreKitManager.swift` 與社群貢獻半價 Pro 授權鎖定狀態機 (`CommunityContributionPolicy.swift`)（支援 `com.chekilens.pro.contributor` 半價買斷商品、Keychain/UserDefaults 永久鎖定共享開關不可關閉、Restore Purchases 自動還原綁定狀態與單元測試）。
+- [ ] **Task 8.4**: 實作 `SettingsView`「社群模型優化與半價 Pro」設定區塊、端側去識別化即時預覽 Sheet 與裁切儲存觸發掛載（整合 `ChekiDetailView` 與 `BatchPairingView` 四角儲存回傳、中英日多語系字串與 UI 測試驗證）。
+- [ ] **Task 8.5**: 撰寫後端共享樣本清洗匯入與 YOLO11-Pose 增量微調腳本 (`scripts/ingest_community_annotations.py`)。
 
 ---
 
