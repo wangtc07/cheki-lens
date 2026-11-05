@@ -14,32 +14,36 @@ extension VisionManager {
     /// 3. 上方白邊消失導致 Native 嚴重截斷之案例 (如 DSCF0074、IMG_7882)
     ///
     /// 透過物件語義偵測 (Object Detection Box)，取得拍立得全卡位置，再行透視幾何鎖定，保證 0 重大失誤。
+    /// 優先載入 `Application Support/ChekiModels/` 下的 OTA 動態更新模型，若無則回退至 App Bundle 內建模型。
+    nonisolated static func resolvePoseModelURL(
+        otaStore: ChekiOTAModelStore = ChekiOTAModelStore(),
+        bundle: Bundle = .main
+    ) -> URL? {
+        if let otaURL = otaStore.activeCompiledModelURL() {
+            return otaURL
+        }
+        if let url = bundle.url(forResource: "ChekiPoseNet", withExtension: "mlmodelc") ??
+                     bundle.url(forResource: "ChekiPoseNet", withExtension: "mlpackage") {
+            return url
+        }
+        let localPaths = [
+            "ChekiLens/Models/ChekiPoseNet.mlpackage",
+            "runs/pose/cheki_pose_clean/weights/best.mlpackage"
+        ]
+        for p in localPaths {
+            let u = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/" + p)
+            if FileManager.default.fileExists(atPath: u.path) {
+                return u
+            }
+        }
+        return nil
+    }
+
     func detectFallbackPose(image: CGImage, imageSize: CGSize) async throws -> DetectionResult? {
         let config = MLModelConfiguration()
         config.computeUnits = .all
-        
-        // 搜尋可用的 CoreML 模型路徑
-        var modelURL: URL? = nil
-        let bundle = Bundle.main
-        if let url = bundle.url(forResource: "ChekiPoseNet", withExtension: "mlmodelc") ??
-                     bundle.url(forResource: "ChekiPoseNet", withExtension: "mlpackage") {
-            modelURL = url
-        } else {
-            // 本機開發與測試環境路徑備援
-            let localPaths = [
-                "ChekiLens/Models/ChekiPoseNet.mlpackage",
-                "runs/pose/cheki_pose_clean/weights/best.mlpackage"
-            ]
-            for p in localPaths {
-                let u = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/" + p)
-                if FileManager.default.fileExists(atPath: u.path) {
-                    modelURL = u
-                    break
-                }
-            }
-        }
-        
-        guard let url = modelURL else {
+
+        guard let url = Self.resolvePoseModelURL() else {
             return nil
         }
         
