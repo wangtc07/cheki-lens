@@ -11,11 +11,12 @@
 - **進行中的修正**：從 `main` 建立 `feat/community-model-opt` 分支，全數完成 Phase 8（Task 8.1 至 Task 8.5：端側隱私去識別化、四角微調回傳佇列、社群半價 Pro 狀態機與鎖定、設定與隱私預覽 UI、以及模式 C GitHub Actions 全自動排程訓練與 OTA 模型熱更新管線）。
 - **當前所屬階段**：Phase 8 — 社群模型優化與隱私共享計畫 (Community Model Optimization & Privacy Telemetry)（全數完成）
 - **當前分支**：`feat/community-model-opt`
-- **當前進行中任務**：完成 **Task 8.5（實作模式 C 全自動訓練與 OTA 發布管線：`scripts/ingest_community_annotations.py`、`.github/workflows/community_model_retrain.yml` 與 `ChekiOTAModelStore` 遠端 Manifest SHA256 校驗熱更新）**：
+- **當前進行中任務**：完成 **Task 8.5（實作模式 C 全自動訓練與 OTA 發布管線：`scripts/ingest_community_annotations.py`、`.github/workflows/community_model_retrain.yml` 與 `ChekiOTAModelStore` 遠端 Manifest SHA256 校驗熱更新）** 及 **社群模型上傳、訓練與 OTA 更新架構流程圖文件（`docs/COMMUNITY_MODEL_PIPELINE.md`）**：
   1. 撰寫 `scripts/ingest_community_annotations.py`，內建幾何凸多邊形與長寬比清洗守門員、重複樣本冪等過濾、YOLO11-Pose 增量微調、黃金測試集防退步門檻（Golden Regression Gate）、以及 `ChekiPoseNet.mlmodelc.zip` + `ota_manifest.json` 打包器（通過 `--self-test` 驗證）。
   2. 建立 `.github/workflows/community_model_retrain.yml`（於 `macos-14` Apple Silicon Runner 每週排程執行並自動將通過防退步驗證的 OTA 模型發布至 `model-latest` GitHub Release）。
   3. 在 `ChekiOTAModelStore` 實作 `applyRemoteManifestIfNeeded(manifest:downloadArchive:)`，支援遠端版本比對、SHA256 完整性驗證與原子化安裝，並新增 `testApplyRemoteManifestVerifiesSHA256AndSkipsSameVersion` 單元測試通過。
-- **最新穩定 Git Commit**：eb80342 (feat(UI): 完成 Task 8.4 社群模型優化與半價 Pro 設定面板、隱私預覽與雙裁切儲存掛載)
+  4. 建立 `docs/COMMUNITY_MODEL_PIPELINE.md` 並在 `docs/PROGRESS.md` 補齊完整端到端流程圖。
+- **最新穩定 Git Commit**：75c87bc (feat(mlops): 完成 Task 8.5 模式 C 全自動訓練與 OTA 模型熱更新管線)
 - **下一動執行指示**：Phase 8 全數完成，可合併回 `main` 或接續執行 **Task 7.5.2**（多語系字串補齊與 iPad / 多裝置佈局適配）。
 
 ---
@@ -407,6 +408,66 @@
 ---
 
 ### 階段 8：社群模型優化與隱私共享計畫 (Phase 8: Community Model Optimization & Privacy Telemetry)
+
+*詳細端到端 Mermaid 流程圖與序列圖詳見：`docs/COMMUNITY_MODEL_PIPELINE.md`*
+
+#### 🏗️ 端側去識別化上傳、全自動訓練與 OTA 熱更新流程圖
+
+```
+[階段 1：iOS 裝置端隱私去識別化與佇列回傳]
+用戶手動微調四角並儲存 (ChekiDetailView / BatchPairingView)
+      │
+      ├─ 未開啟共享 ──► 僅儲存本機裁切，結束
+      │
+      └─ 已開啟共享（或購買 NT$60 / ¥300 半價 Pro 永久鎖定）
+            │
+            ▼
+      [QuadCornerGeometry 順時針凸包與面積佔比檢驗]
+            │
+            ▼
+      [ChekiPrivacyMaskService 端側四重去識別化]
+        ├─ 1. 長邊等比例降採樣至 640px
+        ├─ 2. 遮蔽四邊形中央 76% 肖像與簽名區（僅留外圍 12% 相紙白邊與桌面背景）
+        ├─ 3. VNDetectFaceRectanglesRequest 偵測背景殘留人臉並塗黑
+        └─ 4. 重新編碼純淨 JPEG（抹除 GPS / TIFF / 拍攝時間與設備 EXIF）
+            │
+            ▼
+      [ChekiAlignmentTelemetryService 離線佇列持久化與背景批次上傳]
+            │
+            ▼
+[階段 2：GitHub Actions 自動化訓練與守門管線 (Mode C / macos-14)]
+      │
+      ▼
+[scripts/ingest_community_annotations.py 批次驗收]
+  ├─ 二次幾何凸包檢驗 + sampleId 冪等去重
+  └─ 合併寫入 TestData/cheki_annotations.jsonl 與 TestData/images
+      │
+      ▼
+[累積新增樣本達標 ──► 啟動訓練與編譯]
+  ├─ 1. scripts/data_augmentation.py 擴充訓練與驗證集
+  ├─ 2. scripts/train_yolo_pose.py 微調 YOLO11n-Pose 匯出 ChekiPoseNet.mlpackage
+  └─ 3. xcrun coremlcompiler compile 預編譯為 ChekiPoseNet.mlmodelc
+      │
+      ▼
+[evaluate_golden_gate 黃金測試集守門員]
+  ├─ 平均角點誤差退步 或 <95% 樣本小於 8.0px ──► 中止發布，保留上一版模型
+  └─ 精準度優於現有基準 ──► 打包 ChekiPoseNet.mlmodelc.zip + 計算 SHA256 產出 ota_manifest.json
+                                │
+                                ▼
+                  [自動發布至 GitHub Release (model-latest)]
+                                │
+                                ▼
+[階段 3：iOS 端免更新 App 之 OTA 模型熱更新與推理]
+      │
+      ▼
+[ChekiOTAModelStore.applyRemoteManifestIfNeeded]
+  ├─ 1. 比對遠端 version（相同則直接略過下載）
+  ├─ 2. 背景下載壓縮包並以 CryptoKit.SHA256 驗證完整性（不符則拒絕安裝）
+  └─ 3. 原子替換 Application Support/ChekiModels/ChekiPoseNet.mlmodelc
+      │
+      ▼
+[VisionManager.resolvePoseModelURL 優先載入熱更新模型（異常時自動退回 Bundle 內建模型）]
+```
 
 - [x] **Task 8.1**: 實作端側隱私去識別化與幾何檢驗引擎 (`ChekiPrivacyMaskService.swift`) 與單元測試（`QuadCornerGeometry` 四角凸多邊形與長寬比邊界檢驗、640px 降採樣、內部 76% 肖像與簽名區遮蔽並保留外圍 12% 邊框、Vision 人臉遮罩、EXIF/GPS 抹除與 4 項單元測試通過）。
 - [x] **Task 8.2**: 實作四角調整回傳與本機佇列服務 (`ChekiAlignmentTelemetryService.swift`) 與 OTA 模型熱更新載入介面（背景上傳佇列、JSONL 格式相容封包與 `VisionManager+Fallback.swift` 優先載入 `Application Support/ChekiModels/` 動態編譯模型；3 項單元測試全數通過）。
