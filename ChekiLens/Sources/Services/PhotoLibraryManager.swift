@@ -293,16 +293,32 @@ final class PhotoLibraryManager {
         }
     }
 
-    /// 將既有 `PHAsset` 加入指定相簿（不複製或新建照片）
-    func addExistingAsset(identifier: String, creationDate: Date? = nil, to album: PHAssetCollection) async throws {
+    /// 將既有 `PHAsset` 加入指定相簿（不複製或新建照片）並同步拍攝時間
+    func addExistingAsset(identifier: String, creationDate: Date? = nil, to album: PHAssetCollection? = nil) async throws {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject else { return }
-        try await PHPhotoLibrary.shared().performChanges {
-            if let creationDate {
-                let changeRequest = PHAssetChangeRequest(for: asset)
-                changeRequest.creationDate = creationDate
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                if let creationDate {
+                    let changeRequest = PHAssetChangeRequest(for: asset)
+                    changeRequest.creationDate = creationDate
+                }
+                if let album {
+                    let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
+                    albumChangeRequest?.addAssets([asset] as NSArray)
+                }
             }
-            let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
-            albumChangeRequest?.addAssets([asset] as NSArray)
+            Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
+        } catch {
+            // 若包含相簿變更失敗（例如 Limited 權限下無法建立/寫入相簿），仍退回嘗試單獨更新 creationDate
+            if let creationDate {
+                try await PHPhotoLibrary.shared().performChanges {
+                    let changeRequest = PHAssetChangeRequest(for: asset)
+                    changeRequest.creationDate = creationDate
+                }
+                Self.recordAssetSyncedTimestamp(for: asset.localIdentifier)
+            } else {
+                throw error
+            }
         }
     }
 
@@ -339,16 +355,16 @@ final class PhotoLibraryManager {
                 ? frontSyncDate.addingTimeInterval(1.0)
                 : frontSyncDate
 
-            guard let primarySpec = targetAlbumSpecs.first,
-                  let primaryAlbum = try? await getOrCreateAlbum(albumName: primarySpec.albumName, inFolder: primarySpec.folderName) else {
-                continue
-            }
+            let primarySpec = targetAlbumSpecs.first
+            let primaryAlbum = (primarySpec != nil)
+                ? try? await getOrCreateAlbum(albumName: primarySpec!.albumName, inFolder: primarySpec!.folderName)
+                : nil
 
             var didSyncItem = false
 
             // 1. 正面同步（先寫入主相簿，若有多位成員再將同一 PHAsset 加入其餘成員相簿）
             if onlyAlbumAndDateIfAlreadySynced,
-               item.isSyncedToPhotoLibrary,
+               (item.isSyncedToPhotoLibrary || (item.frontAssetIdentifier != nil && !item.frontAssetIdentifier!.isEmpty)),
                let existingFrontID = item.frontAssetIdentifier,
                !existingFrontID.isEmpty,
                PHAsset.fetchAssets(withLocalIdentifiers: [existingFrontID], options: nil).firstObject != nil {
@@ -374,7 +390,7 @@ final class PhotoLibraryManager {
 
             // 2. 背面同步（若有背面）
             if onlyAlbumAndDateIfAlreadySynced,
-               item.isSyncedToPhotoLibrary,
+               (item.isSyncedToPhotoLibrary || (item.backAssetIdentifier != nil && !item.backAssetIdentifier!.isEmpty)),
                let existingBackID = item.backAssetIdentifier,
                !existingBackID.isEmpty,
                PHAsset.fetchAssets(withLocalIdentifiers: [existingBackID], options: nil).firstObject != nil {
@@ -421,13 +437,160 @@ final class PhotoLibraryManager {
 
             if didSyncItem {
                 item.isSyncedToPhotoLibrary = true
-                item.isDateWrittenToAlbum = overwriteExif && (item.ocrDate != nil)
+                item.isDateWrittenToAlbum = (overwriteExif || item.isJudgedDateManuallySet) && (item.ocrDate != nil || item.isJudgedDateManuallySet)
                 syncedCount += 1
             }
         }
 
         try? modelContext.save()
         return syncedCount
+    }
+
+    // MARK: - 單張拍立得日期時間即時同步至系統相簿
+
+    /// 同步單張拍立得的拍攝時間至 iOS 系統相簿（若有背面則一併依正反面時間軸策略更新）
+    @MainActor
+    @discardableResult
+    func syncItemDateToPhotoLibrary(
+        _ item: ChekiItem,
+        modelContext: ModelContext? = nil
+    ) async -> Bool {
+        guard !item.isDeleted else { return false }
+        guard await requestAuthorization() else { return false }
+
+        let overwriteExif = UserDefaults.standard.object(forKey: "overwriteExifDateWithOCR") as? Bool ?? true
+        let timelineStrategy = UserDefaults.standard.string(forKey: "backsideTimelineStrategy") ?? "sameSecond"
+        let (expectedFrontDate, expectedBackDate) = item.pairedSystemAlbumDates(timelineStrategy: timelineStrategy)
+
+        let frontSyncDate = (overwriteExif || item.isJudgedDateManuallySet) ? expectedFrontDate : item.capturedAt
+        let backSyncDate = (overwriteExif || item.isJudgedDateManuallySet) ? expectedBackDate : item.capturedAt
+
+        var assetsToUpdate: [(asset: PHAsset, newDate: Date)] = []
+        if let frontID = item.frontAssetIdentifier, !frontID.isEmpty,
+           let frontAsset = PHAsset.fetchAssets(withLocalIdentifiers: [frontID], options: nil).firstObject {
+            assetsToUpdate.append((frontAsset, frontSyncDate))
+        }
+        if let backID = item.backAssetIdentifier, !backID.isEmpty,
+           let backAsset = PHAsset.fetchAssets(withLocalIdentifiers: [backID], options: nil).firstObject {
+            assetsToUpdate.append((backAsset, backSyncDate))
+        }
+
+        // 1. 若系統相簿已有對應 PHAsset，直接更新其拍攝時間
+        if !assetsToUpdate.isEmpty {
+            let useGroupMemberAlbums = UserDefaults.standard.object(forKey: "createGroupMemberAlbumsInPhotos") as? Bool ?? true
+            let allMembers = (try? (modelContext ?? item.modelContext)?.fetch(FetchDescriptor<IdolMember>())) ?? []
+            let assignedMembers = item.assignedMembers(from: allMembers)
+            let primarySpec = assignedMembers.first.map { ($0.albumTitle, $0.group?.name) }
+            let album = (useGroupMemberAlbums && primarySpec != nil)
+                ? try? await getOrCreateAlbum(albumName: primarySpec!.0, inFolder: primarySpec!.1)
+                : nil
+
+            do {
+                try await PHPhotoLibrary.shared().performChanges {
+                    for entry in assetsToUpdate {
+                        let changeRequest = PHAssetChangeRequest(for: entry.asset)
+                        changeRequest.creationDate = entry.newDate
+                        if let album {
+                            let albumChangeRequest = PHAssetCollectionChangeRequest(for: album)
+                            albumChangeRequest?.addAssets([entry.asset] as NSArray)
+                        }
+                    }
+                }
+                for entry in assetsToUpdate {
+                    Self.recordAssetSyncedTimestamp(for: entry.asset.localIdentifier)
+                }
+                item.isDateWrittenToAlbum = true
+                item.isSyncedToPhotoLibrary = true
+                if let ctx = modelContext ?? item.modelContext {
+                    try? ctx.save()
+                }
+                logger.info("已成功同步更新拍立得拍攝時間至系統相簿 (item: \(item.id.uuidString))")
+                return true
+            } catch {
+                // 若包含相簿變更失敗（例如 Limited 權限下無法建立/寫入相簿），仍退回嘗試單純更新拍攝時間
+                do {
+                    try await PHPhotoLibrary.shared().performChanges {
+                        for entry in assetsToUpdate {
+                            let changeRequest = PHAssetChangeRequest(for: entry.asset)
+                            changeRequest.creationDate = entry.newDate
+                        }
+                    }
+                    for entry in assetsToUpdate {
+                        Self.recordAssetSyncedTimestamp(for: entry.asset.localIdentifier)
+                    }
+                    item.isDateWrittenToAlbum = true
+                    item.isSyncedToPhotoLibrary = true
+                    if let ctx = modelContext ?? item.modelContext {
+                        try? ctx.save()
+                    }
+                    logger.info("已成功同步更新拍立得拍攝時間 (無相簿) 至系統相簿 (item: \(item.id.uuidString))")
+                    return true
+                } catch {
+                    logger.error("更新拍立得拍攝時間至系統相簿失敗: \(error.localizedDescription)")
+                    return false
+                }
+            }
+        } else if (UserDefaults.standard.object(forKey: "autoSyncToPhotosLibrary") as? Bool ?? true),
+                  let ctx = modelContext ?? item.modelContext {
+            // 2. 若尚未寫入系統相簿且開啟自動同步，執行全量初次同步
+            let synced = await syncItemsToSystemPhotoLibrary([item], modelContext: ctx, onlyAlbumAndDateIfAlreadySynced: false)
+            return synced > 0
+        }
+
+        return false
+    }
+
+    /// 檢查單張拍立得與系統相簿拍攝時間是否不一致，若不一致則自動同步（用於 App 啟動或檢視拍立得時自動修復）
+    @MainActor
+    @discardableResult
+    func syncItemDateToPhotoLibraryIfNeeded(
+        _ item: ChekiItem,
+        modelContext: ModelContext? = nil
+    ) async -> Bool {
+        guard !item.isDeleted, item.modelContext != nil else { return false }
+
+        let overwriteExif = UserDefaults.standard.object(forKey: "overwriteExifDateWithOCR") as? Bool ?? true
+        let hasCustomOrOCRDate = item.isJudgedDateManuallySet || (overwriteExif && item.ocrDate != nil)
+        guard hasCustomOrOCRDate else { return false }
+
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else { return false }
+
+        let timelineStrategy = UserDefaults.standard.string(forKey: "backsideTimelineStrategy") ?? "sameSecond"
+        let (expectedFrontDate, expectedBackDate) = item.pairedSystemAlbumDates(timelineStrategy: timelineStrategy)
+        let frontSyncDate = (overwriteExif || item.isJudgedDateManuallySet) ? expectedFrontDate : item.capturedAt
+        let backSyncDate = (overwriteExif || item.isJudgedDateManuallySet) ? expectedBackDate : item.capturedAt
+
+        var needsUpdate = false
+
+        if let frontID = item.frontAssetIdentifier, !frontID.isEmpty,
+           let frontAsset = PHAsset.fetchAssets(withLocalIdentifiers: [frontID], options: nil).firstObject {
+            if let assetDate = frontAsset.creationDate {
+                if abs(assetDate.timeIntervalSince(frontSyncDate)) > 1.0 {
+                    needsUpdate = true
+                }
+            } else {
+                needsUpdate = true
+            }
+        }
+
+        if !needsUpdate, let backID = item.backAssetIdentifier, !backID.isEmpty,
+           let backAsset = PHAsset.fetchAssets(withLocalIdentifiers: [backID], options: nil).firstObject {
+            if let assetDate = backAsset.creationDate {
+                if abs(assetDate.timeIntervalSince(backSyncDate)) > 1.0 {
+                    needsUpdate = true
+                }
+            } else {
+                needsUpdate = true
+            }
+        }
+
+        if needsUpdate {
+            logger.info("偵測到拍立得系統相簿日期不一致，執行自動修復 (item: \(item.id.uuidString))")
+            return await syncItemDateToPhotoLibrary(item, modelContext: modelContext)
+        }
+
+        return false
     }
 
     // MARK: - Delete Sync with System Photo Library
@@ -962,6 +1125,9 @@ final class PhotoLibraryManager {
             let hasAssetID = (item.frontAssetIdentifier?.isEmpty == false) || (item.backAssetIdentifier?.isEmpty == false)
             guard hasAssetID else { continue }
             if await syncExternalEditsFromSystemPhotoLibrary(for: item, modelContext: modelContext) {
+                updatedCount += 1
+            }
+            if await syncItemDateToPhotoLibraryIfNeeded(item, modelContext: modelContext) {
                 updatedCount += 1
             }
         }

@@ -277,6 +277,7 @@ struct ChekiDetailView: View {
                             showToast(L10n.tr("已同步系統相簿修改", "写真アプリの編集を同期しました"))
                         }
                         await ensureCoverDateAndFormatNormalized(for: activeItem)
+                        await PhotoLibraryManager.shared.syncItemDateToPhotoLibraryIfNeeded(activeItem, modelContext: modelContext)
                     }
                     .onChange(of: scenePhase) { _, newPhase in
                         guard newPhase == .active else { return }
@@ -346,7 +347,13 @@ struct ChekiDetailView: View {
         .sheet(isPresented: $showingQuickCreateMember) {
             QuickCreateIdolSheet()
         }
-        .sheet(isPresented: $showingInfoSheet) {
+        .sheet(isPresented: $showingInfoSheet, onDismiss: {
+            if let activeItem = currentItemOpt {
+                Task { @MainActor in
+                    await PhotoLibraryManager.shared.syncItemDateToPhotoLibraryIfNeeded(activeItem, modelContext: modelContext)
+                }
+            }
+        }) {
             if let activeItem = currentItemOpt {
                 NavigationStack {
                     ChekiInfoView(item: activeItem)
@@ -2514,6 +2521,7 @@ private struct ChekiDetailCardFaceRenderer<
             guard !target.isDeleted, target.modelContext != nil else { return }
             target.applyAutomaticJudgedDate(ocrResult.date, preservingTimeFrom: target.appOriginalCaptureDate)
             try? modelContext.save()
+            await PhotoLibraryManager.shared.syncItemDateToPhotoLibraryIfNeeded(target, modelContext: modelContext)
         } else if let origData = target.originalFrontImageData,
                   origData != data,
                   let origUI = UIImage(data: origData)?.normalizedImage,
@@ -2522,6 +2530,7 @@ private struct ChekiDetailCardFaceRenderer<
             guard !target.isDeleted, target.modelContext != nil else { return }
             target.applyAutomaticJudgedDate(fallbackResult.date, preservingTimeFrom: target.appOriginalCaptureDate)
             try? modelContext.save()
+            await PhotoLibraryManager.shared.syncItemDateToPhotoLibraryIfNeeded(target, modelContext: modelContext)
         }
     }
 

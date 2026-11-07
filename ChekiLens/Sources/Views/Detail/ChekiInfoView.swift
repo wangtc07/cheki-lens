@@ -21,6 +21,7 @@ struct ChekiInfoView: View {
     @State private var isEditingTime: Bool = false
     @State private var memoText: String = ""
     @State private var isRecognizingCoverDate: Bool = false
+    @State private var dateSyncTask: Task<Void, Never>? = nil
     @FocusState private var isMemoFocused: Bool
 
     var body: some View {
@@ -206,6 +207,9 @@ struct ChekiInfoView: View {
                                                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                                     item.toggleAssignedMember(member, allMembers: idolMembers)
                                                     try? modelContext.save()
+                                                    Task { @MainActor in
+                                                        await PhotoLibraryManager.shared.syncItemsToSystemPhotoLibrary([item], modelContext: modelContext, onlyAlbumAndDateIfAlreadySynced: true)
+                                                    }
                                                 } label: {
                                                     Image(systemName: "xmark.circle.fill")
                                                         .font(.system(size: 13))
@@ -324,29 +328,30 @@ struct ChekiInfoView: View {
         }
         .task(id: item.id) {
             await autoRecognizeCoverDateIfNeeded()
+            await PhotoLibraryManager.shared.syncItemDateToPhotoLibraryIfNeeded(item, modelContext: modelContext)
+        }
+        .onDisappear {
+            flushPendingPhotoLibraryDateSync()
         }
         .applyAppAppearanceAndLocale()
     }
 
     // MARK: - Bindings & Persistence Helpers
 
-    /// 日期選擇器 Binding：修改年、月、日，保留原有的時、分、秒，並同步寫入 SwiftData
+    /// 日期選擇器 Binding：修改年、月、日，保留原有的時、分、秒，並即時寫入 SwiftData 與同步系統相簿時間軸
     private var dateSelectionBinding: Binding<Date> {
         Binding(
             get: { item.displayDate },
             set: { newDate in
                 let merged = ChekiItem.mergeRecognizedDate(newDate, into: item.displayDate)
-                item.capturedAt = merged
-                if item.ocrDate != nil {
-                    item.ocrDate = merged
-                }
-                item.isJudgedDateManuallySet = true
+                item.lockJudgedDate(merged)
                 try? modelContext.save()
+                schedulePhotoLibraryDateSync()
             }
         )
     }
 
-    /// 時間選擇器 Binding：修改時、分，保留原有的年、月、日，並同步寫入 SwiftData
+    /// 時間選擇器 Binding：修改時、分，保留原有的年、月、日，並即時寫入 SwiftData 與同步系統相簿時間軸
     private var timeSelectionBinding: Binding<Date> {
         Binding(
             get: { item.displayDate },
@@ -362,15 +367,33 @@ struct ChekiInfoView: View {
                 mergedComps.minute = timeComps.minute
                 mergedComps.second = timeComps.second ?? 0
                 if let updated = cal.date(from: mergedComps) {
-                    item.capturedAt = updated
-                    if item.ocrDate != nil {
-                        item.ocrDate = updated
-                    }
-                    item.isJudgedDateManuallySet = true
+                    item.lockJudgedDate(updated)
                     try? modelContext.save()
+                    schedulePhotoLibraryDateSync()
                 }
             }
         )
+    }
+
+    /// 排程防抖同步拍攝時間至系統相簿（避免滾輪滑動過程中連續頻繁觸發 Photos API）
+    private func schedulePhotoLibraryDateSync() {
+        dateSyncTask?.cancel()
+        dateSyncTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            await PhotoLibraryManager.shared.syncItemDateToPhotoLibrary(item, modelContext: modelContext)
+        }
+    }
+
+    /// 面板關閉時立即刷新並執行尚未完成的相簿同步
+    private func flushPendingPhotoLibraryDateSync() {
+        if dateSyncTask != nil {
+            dateSyncTask?.cancel()
+            dateSyncTask = nil
+            Task { @MainActor in
+                await PhotoLibraryManager.shared.syncItemDateToPhotoLibrary(item, modelContext: modelContext)
+            }
+        }
     }
 
     /// 清除舊版自動塞入的系統匯入文字（「透過批次配對工作台…」），並確保規格落入三種具體規格之一
@@ -456,6 +479,7 @@ struct ChekiInfoView: View {
         if let ocrResult = await visionManager.recognizeDate(from: cgImage) {
             item.applyAutomaticJudgedDate(ocrResult.date, preservingTimeFrom: item.appOriginalCaptureDate)
             try? modelContext.save()
+            await PhotoLibraryManager.shared.syncItemDateToPhotoLibrary(item, modelContext: modelContext)
         } else if let origData = item.originalFrontImageData,
                   origData != data,
                   let origUI = UIImage(data: origData)?.normalizedImage,
@@ -463,6 +487,7 @@ struct ChekiInfoView: View {
                   let fallbackResult = await visionManager.recognizeDate(from: origCG) {
             item.applyAutomaticJudgedDate(fallbackResult.date, preservingTimeFrom: item.appOriginalCaptureDate)
             try? modelContext.save()
+            await PhotoLibraryManager.shared.syncItemDateToPhotoLibrary(item, modelContext: modelContext)
         }
     }
 }

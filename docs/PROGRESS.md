@@ -7,19 +7,17 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-- **最後更新時間**：2026-11-03
-- **進行中的修正**：已完成 Task 6.8（UI/UX 統一與邊界微調滑桿即時預覽，以及標記點 0% 基準點校正）。
+- **最後更新時間**：2026-11-07
+- **進行中的修正**：修復拍立得修改日期後未同步更新至系統相簿 (Photos.app) 之問題，並實作即時同步防抖與全量啟動自動修復機制。
 - **當前所屬階段**：Phase 6.8 UI/UX 體驗精修 / Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync)
 - **當前分支**：`fix/uiux`
-- **當前進行中任務**：完成 **Task 6.8（UI/UX 統一與邊界微調滑桿即時預覽）**：
-  1. 放大單張預覽底部「規格與日期」簡化為純圓形日曆 icon（`Image(systemName: "calendar")`），外觀與尺寸對齊 44 pt 玻璃圓鈕。
-  2. 邊界微調升級：全域預設保留於 `SettingsView`，單張照片 (`StagingChekiPhoto`) 與 `ChekiItem` 支援個別設定專屬 `borderInsetPercentage` / `borderInsetRatio`。
-  3. 雙裁切編輯器 UI 全面統一：`ChekiDetailView` 的 `ChekiQuadCropEditorView` 統一採用 `BatchPairingView` 的浮動液態玻璃膠囊風格（移除底部平鋪深黑條與扁平按鈕，相紙規格與動作按鈕統一採用液態玻璃膠囊）。
-  4. 邊界微調即時預覽滑桿：點選「邊界微調」後畫布平滑漸變切換為透視校正裁切後的即時畫面，底部出現 -3.0% ~ +3.0% 浮動玻璃滑桿與即時百分比標籤，滑動時以 GPU 120fps 即時預覽往外/往內邊界調整，最右端提供 ✓ 按鈕確認套用。
-  5. 邊界微調預覽畫面圓角化：精確計算卡片適配尺寸並套用 12 pt continuous 圓角與細緻描邊，消除 90 度直角露出桌面背景之視覺干擾，達成與正式匯出/全螢幕檢視一致的拍立得圓角外觀。
-  6. 標記點統一為 0.0% 基準點：移除多餘的 `baseCornersFromCurrent` 反向放大推算，確保進入微調滑桿時以畫面上四個標記點為 0.0% 基準點（0.0% 時預覽畫面與一般顯示 100% 相同無桌面），向內或向外調整直覺可控。
-  7. 撰寫 `BorderInsetAdjustmentTests` 單元測試，全量單元測試全數通過。
-- **最新穩定 Git Commit**：3b88203 (fix(crop): 標記點統一為 0% 基準點，消除反向推算外擴並確保微調預覽與一般顯示 100% 一致)
+- **當前進行中任務**：完成 **拍立得日期即時同步系統相簿修復**：
+  1. `ChekiInfoView` 日期與時間修改切換為 `item.lockJudgedDate(merged)`，並加入 400ms 防抖排程即時同步 `PhotoLibraryManager.shared.syncItemDateToPhotoLibrary`，面板關閉時立即 flush 確保相簿時間軸即時更新。
+  2. `PhotoLibraryManager` 新增 `syncItemDateToPhotoLibrary` 與 `syncItemDateToPhotoLibraryIfNeeded`，直接以 `PHAssetChangeRequest.creationDate` 原地更新系統相簿照片拍攝時間，兼顧正面與背面時間軸策略（`sameSecond` / `plusOneSecond`）與相簿歸屬。
+  3. 啟動與檢視自動修復：於 `ContentView` 前景恢復與 `ChekiDetailView` 檢視時自動比對 `PHAsset.creationDate` 與 `displayDate`，若存在差異自動排程修復（使手機上既有如「室井ゆう」等已改日期之拍立得無須重複編輯即可於啟動時自動同步更新）。
+  4. 強化 `addExistingAsset` 容錯：若有限相簿權限無法加入自訂成員相簿，自動退回單純更新 `creationDate`，確保時間軸 100% 成功同步。
+  5. 撰寫 `PhotoLibraryDateSyncTests` 單元測試，全量單元測試全數通過。
+- **最新穩定 Git Commit**：d765cac (fix(sync): 修正拍立得修改日期後即時更新系統相簿，並支援自動修復既有未同步項目)
 - **下一動執行指示**：接續執行 **Task 7.5.2**（多語系字串補齊至 `Localizable.xcstrings`（繁體中文與日文）與 iPad / 多裝置佈局適配）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
