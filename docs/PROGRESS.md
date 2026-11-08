@@ -7,16 +7,20 @@
 
 ## 📍 最新狀態摘要 (Current Checkpoint)
 
-- **最後更新時間**：2026-11-05
-- **進行中的修正**：從 `main` 建立 `feat/community-model-opt` 分支，全數完成 Phase 8（Task 8.1 至 Task 8.6：端側隱私去識別化、四角微調回傳佇列、社群半價 Pro 狀態機與鎖定、設定與隱私預覽 UI、模式 C GitHub Actions 全自動排程訓練與 OTA 模型熱更新管線、以及第二階段 Coarse-to-Fine 原圖局部亞像素邊緣吸附引擎）。
-- **當前所屬階段**：Phase 8 — 社群模型優化與隱私共享計畫 (Community Model Optimization & Privacy Telemetry)（全數完成）
-- **當前分支**：`feat/community-model-opt`
-- **當前進行中任務**：完成 **Task 8.6（實作第二階段 Coarse-to-Fine 原圖局部亞像素邊緣吸附：`VisionManager.snapQuadToFullResEdges`、YOLO11-Pose 4 關鍵點解碼與全管線整合）**：
-  1. 在 `VisionManager+Refinement.swift` 實作 `VisionManager.snapQuadToFullResEdges`，於滿血原圖解析度下沿四邊法向量進行 15 站點 1D Sobel 階躍搜尋、3 點拋物線亞像素內插、內側白邊平台微收緊（`inwardPlateauTightenPx = 1.5` 消除模糊過渡帶縫隙）、RANSAC 抗跨邊塗鴉離群值過濾與全最小平方法（PCA）四線交點求解。
-  2. 整合至 `VisionManager+AntiGlare.swift`（`detectQuadFastForCamera` 放大回原圖後的終端精修）、`VisionManager+Fallback.swift`（解析 YOLO11-Pose 4 關鍵點並執行原圖邊緣吸附）與 `VisionManager+Refinement.swift`（`refineQuadrilateral` 自適應對比度精修）。
-  3. 新增 `ChekiLensTests/FullResEdgeSnapperTests.swift` 驗證中亮度桌面消縫隙、跨邊麥克筆塗鴉 RANSAC 防護與白底安全回退。
-- **最新穩定 Git Commit**：365a967 (docs(mlops): 新增社群模型上傳、自動訓練與 OTA 熱更新完整流程圖)
-- **下一動執行指示**：Phase 8 全數完成，可合併回 `main` 或接續執行 **Task 7.5.2**（多語系字串補齊與 iPad / 多裝置佈局適配）。
+- **最後更新時間**：2026-11-08
+- **進行中的修正**：已將 `feat/community-model-opt` 分支合併回 `main`，包含 Phase 8 全部功能（Task 8.1 至 8.6：端側隱私去識別化、四角微調回傳佇列、社群半價 Pro 狀態機與鎖定、設定與隱私預覽 UI、模式 C 全自動排程訓練與 OTA 模型熱更新管線、以及第二階段 Coarse-to-Fine 原圖局部亞像素邊緣吸附引擎），以及拍立得日期即時同步系統相簿修復。
+- **當前所屬階段**：Phase 7 — 多裝置 iCloud 同步與最近刪除相冊 (Multi-Device iCloud Sync) / Phase 8 — 社群模型優化（已完成並合併）
+- **當前分支**：`main`
+- **當前進行中任務**：完成 **Phase 8 與拍立得日期相簿同步修復合併回 main**：
+  1. 端側隱私去識別化與幾何檢驗引擎 (`ChekiPrivacyMaskService.swift`)
+  2. 四角微調回傳與本機佇列服務 (`ChekiAlignmentTelemetryService.swift`) 與 OTA 熱更新載入介面
+  3. 社群貢獻半價 Pro 授權狀態機 (`CommunityContributionPolicy.swift`) 與 StoreKitManager 擴充
+  4. 設定面板、隱私遮罩預覽與雙裁切儲存自動掛載
+  5. 模式 C GitHub Actions 全自動排程訓練與 OTA 發布管線
+  6. 第二階段 Coarse-to-Fine 原圖局部亞像素邊緣吸附引擎 (`VisionManager.snapQuadToFullResEdges`)
+  7. 拍立得修改日期即時更新系統相簿 (Photos.app) 與啟動自動修復 (`PhotoLibraryManager.swift`, `ChekiInfoView.swift`)
+- **最新穩定 Git Commit**：6753fe7 (docs: 更新 main 分支合併 Phase 8 與日期相簿同步修復之狀態記錄)
+- **下一動執行指示**：接續執行 **Task 7.5.2**（多語系字串補齊至 `Localizable.xcstrings`（繁體中文與日文）與 iPad / 多裝置佈局適配）。開工前先讀 `docs/UI_AGENT_GUIDELINES.md` 與 `docs/ICLOUD_SYNC_ROADMAP.md`。
 
 ---
 
